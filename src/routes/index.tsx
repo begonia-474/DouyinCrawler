@@ -8,7 +8,7 @@ export const routes: RouteObject[] = [
     path: "/",
     element: <MainLayout />,
     children: [
-      // 默认重定向到抖音
+      // 默认重定向到抖音首页
       { index: true, element: <Navigate to="/douyin" replace /> },
 
       // 平台路由
@@ -16,16 +16,8 @@ export const routes: RouteObject[] = [
         path: "douyin",
         children: douyinRoutes,
       },
-      // {
-      //   path: "kuaishou",
-      //   children: kuaishouRoutes,
-      // },
-      // {
-      //   path: "bilibili",
-      //   children: bilibiliRoutes,
-      // },
 
-      // 共享路由
+      // 共享路由（下载记录、设置）
       ...sharedRoutes,
     ],
   },

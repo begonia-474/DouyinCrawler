@@ -1,22 +1,26 @@
 import React from "react";
 import { RouteObject } from "react-router-dom";
 
-const HomePage = React.lazy(() => import("./pages/home"));
+const DouyinIndex = React.lazy(() => import("./pages/index"));
+const VideoPage = React.lazy(() => import("./pages/video"));
 const UserPage = React.lazy(() => import("./pages/user"));
-const MixPage = React.lazy(() => import("./pages/mix"));
-const SearchPage = React.lazy(() => import("./pages/search"));
-const CommentsPage = React.lazy(() => import("./pages/comments"));
 const LivePage = React.lazy(() => import("./pages/live"));
+const LikesPage = React.lazy(() => import("./pages/likes"));
+const CollectsPage = React.lazy(() => import("./pages/collects"));
+const MixPage = React.lazy(() => import("./pages/mix"));
 const FeedPage = React.lazy(() => import("./pages/feed"));
-const MusicPage = React.lazy(() => import("./pages/music"));
+const FavoritesPage = React.lazy(() => import("./pages/favorites"));
+const LibraryPage = React.lazy(() => import("./pages/library"));
 
 export const douyinRoutes: RouteObject[] = [
-  { index: true, element: <HomePage /> },
+  { index: true, element: <DouyinIndex /> },
+  { path: "video", element: <VideoPage /> },
   { path: "user", element: <UserPage /> },
-  { path: "mix", element: <MixPage /> },
-  { path: "search", element: <SearchPage /> },
-  { path: "comments", element: <CommentsPage /> },
   { path: "live", element: <LivePage /> },
+  { path: "likes", element: <LikesPage /> },
+  { path: "collects", element: <CollectsPage /> },
+  { path: "mix", element: <MixPage /> },
   { path: "feed", element: <FeedPage /> },
-  { path: "music", element: <MusicPage /> },
+  { path: "favorites", element: <FavoritesPage /> },
+  { path: "library", element: <LibraryPage /> },
 ];

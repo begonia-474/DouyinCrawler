@@ -1,7 +1,6 @@
 import { useState, useCallback } from "react";
 import { Header } from "@/components/layout/header";
 import { UrlInput } from "@/components/shared/url-input";
-import { VideoCard } from "@/components/shared/video-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -12,13 +11,11 @@ import {
   Download,
   CheckCircle2,
   AlertCircle,
-  Clock,
   ThumbsUp,
   MessageSquare,
   Share2,
   Bookmark,
   BarChart3,
-  Sparkles,
 } from "lucide-react";
 
 interface ParsedInfo {
@@ -29,30 +26,12 @@ interface ParsedInfo {
   awemeId?: string;
 }
 
-interface RelatedVideo {
-  id: string;
-  title: string;
-  author: string;
-  duration: string;
-  diggCount: number;
-  commentCount: number;
-  shareCount: number;
-}
-
-interface DownloadRecord {
-  id: string;
-  url: string;
-  title: string;
-  status: "completed" | "error" | "downloading";
-  progress?: number;
-}
-
 function formatCount(n: number): string {
   if (n >= 10000) return `${(n / 10000).toFixed(1)}w`;
   return n.toLocaleString();
 }
 
-export default function HomePage() {
+export default function VideoPage() {
   const [loading, setLoading] = useState(false);
   const [parsed, setParsed] = useState<ParsedInfo | null>(null);
   const [stats, setStats] = useState<{
@@ -61,19 +40,16 @@ export default function HomePage() {
     share_count: number;
     collect_count: number;
   } | null>(null);
-  const [related, setRelated] = useState<RelatedVideo[]>([]);
   const [downloadUrl, setDownloadUrl] = useState("");
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [downloading, setDownloading] = useState(false);
   const [downloaded, setDownloaded] = useState(false);
-  const [records, setRecords] = useState<DownloadRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const handleParse = useCallback(async (url: string) => {
     setLoading(true);
     setParsed(null);
     setStats(null);
-    setRelated([]);
     setDownloadUrl(url);
     setDownloaded(false);
     setError(null);
@@ -89,7 +65,6 @@ export default function HomePage() {
 
       const data = detailRes.data;
 
-      // 单视频：有 detail 字段
       if (data?.detail) {
         const detail = data.detail;
         setParsed({
@@ -98,22 +73,11 @@ export default function HomePage() {
           author: detail.author,
           awemeId: detail.aweme_id || detail.awemeId,
         });
-        // 从 detail 中取统计数据
         setStats({
           digg_count: detail.digg_count ?? 0,
           comment_count: detail.comment_count ?? 0,
           share_count: detail.share_count ?? 0,
           collect_count: detail.collect_count ?? 0,
-        });
-      }
-      // 用户主页/合集：有 videos 字段
-      else if (data?.videos) {
-        const videos = data.videos as VideoItem[];
-        const isUser = data.type === "user";
-        setParsed({
-          type: isUser ? "user" : "mix",
-          title: `${isUser ? "用户主页" : "合集"} (${videos.length} 个视频)`,
-          author: videos[0]?.author || "",
         });
       }
     } catch (e) {
@@ -134,28 +98,19 @@ export default function HomePage() {
     if (res.success) {
       setDownloaded(true);
       setDownloadProgress(100);
-      setRecords((prev) => [
-        { id: Date.now().toString(), url: downloadUrl, title: parsed?.title || downloadUrl, status: "completed" },
-        ...prev,
-      ]);
     } else {
       setError(res.error || "下载失败");
-      setRecords((prev) => [
-        { id: Date.now().toString(), url: downloadUrl, title: parsed?.title || downloadUrl, status: "error" },
-        ...prev,
-      ]);
     }
     setDownloading(false);
-  }, [downloadUrl, parsed]);
+  }, [downloadUrl]);
 
   return (
     <>
-      <Header title="快速下载" description="粘贴抖音链接，一键下载视频/图文" />
+      <Header title="单视频下载" description="粘贴视频或图文链接，解析后下载" />
 
       <div className="space-y-6">
         <UrlInput onSubmit={handleParse} loading={loading} />
 
-        {/* 错误提示 */}
         {error && (
           <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
             <AlertCircle className="h-4 w-4 shrink-0" />
@@ -163,7 +118,6 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* 解析结果 */}
         {parsed && (
           <Card>
             <CardContent className="p-5">
@@ -215,7 +169,6 @@ export default function HomePage() {
           </Card>
         )}
 
-        {/* 作品统计 */}
         {stats && (
           <Card>
             <CardHeader className="pb-3">
@@ -249,63 +202,6 @@ export default function HomePage() {
               </div>
             </CardContent>
           </Card>
-        )}
-
-        {/* 相关视频推荐 */}
-        {related.length > 0 && (
-          <div className="space-y-3">
-            <h3 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <Sparkles className="h-4 w-4" />
-              相关推荐
-            </h3>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-              {related.map((video) => (
-                <VideoCard
-                  key={video.id}
-                  title={video.title}
-                  author={video.author}
-                  duration={video.duration}
-                  diggCount={video.diggCount}
-                  commentCount={video.commentCount}
-                  shareCount={video.shareCount}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* 最近下载记录 */}
-        {records.length > 0 && (
-          <div className="space-y-3">
-            <h3 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <Clock className="h-4 w-4" />
-              最近下载
-            </h3>
-            {records.map((record) => (
-              <div
-                key={record.id}
-                className="flex items-center gap-4 text-sm p-3 rounded-lg bg-muted/50"
-              >
-                {record.status === "completed" && (
-                  <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
-                )}
-                {record.status === "error" && (
-                  <AlertCircle className="h-4 w-4 text-destructive shrink-0" />
-                )}
-                {record.status === "downloading" && (
-                  <Clock className="h-4 w-4 text-muted-foreground shrink-0" />
-                )}
-                <span className="flex-1 truncate">{record.title}</span>
-                <span className="text-muted-foreground text-xs shrink-0">
-                  {record.status === "completed"
-                    ? "已完成"
-                    : record.status === "error"
-                    ? "失败"
-                    : `${record.progress}%`}
-                </span>
-              </div>
-            ))}
-          </div>
         )}
       </div>
     </>

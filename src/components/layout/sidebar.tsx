@@ -1,14 +1,10 @@
-import { NavLink, useLocation } from "react-router-dom";
+import { NavLink } from "react-router-dom";
 import {
-  Download,
-  User,
-  Search,
-  MessageSquare,
-  Radio,
-  Rss,
-  ListMusic,
-  Layers,
+  Home,
   FolderDown,
+  Rss,
+  Heart,
+  Database,
   Settings,
   Video,
 } from "lucide-react";
@@ -21,21 +17,17 @@ const platformItems = [
   // { id: "bilibili", icon: ..., label: "B站" },
 ];
 
-// 抖音导航项
-const douyinNavItems = [
-  { to: "/douyin", icon: Download, label: "快速下载" },
-  { to: "/douyin/user", icon: User, label: "用户主页" },
-  { to: "/douyin/mix", icon: Layers, label: "合集" },
-  { to: "/douyin/search", icon: Search, label: "搜索" },
-  { to: "/douyin/comments", icon: MessageSquare, label: "评论" },
-  { to: "/douyin/live", icon: Radio, label: "直播" },
+// 主导航项
+const navItems = [
+  { to: "/douyin", icon: Home, label: "首页" },
+  { to: "/downloads", icon: FolderDown, label: "下载记录" },
   { to: "/douyin/feed", icon: Rss, label: "Feed" },
-  { to: "/douyin/music", icon: ListMusic, label: "音乐收藏" },
+  { to: "/douyin/favorites", icon: Heart, label: "收藏" },
+  { to: "/douyin/library", icon: Database, label: "资料库" },
 ];
 
 // 底部固定项
 const bottomItems = [
-  { to: "/downloads", icon: FolderDown, label: "下载管理" },
   { to: "/settings", icon: Settings, label: "设置" },
 ];
 
@@ -69,8 +61,7 @@ function SidebarLink({
 }
 
 export function Sidebar() {
-  const location = useLocation();
-  const currentPlatform = "douyin"; // 后续可以根据路径动态判断
+  const currentPlatform = "douyin";
 
   return (
     <aside className="w-[220px] border-r bg-card flex flex-col h-full">
@@ -100,7 +91,7 @@ export function Sidebar() {
 
       {/* 主导航 */}
       <nav className="flex-1 px-3 py-2 space-y-1 overflow-auto">
-        {douyinNavItems.map((item) => (
+        {navItems.map((item) => (
           <SidebarLink key={item.to} {...item} />
         ))}
       </nav>
