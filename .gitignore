@@ -1,0 +1,91 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+*.egg-info/
+*.egg
+dist/
+build/
+develop-eggs/
+downloads/
+eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.manifest
+*.spec
+pip-log.txt
+pip-delete-this-directory.txt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# 环境变量和配置
+.env
+.env.local
+.env.*.local
+config.yaml
+config.yml
+config.json
+token.json
+cookies.json
+
+# 日志
+*.log
+logs/
+
+# 下载的媒体文件（保留目录结构，只忽略媒体文件）
+downloads/**/*.mp4
+downloads/**/*.mp3
+downloads/**/*.jpg
+downloads/**/*.jpeg
+downloads/**/*.png
+downloads/**/*.gif
+downloads/**/*.webp
+downloads/**/*.m4a
+
+# 其他数据目录
+data/
+output/
+test_Download/
+
+# CodeGraph 索引（本地生成）
+.codegraph/
+
+# Claude 配置
+.claude/
+
+# 测试相关
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 文档和项目配置
+docs/
+CLAUDE.md
+
+# 其他
+*.bak
+*.tmp
+*.temp
