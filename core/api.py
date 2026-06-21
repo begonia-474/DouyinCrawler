@@ -24,6 +24,7 @@ class DouyinAPIEndpoints:
     POST_RELATED = f"{DOUYIN_DOMAIN}/aweme/v1/web/aweme/related/"
     POST_STATS = f"{DOUYIN_DOMAIN}/aweme/v2/web/aweme/stats/"
     LOCATE_POST = f"{DOUYIN_DOMAIN}/aweme/v1/web/locate/post/"
+    LOCATE_POST = f"{DOUYIN_DOMAIN}/aweme/v1/web/locate/post/"
 
     # === 评论相关 ===
     POST_COMMENT = f"{DOUYIN_DOMAIN}/aweme/v1/web/comment/list/"

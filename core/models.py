@@ -231,3 +231,14 @@ class LiveImFetch(BaseModel):
 
 class QueryUser(BaseRequestModel):
     pass
+
+
+class PostLocate(BaseRequestModel):
+    """定位作品请求参数"""
+    sec_user_id: str
+    max_cursor: str = ""  # last max_cursor
+    locate_item_id: str = ""  # aweme_id
+    locate_item_cursor: str = ""
+    locate_query: str = "true"
+    count: int = 10
+    publish_video_strategy_type: int = 2

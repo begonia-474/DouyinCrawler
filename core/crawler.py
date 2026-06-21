@@ -7,6 +7,7 @@ from core.api import DouyinAPIEndpoints as ep
 from core.signature.abogus import ABogus
 from core.signature.xbogus import XBogus
 from core.signature.fingerprint import BrowserFingerprintGenerator
+from core.signature.manager import ABogusManager, XBogusManager
 
 
 class DouyinCrawler:
@@ -21,6 +22,11 @@ class DouyinCrawler:
     def __init__(self, cookie: str, proxies: dict | None = None, encryption: str = "ab"):
         self.cookie = cookie
         self.encryption = encryption
+        # 初始化签名管理器
+        if encryption == "ab":
+            self.bogus_manager = ABogusManager
+        else:
+            self.bogus_manager = XBogusManager
         timeout = 10
         client_kwargs = {
             "timeout": timeout,
@@ -161,6 +167,10 @@ class DouyinCrawler:
         params = PostStats(item_id=aweme_id, aweme_type=aweme_type, msToken=self._get_token()).model_dump()
         body = urlencode(params)
         return await self._post_json(self._sign_url(ep.POST_STATS, params, body), form_data=params)
+
+    async def fetch_locate_post(self, params: dict) -> dict:
+        """定位作品 — 用于跳页定位"""
+        return await self._get_json(self._sign_url(ep.LOCATE_POST, params))
 
     async def fetch_mix_aweme(self, mix_id: str, cursor: int = 0, count: int = 20) -> dict:
         from core.models import UserMix

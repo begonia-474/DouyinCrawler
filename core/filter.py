@@ -496,3 +496,85 @@ class LiveImFetchFilter:
     @property
     def internal_ext(self) -> str:
         return get_nested(self._data, "data", 0, "internal_ext", default="")
+
+
+class QueryUserFilter:
+    """用户查询结果过滤器"""
+
+    def __init__(self, data: dict):
+        self._data = data
+
+    @property
+    def status_code(self) -> int:
+        return self._data.get("status_code")
+
+    @property
+    def status_msg(self) -> str:
+        return self._data.get("status_msg", "")
+
+    @property
+    def browser_name(self) -> str:
+        return self._data.get("browser_name", "")
+
+    @property
+    def create_time(self) -> str:
+        return str(self._data.get("create_time", ""))
+
+    @property
+    def firebase_instance_id(self) -> str:
+        return self._data.get("firebase_instance_id", "")
+
+    @property
+    def user_unique_id(self) -> str:
+        return str(self._data.get("id", ""))
+
+    @property
+    def last_time(self) -> str:
+        return str(self._data.get("last_time", ""))
+
+    @property
+    def user_agent(self) -> str:
+        return self._data.get("user_agent", "")
+
+    @property
+    def user_uid(self) -> str:
+        return str(self._data.get("user_uid", ""))
+
+    @property
+    def user_uid_type(self) -> int:
+        return self._data.get("user_uid_type", 0)
+
+    def to_dict(self) -> dict:
+        return {
+            "status_code": self.status_code,
+            "status_msg": self.status_msg,
+            "browser_name": self.browser_name,
+            "create_time": self.create_time,
+            "firebase_instance_id": self.firebase_instance_id,
+            "user_unique_id": self.user_unique_id,
+            "last_time": self.last_time,
+            "user_agent": self.user_agent,
+            "user_uid": self.user_uid,
+            "user_uid_type": self.user_uid_type,
+        }
+
+
+class PostStatsFilter:
+    """作品统计过滤器"""
+
+    def __init__(self, data: dict):
+        self._data = data
+
+    @property
+    def status_code(self) -> int:
+        return self._data.get("status_code", -1)
+
+    @property
+    def status_msg(self) -> str:
+        return self._data.get("status_msg", "")
+
+    def to_dict(self) -> dict:
+        return {
+            "status_code": self.status_code,
+            "status_msg": self.status_msg,
+        }
