@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Header } from "@/components/layout/header";
+import { useMounted } from "@/hooks/use-safe-timer";
 import { VideoCard } from "@/components/shared/video-card";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -21,11 +22,13 @@ export function FeedPage() {
   const [tabVideos, setTabVideos] = useState<FeedVideo[]>([]);
   const [followVideos, setFollowVideos] = useState<FeedVideo[]>([]);
   const [friendVideos, setFriendVideos] = useState<FeedVideo[]>([]);
+  const mountedRef = useMounted();
 
   const handleRefresh = async (type: string) => {
     setLoading(true);
     // 模拟加载
     setTimeout(() => {
+      if (!mountedRef.current) return;
       const mockVideo: FeedVideo = {
         id: Date.now().toString(),
         title: `${type}推荐视频`,

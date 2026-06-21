@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Header } from "@/components/layout/header";
+import { useMounted } from "@/hooks/use-safe-timer";
 import { UrlInput } from "@/components/shared/url-input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -160,6 +161,7 @@ export function CommentsPage() {
   const [comments, setComments] = useState<Comment[]>([]);
   const [postStats, setPostStats] = useState<PostStats | null>(null);
   const [hasMore, setHasMore] = useState(true);
+  const mountedRef = useMounted();
 
   const handleParse = async (_url: string) => {
     setLoading(true);
@@ -168,6 +170,7 @@ export function CommentsPage() {
     setHasMore(true);
 
     setTimeout(() => {
+      if (!mountedRef.current) return;
       setPostStats({
         awemeId: "1234567890",
         title: "旅行中的美好瞬间",
@@ -186,6 +189,7 @@ export function CommentsPage() {
   const handleLoadMore = async () => {
     setLoading(true);
     setTimeout(() => {
+      if (!mountedRef.current) return;
       setComments((prev) => [
         ...prev,
         {

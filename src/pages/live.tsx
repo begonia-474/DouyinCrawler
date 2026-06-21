@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Header } from "@/components/layout/header";
+import { useMounted } from "@/hooks/use-safe-timer";
 import { UrlInput } from "@/components/shared/url-input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -29,10 +30,12 @@ export function LivePage() {
   const [loading, setLoading] = useState(false);
   const [liveInfo, setLiveInfo] = useState<LiveInfo | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  const mountedRef = useMounted();
 
   const handleParse = async (_url: string) => {
     setLoading(true);
     setTimeout(() => {
+      if (!mountedRef.current) return;
       setLiveInfo({
         title: "示例直播间标题",
         nickname: "主播昵称",
@@ -53,7 +56,9 @@ export function LivePage() {
   const handleCopy = (text: string, type: string) => {
     navigator.clipboard.writeText(text);
     setCopied(type);
-    setTimeout(() => setCopied(null), 2000);
+    setTimeout(() => {
+      if (mountedRef.current) setCopied(null);
+    }, 2000);
   };
 
   return (

@@ -1,11 +1,8 @@
 import { Circle } from "lucide-react";
+import { useAppStore } from "@/stores/app-store";
 
-interface StatusBarProps {
-  connected?: boolean;
-  downloadCount?: number;
-}
-
-export function StatusBar({ connected = false, downloadCount = 0 }: StatusBarProps) {
+export function StatusBar() {
+  const { connected, downloadCount } = useAppStore();
   return (
     <div className="h-8 border-t bg-muted/50 flex items-center px-4 text-xs text-muted-foreground gap-4">
       <div className="flex items-center gap-1.5">

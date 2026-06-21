@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import { Header } from "@/components/layout/header";
+import { useMounted } from "@/hooks/use-safe-timer";
 import { UrlInput } from "@/components/shared/url-input";
 import { VideoCard } from "@/components/shared/video-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -69,6 +70,7 @@ export function HomePage() {
   const [downloading, setDownloading] = useState(false);
   const [downloaded, setDownloaded] = useState(false);
   const [records] = useState<DownloadRecord[]>([]);
+  const mountedRef = useMounted();
 
   const handleParse = useCallback(async (url: string) => {
     setLoading(true);
@@ -80,6 +82,7 @@ export function HomePage() {
 
     // 模拟解析
     setTimeout(() => {
+      if (!mountedRef.current) return;
       setParsed({
         type: "video",
         title: "示例视频标题 - 旅行中的美好瞬间",
@@ -112,14 +115,16 @@ export function HomePage() {
       setDownloadProgress((prev) => {
         if (prev >= 100) {
           clearInterval(interval);
-          setDownloading(false);
-          setDownloaded(true);
+          if (mountedRef.current) {
+            setDownloading(false);
+            setDownloaded(true);
+          }
           return 100;
         }
         return prev + 10;
       });
     }, 300);
-  }, [downloadUrl]);
+  }, [downloadUrl, mountedRef]);
 
   return (
     <>

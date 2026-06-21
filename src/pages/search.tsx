@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Header } from "@/components/layout/header";
+import { useMounted } from "@/hooks/use-safe-timer";
 import { VideoCard } from "@/components/shared/video-card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -20,6 +21,7 @@ export function SearchPage() {
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searched, setSearched] = useState(false);
+  const mountedRef = useMounted();
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,6 +32,7 @@ export function SearchPage() {
 
     // 模拟搜索
     setTimeout(() => {
+      if (!mountedRef.current) return;
       setResults([
         {
           id: "1",

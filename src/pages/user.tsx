@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Header } from "@/components/layout/header";
+import { useMounted } from "@/hooks/use-safe-timer";
 import { UrlInput } from "@/components/shared/url-input";
 import { VideoCard } from "@/components/shared/video-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -213,10 +214,12 @@ export function UserPage() {
   const [following] = useState<FollowItem[]>(mockFollowing);
   const [followers] = useState<FollowItem[]>(mockFollowers);
   const [stats] = useState<PostStats>(mockStats);
+  const mountedRef = useMounted();
 
   const handleParse = async (_url: string) => {
     setLoading(true);
     setTimeout(() => {
+      if (!mountedRef.current) return;
       setProfile({
         nickname: "示例用户",
         avatar: "",

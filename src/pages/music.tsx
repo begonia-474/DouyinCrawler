@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Header } from "@/components/layout/header";
+import { useMounted } from "@/hooks/use-safe-timer";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -44,10 +45,12 @@ export function MusicPage() {
   const [musicList, setMusicList] = useState<MusicItem[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [searchKeyword, setSearchKeyword] = useState("");
+  const mountedRef = useMounted();
 
   const handleLoad = async () => {
     setLoading(true);
     setTimeout(() => {
+      if (!mountedRef.current) return;
       setMusicList(mockMusic);
       setHasMore(true);
       setLoading(false);
@@ -57,6 +60,7 @@ export function MusicPage() {
   const handleLoadMore = async () => {
     setLoading(true);
     setTimeout(() => {
+      if (!mountedRef.current) return;
       setMusicList((prev) => [
         ...prev,
         {

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Header } from "@/components/layout/header";
+import { useMounted } from "@/hooks/use-safe-timer";
 import { UrlInput } from "@/components/shared/url-input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -36,10 +37,12 @@ export function MixPage() {
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [downloadedCount, setDownloadedCount] = useState(0);
   const [mixInfo, setMixInfo] = useState<MixInfo | null>(null);
+  const mountedRef = useMounted();
 
   const handleParse = async (_url: string) => {
     setLoading(true);
     setTimeout(() => {
+      if (!mountedRef.current) return;
       setMixInfo({
         mixName: "旅行日记合集",
         totalCount: 5,
