@@ -151,12 +151,12 @@ export function MixPage() {
               {mixInfo.videos.map((video) => (
                 <Card
                   key={video.id}
-                  className={video.downloaded ? "border-emerald-200" : ""}
+                  className={video.downloaded ? "border-green-200" : ""}
                 >
                   <CardContent className="p-4 flex items-center gap-4">
                     <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center text-sm font-medium shrink-0">
                       {video.downloaded ? (
-                        <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                        <CheckCircle2 className="h-4 w-4 text-green-600" />
                       ) : (
                         video.index
                       )}

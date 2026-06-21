@@ -15,6 +15,7 @@ import {
   Loader2,
   Heart,
   Clock,
+  Search,
 } from "lucide-react";
 
 interface MusicItem {
@@ -156,7 +157,7 @@ export function MusicPage() {
                           <Heart
                             className={`h-4 w-4 ${
                               item.liked
-                                ? "fill-red-500 text-red-500"
+                                ? "fill-destructive text-destructive"
                                 : "text-muted-foreground"
                             }`}
                           />
@@ -203,7 +204,8 @@ export function MusicPage() {
             </div>
             <Card>
               <CardContent className="p-8 text-center text-muted-foreground">
-                输入关键词搜索音乐
+                <Search className="h-10 w-10 mx-auto mb-3" />
+                <p>输入关键词搜索音乐</p>
               </CardContent>
             </Card>
           </TabsContent>

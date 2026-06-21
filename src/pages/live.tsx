@@ -133,7 +133,7 @@ export function LivePage() {
                               onClick={() => handleCopy(url, `m3u8-${i}`)}
                             >
                               {copied === `m3u8-${i}` ? (
-                                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                                <CheckCircle2 className="h-4 w-4 text-green-600" />
                               ) : (
                                 <Copy className="h-4 w-4" />
                               )}
@@ -155,7 +155,7 @@ export function LivePage() {
                               onClick={() => handleCopy(url, `flv-${i}`)}
                             >
                               {copied === `flv-${i}` ? (
-                                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                                <CheckCircle2 className="h-4 w-4 text-green-600" />
                               ) : (
                                 <Copy className="h-4 w-4" />
                               )}

@@ -149,41 +149,43 @@ function StatsCard({ stats }: { stats: PostStats }) {
 
 function FollowItemCard({ item, type }: { item: FollowItem; type: "following" | "follower" }) {
   return (
-    <div className="flex items-center gap-3 p-3 rounded-lg hover:bg-accent/50 transition-colors">
-      <Avatar className="h-10 w-10">
-        <AvatarImage src={item.avatar} />
-        <AvatarFallback>{item.nickname[0]}</AvatarFallback>
-      </Avatar>
-      <div className="flex-1 min-w-0">
-        <h4 className="text-sm font-medium">{item.nickname}</h4>
-        {item.signature && (
-          <p className="text-xs text-muted-foreground truncate">
-            {item.signature}
+    <Card>
+      <CardContent className="p-4 flex items-center gap-4">
+        <Avatar className="h-10 w-10">
+          <AvatarImage src={item.avatar} />
+          <AvatarFallback>{item.nickname[0]}</AvatarFallback>
+        </Avatar>
+        <div className="flex-1 min-w-0">
+          <h4 className="text-sm font-medium">{item.nickname}</h4>
+          {item.signature && (
+            <p className="text-xs text-muted-foreground truncate">
+              {item.signature}
+            </p>
+          )}
+          <p className="text-xs text-muted-foreground">
+            {formatCount(item.followerCount)} 粉丝
           </p>
+        </div>
+        {type === "following" ? (
+          <Button variant="outline" size="sm">
+            <UserCheck className="h-3.5 w-3.5 mr-1" />
+            已关注
+          </Button>
+        ) : (
+          <Button variant="outline" size="sm">
+            <UserPlus className="h-3.5 w-3.5 mr-1" />
+            关注
+          </Button>
         )}
-        <p className="text-xs text-muted-foreground">
-          {formatCount(item.followerCount)} 粉丝
-        </p>
-      </div>
-      {type === "following" ? (
-        <Button variant="outline" size="sm">
-          <UserCheck className="h-3.5 w-3.5 mr-1" />
-          已关注
-        </Button>
-      ) : (
-        <Button variant="outline" size="sm">
-          <UserPlus className="h-3.5 w-3.5 mr-1" />
-          关注
-        </Button>
-      )}
-    </div>
+      </CardContent>
+    </Card>
   );
 }
 
 function CollectsFolderCard({ folder }: { folder: CollectsFolder }) {
   return (
     <Card className="hover:bg-accent/50 transition-colors cursor-pointer">
-      <CardContent className="p-4 flex items-center gap-3">
+      <CardContent className="p-4 flex items-center gap-4">
         <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
           <FolderOpen className="h-5 w-5 text-primary" />
         </div>
@@ -381,7 +383,8 @@ export function UserPage() {
               {/* 收藏夹 */}
               <TabsContent value="collects" className="mt-4 space-y-3">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-medium text-muted-foreground">
+                  <h3 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                    <FolderOpen className="h-4 w-4" />
                     收藏夹列表
                   </h3>
                   <Button variant="outline" size="sm">

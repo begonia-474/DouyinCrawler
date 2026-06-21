@@ -252,14 +252,17 @@ export function HomePage() {
         {/* 最近下载记录 */}
         {records.length > 0 && (
           <div className="space-y-3">
-            <h3 className="text-sm font-medium text-muted-foreground">最近下载</h3>
+            <h3 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+              <Clock className="h-4 w-4" />
+              最近下载
+            </h3>
             {records.map((record) => (
               <div
                 key={record.id}
-                className="flex items-center gap-3 text-sm p-3 rounded-lg bg-muted/50"
+                className="flex items-center gap-4 text-sm p-3 rounded-lg bg-muted/50"
               >
                 {record.status === "completed" && (
-                  <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
+                  <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
                 )}
                 {record.status === "error" && (
                   <AlertCircle className="h-4 w-4 text-destructive shrink-0" />

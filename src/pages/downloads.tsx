@@ -53,9 +53,9 @@ const mockTasks: Task[] = [
 function StatusIcon({ status }: { status: Task["status"] }) {
   switch (status) {
     case "completed":
-      return <CheckCircle2 className="h-4 w-4 text-emerald-500" />;
+      return <CheckCircle2 className="h-4 w-4 text-green-600" />;
     case "downloading":
-      return <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />;
+      return <Loader2 className="h-4 w-4 text-muted-foreground animate-spin" />;
     case "error":
       return <AlertCircle className="h-4 w-4 text-destructive" />;
     default:
@@ -72,7 +72,7 @@ function TaskItem({ task }: { task: Task }) {
         <div className="flex items-center gap-2 mt-1">
           <span className="text-xs text-muted-foreground">{task.size}</span>
           {task.speed && (
-            <span className="text-xs text-blue-500">{task.speed}</span>
+            <span className="text-xs text-muted-foreground">{task.speed}</span>
           )}
           {task.error && (
             <span className="text-xs text-destructive">{task.error}</span>
@@ -149,7 +149,8 @@ export function DownloadsPage() {
           {activeTasks.length === 0 ? (
             <Card>
               <CardContent className="p-8 text-center text-muted-foreground">
-                没有进行中的下载任务
+                <Download className="h-10 w-10 mx-auto mb-3" />
+                <p>没有进行中的下载任务</p>
               </CardContent>
             </Card>
           ) : (
@@ -161,7 +162,8 @@ export function DownloadsPage() {
           {completedTasks.length === 0 ? (
             <Card>
               <CardContent className="p-8 text-center text-muted-foreground">
-                没有已完成的下载
+                <CheckCircle2 className="h-10 w-10 mx-auto mb-3" />
+                <p>没有已完成的下载</p>
               </CardContent>
             </Card>
           ) : (
@@ -173,7 +175,8 @@ export function DownloadsPage() {
           {errorTasks.length === 0 ? (
             <Card>
               <CardContent className="p-8 text-center text-muted-foreground">
-                没有失败的下载
+                <AlertCircle className="h-10 w-10 mx-auto mb-3" />
+                <p>没有失败的下载</p>
               </CardContent>
             </Card>
           ) : (

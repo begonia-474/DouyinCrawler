@@ -44,10 +44,10 @@ function SidebarLink({
       end={to === "/"}
       className={({ isActive }) =>
         cn(
-          "flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors",
+          "flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors relative",
           "hover:bg-accent hover:text-accent-foreground",
           isActive
-            ? "bg-accent text-accent-foreground font-medium"
+            ? "bg-accent text-accent-foreground font-medium before:absolute before:left-0 before:top-1/2 before:-translate-y-1/2 before:h-5 before:w-[3px] before:rounded-full before:bg-primary"
             : "text-muted-foreground"
         )
       }

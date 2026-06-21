@@ -5,7 +5,7 @@ import { VideoCard } from "@/components/shared/video-card";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { RefreshCw, Loader2 } from "lucide-react";
+import { RefreshCw, Loader2, Rss } from "lucide-react";
 
 interface FeedVideo {
   id: string;
@@ -55,6 +55,7 @@ export function FeedPage() {
       return (
         <Card>
           <CardContent className="p-8 text-center">
+            <Rss className="h-10 w-10 text-muted-foreground mx-auto mb-3" />
             <p className="text-muted-foreground mb-4">暂无{type}内容</p>
             <Button
               variant="outline"

@@ -111,7 +111,7 @@ function CommentItem({ comment }: { comment: Comment }) {
 
   return (
     <div className="space-y-3">
-      <div className="flex gap-3">
+      <div className="flex gap-4">
         <Avatar className="h-8 w-8 shrink-0">
           <AvatarImage src={comment.avatar} />
           <AvatarFallback>{comment.user[0]}</AvatarFallback>
@@ -123,13 +123,15 @@ function CommentItem({ comment }: { comment: Comment }) {
           </div>
           <p className="text-sm mt-1">{comment.content}</p>
           <div className="flex items-center gap-4 mt-2">
-            <button className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
+            <Button variant="ghost" size="sm" className="h-auto px-1.5 py-0.5 text-xs text-muted-foreground">
               <Heart className="h-3.5 w-3.5" />
               {formatCount(comment.likeCount)}
-            </button>
+            </Button>
             {comment.replyCount > 0 && (
-              <button
-                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-auto px-1.5 py-0.5 text-xs text-muted-foreground"
                 onClick={() => setShowReplies(!showReplies)}
               >
                 <MessageSquare className="h-3.5 w-3.5" />
@@ -139,7 +141,7 @@ function CommentItem({ comment }: { comment: Comment }) {
                 ) : (
                   <ChevronDown className="h-3 w-3" />
                 )}
-              </button>
+              </Button>
             )}
           </div>
         </div>
@@ -301,7 +303,8 @@ export function CommentsPage() {
           !loading && (
             <Card>
               <CardContent className="p-8 text-center text-muted-foreground">
-                输入视频链接查看评论和作品统计
+                <MessageSquare className="h-10 w-10 mx-auto mb-3" />
+                <p>输入视频链接查看评论和作品统计</p>
               </CardContent>
             </Card>
           )

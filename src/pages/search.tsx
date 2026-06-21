@@ -81,7 +81,8 @@ export function SearchPage() {
             {results.length === 0 ? (
               <Card>
                 <CardContent className="p-8 text-center text-muted-foreground">
-                  {loading ? "搜索中..." : "没有找到相关结果"}
+                  <Search className="h-10 w-10 mx-auto mb-3" />
+                  <p>{loading ? "搜索中..." : "没有找到相关结果"}</p>
                 </CardContent>
               </Card>
             ) : (
