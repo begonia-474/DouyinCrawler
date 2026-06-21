@@ -1,3 +1,7 @@
+# Node.js
+node_modules/
+dist/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -69,6 +73,8 @@ test_Download/
 
 # Claude 配置
 .claude/
+.agents/
+skills-lock.json
 
 # 测试相关
 .coverage
