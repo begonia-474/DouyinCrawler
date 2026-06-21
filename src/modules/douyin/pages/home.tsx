@@ -1,12 +1,13 @@
 import { useState, useCallback } from "react";
 import { Header } from "@/components/layout/header";
-import { useMounted } from "@/hooks/use-safe-timer";
 import { UrlInput } from "@/components/shared/url-input";
 import { VideoCard } from "@/components/shared/video-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
+import { getPostDetail, downloadOne } from "@/lib/api";
+import type { VideoItem } from "@/lib/api-types";
 import {
   Download,
   CheckCircle2,
@@ -16,7 +17,6 @@ import {
   MessageSquare,
   Share2,
   Bookmark,
-  Play,
   BarChart3,
   Sparkles,
 } from "lucide-react";
@@ -27,14 +27,6 @@ interface ParsedInfo {
   author?: string;
   duration?: string;
   awemeId?: string;
-}
-
-interface PostStats {
-  diggCount: number;
-  commentCount: number;
-  shareCount: number;
-  collectCount: number;
-  playCount: number;
 }
 
 interface RelatedVideo {
@@ -60,17 +52,22 @@ function formatCount(n: number): string {
   return n.toLocaleString();
 }
 
-export function HomePage() {
+export default function HomePage() {
   const [loading, setLoading] = useState(false);
   const [parsed, setParsed] = useState<ParsedInfo | null>(null);
-  const [stats, setStats] = useState<PostStats | null>(null);
+  const [stats, setStats] = useState<{
+    digg_count: number;
+    comment_count: number;
+    share_count: number;
+    collect_count: number;
+  } | null>(null);
   const [related, setRelated] = useState<RelatedVideo[]>([]);
   const [downloadUrl, setDownloadUrl] = useState("");
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [downloading, setDownloading] = useState(false);
   const [downloaded, setDownloaded] = useState(false);
-  const [records] = useState<DownloadRecord[]>([]);
-  const mountedRef = useMounted();
+  const [records, setRecords] = useState<DownloadRecord[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   const handleParse = useCallback(async (url: string) => {
     setLoading(true);
@@ -79,52 +76,77 @@ export function HomePage() {
     setRelated([]);
     setDownloadUrl(url);
     setDownloaded(false);
+    setError(null);
 
-    // 模拟解析
-    setTimeout(() => {
-      if (!mountedRef.current) return;
-      setParsed({
-        type: "video",
-        title: "示例视频标题 - 旅行中的美好瞬间",
-        author: "旅行达人",
-        duration: "00:30",
-        awemeId: "1234567890",
-      });
-      setStats({
-        diggCount: 52000,
-        commentCount: 3200,
-        shareCount: 1800,
-        collectCount: 8900,
-        playCount: 892000,
-      });
-      setRelated([
-        { id: "r1", title: "相关视频 1 - 风景合集", author: "摄影师A", duration: "01:20", diggCount: 18000, commentCount: 890, shareCount: 450 },
-        { id: "r2", title: "相关视频 2 - 美食探店", author: "美食家B", duration: "02:15", diggCount: 9500, commentCount: 560, shareCount: 230 },
-        { id: "r3", title: "相关视频 3 - 搞笑日常", author: "段子手C", duration: "00:45", diggCount: 35000, commentCount: 2100, shareCount: 1200 },
-      ]);
-      setLoading(false);
-    }, 1000);
+    try {
+      const detailRes = await getPostDetail(url);
+
+      if (!detailRes.success) {
+        setError(detailRes.error || "解析失败");
+        setLoading(false);
+        return;
+      }
+
+      const data = detailRes.data;
+
+      // 单视频：有 detail 字段
+      if (data?.detail) {
+        const detail = data.detail;
+        setParsed({
+          type: detail.type || "video",
+          title: detail.desc || detail.title,
+          author: detail.author,
+          awemeId: detail.aweme_id || detail.awemeId,
+        });
+        // 从 detail 中取统计数据
+        setStats({
+          digg_count: detail.digg_count ?? 0,
+          comment_count: detail.comment_count ?? 0,
+          share_count: detail.share_count ?? 0,
+          collect_count: detail.collect_count ?? 0,
+        });
+      }
+      // 用户主页/合集：有 videos 字段
+      else if (data?.videos) {
+        const videos = data.videos as VideoItem[];
+        const isUser = data.type === "user";
+        setParsed({
+          type: isUser ? "user" : "mix",
+          title: `${isUser ? "用户主页" : "合集"} (${videos.length} 个视频)`,
+          author: videos[0]?.author || "",
+        });
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "请求异常");
+    }
+
+    setLoading(false);
   }, []);
 
   const handleDownload = useCallback(async () => {
     if (!downloadUrl) return;
     setDownloading(true);
     setDownloadProgress(0);
+    setError(null);
 
-    const interval = setInterval(() => {
-      setDownloadProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          if (mountedRef.current) {
-            setDownloading(false);
-            setDownloaded(true);
-          }
-          return 100;
-        }
-        return prev + 10;
-      });
-    }, 300);
-  }, [downloadUrl, mountedRef]);
+    const res = await downloadOne(downloadUrl);
+
+    if (res.success) {
+      setDownloaded(true);
+      setDownloadProgress(100);
+      setRecords((prev) => [
+        { id: Date.now().toString(), url: downloadUrl, title: parsed?.title || downloadUrl, status: "completed" },
+        ...prev,
+      ]);
+    } else {
+      setError(res.error || "下载失败");
+      setRecords((prev) => [
+        { id: Date.now().toString(), url: downloadUrl, title: parsed?.title || downloadUrl, status: "error" },
+        ...prev,
+      ]);
+    }
+    setDownloading(false);
+  }, [downloadUrl, parsed]);
 
   return (
     <>
@@ -132,6 +154,14 @@ export function HomePage() {
 
       <div className="space-y-6">
         <UrlInput onSubmit={handleParse} loading={loading} />
+
+        {/* 错误提示 */}
+        {error && (
+          <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
 
         {/* 解析结果 */}
         {parsed && (
@@ -195,30 +225,25 @@ export function HomePage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="pt-0">
-              <div className="grid grid-cols-5 gap-4">
-                <div className="text-center">
-                  <Play className="h-4 w-4 text-muted-foreground mx-auto mb-1" />
-                  <p className="text-base font-semibold">{formatCount(stats.playCount)}</p>
-                  <p className="text-xs text-muted-foreground">播放</p>
-                </div>
+              <div className="grid grid-cols-4 gap-4">
                 <div className="text-center">
                   <ThumbsUp className="h-4 w-4 text-muted-foreground mx-auto mb-1" />
-                  <p className="text-base font-semibold">{formatCount(stats.diggCount)}</p>
+                  <p className="text-base font-semibold">{formatCount(stats.digg_count)}</p>
                   <p className="text-xs text-muted-foreground">点赞</p>
                 </div>
                 <div className="text-center">
                   <MessageSquare className="h-4 w-4 text-muted-foreground mx-auto mb-1" />
-                  <p className="text-base font-semibold">{formatCount(stats.commentCount)}</p>
+                  <p className="text-base font-semibold">{formatCount(stats.comment_count)}</p>
                   <p className="text-xs text-muted-foreground">评论</p>
                 </div>
                 <div className="text-center">
                   <Share2 className="h-4 w-4 text-muted-foreground mx-auto mb-1" />
-                  <p className="text-base font-semibold">{formatCount(stats.shareCount)}</p>
+                  <p className="text-base font-semibold">{formatCount(stats.share_count)}</p>
                   <p className="text-xs text-muted-foreground">分享</p>
                 </div>
                 <div className="text-center">
                   <Bookmark className="h-4 w-4 text-muted-foreground mx-auto mb-1" />
-                  <p className="text-base font-semibold">{formatCount(stats.collectCount)}</p>
+                  <p className="text-base font-semibold">{formatCount(stats.collect_count)}</p>
                   <p className="text-xs text-muted-foreground">收藏</p>
                 </div>
               </div>

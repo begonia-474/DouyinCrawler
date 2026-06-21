@@ -11,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { updateConfig } from "@/lib/api";
 import {
   Cookie,
   FolderOpen,
@@ -54,22 +55,40 @@ function SettingItem({
   );
 }
 
-export function SettingsPage() {
+export default function SettingsPage() {
   const [cookie, setCookie] = useState("");
   const [downloadPath, setDownloadPath] = useState("Download");
   const [naming, setNaming] = useState("{create}_{desc}");
   const [encryption, setEncryption] = useState("ab");
   const [proxy, setProxy] = useState("");
   const [maxConnections, setMaxConnections] = useState("5");
-  const [timeout, setTimeout] = useState("10");
+  const [reqTimeout, setReqTimeout] = useState("10");
   const [maxRetries, setMaxRetries] = useState("5");
 
   const handleSelectFolder = async () => {
     // 实际会调用 Tauri dialog API
   };
 
-  const handleSave = () => {
-    console.log("Saving config...");
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState<string | null>(null);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaveMsg(null);
+    const res = await updateConfig({
+      cookie,
+      download_path: downloadPath,
+      naming,
+      encryption,
+      proxy,
+    });
+    if (res.success) {
+      setSaveMsg("保存成功");
+    } else {
+      setSaveMsg(res.error || "保存失败");
+    }
+    setSaving(false);
+    window.setTimeout(() => setSaveMsg(null), 2000);
   };
 
   const handleReset = () => {
@@ -79,7 +98,7 @@ export function SettingsPage() {
     setEncryption("ab");
     setProxy("");
     setMaxConnections("5");
-    setTimeout("10");
+    setReqTimeout("10");
     setMaxRetries("5");
   };
 
@@ -91,9 +110,10 @@ export function SettingsPage() {
             <RotateCcw className="h-4 w-4 mr-1" />
             重置
           </Button>
-          <Button size="sm" onClick={handleSave}>
+          {saveMsg && <span className="text-xs text-muted-foreground">{saveMsg}</span>}
+          <Button size="sm" onClick={handleSave} disabled={saving}>
             <Save className="h-4 w-4 mr-1" />
-            保存
+            {saving ? "保存中..." : "保存"}
           </Button>
         </div>
       </Header>
@@ -228,8 +248,8 @@ export function SettingsPage() {
           >
             <Input
               type="number"
-              value={timeout}
-              onChange={(e) => setTimeout(e.target.value)}
+              value={reqTimeout}
+              onChange={(e) => setReqTimeout(e.target.value)}
               min="1"
               max="60"
               className="w-24 h-8 text-sm"

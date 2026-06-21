@@ -101,7 +101,7 @@ function TaskItem({ task }: { task: Task }) {
   );
 }
 
-export function DownloadsPage() {
+export default function DownloadsPage() {
   const activeTasks = mockTasks.filter(
     (t) => t.status === "downloading" || t.status === "pending"
   );

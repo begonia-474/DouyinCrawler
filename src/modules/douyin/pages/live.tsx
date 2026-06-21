@@ -1,0 +1,149 @@
+import { useState, useCallback } from "react";
+import { Header } from "@/components/layout/header";
+import { UrlInput } from "@/components/shared/url-input";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { getLiveInfo } from "@/lib/api";
+import type { LiveInfo as LiveInfoType } from "@/lib/api-types";
+import {
+  Radio,
+  Users,
+  Copy,
+  CheckCircle2,
+  Circle,
+  AlertCircle,
+  Loader2,
+} from "lucide-react";
+
+export default function LivePage() {
+  const [loading, setLoading] = useState(false);
+  const [liveInfo, setLiveInfo] = useState<LiveInfoType | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleParse = useCallback(async (url: string) => {
+    setLoading(true);
+    setLiveInfo(null);
+    setError(null);
+
+    const res = await getLiveInfo(url);
+    if (res.success && res.data) {
+      setLiveInfo(res.data);
+    } else {
+      setError(res.error || "获取直播信息失败");
+    }
+    setLoading(false);
+  }, []);
+
+  const handleCopy = (text: string, type: string) => {
+    navigator.clipboard.writeText(text);
+    setCopied(type);
+    window.setTimeout(() => setCopied(null), 2000);
+  };
+
+  return (
+    <>
+      <Header title="直播" description="获取直播信息和流地址" />
+
+      <div className="space-y-6">
+        <UrlInput
+          onSubmit={handleParse}
+          loading={loading}
+          placeholder="粘贴直播间链接..."
+        />
+
+        {error && (
+          <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {loading && (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        )}
+
+        {liveInfo && (
+          <div className="space-y-4">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-lg">{liveInfo.title}</CardTitle>
+                  <Badge variant={liveInfo.is_live ? "default" : "secondary"}>
+                    {liveInfo.is_live ? (
+                      <><Circle className="h-2 w-2 fill-current mr-1" />直播中</>
+                    ) : "未开播"}
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-3 gap-4 text-sm">
+                  <div>
+                    <p className="text-muted-foreground">主播</p>
+                    <p className="font-medium">{liveInfo.nickname}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">观看人数</p>
+                    <p className="font-medium flex items-center gap-1">
+                      <Users className="h-4 w-4" />
+                      {liveInfo.user_count}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">房间号</p>
+                    <p className="font-medium">{liveInfo.room_id}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {liveInfo.is_live && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Radio className="h-4 w-4" />
+                    流地址
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {liveInfo.flv_urls?.length > 0 && (
+                    <div className="space-y-2">
+                      <Label>FLV</Label>
+                      {liveInfo.flv_urls.map((url, i) => (
+                        <div key={i} className="flex gap-2">
+                          <Input value={url} readOnly className="flex-1 font-mono text-xs" />
+                          <Button variant="outline" size="icon" onClick={() => handleCopy(url, `flv-${i}`)}>
+                            {copied === `flv-${i}` ? <CheckCircle2 className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {liveInfo.m3u8_urls?.length > 0 && (
+                    <div className="space-y-2">
+                      <Label>M3U8</Label>
+                      {liveInfo.m3u8_urls.map((url, i) => (
+                        <div key={i} className="flex gap-2">
+                          <Input value={url} readOnly className="flex-1 font-mono text-xs" />
+                          <Button variant="outline" size="icon" onClick={() => handleCopy(url, `m3u8-${i}`)}>
+                            {copied === `m3u8-${i}` ? <CheckCircle2 className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}

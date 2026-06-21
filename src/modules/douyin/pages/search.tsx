@@ -1,27 +1,19 @@
 import { useState } from "react";
 import { Header } from "@/components/layout/header";
-import { useMounted } from "@/hooks/use-safe-timer";
 import { VideoCard } from "@/components/shared/video-card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Search, Loader2 } from "lucide-react";
+import { search } from "@/lib/api";
+import type { VideoItem } from "@/lib/api-types";
+import { Search, Loader2, AlertCircle } from "lucide-react";
 
-interface SearchResult {
-  id: string;
-  title: string;
-  author: string;
-  duration: string;
-  diggCount: number;
-  commentCount: number;
-}
-
-export function SearchPage() {
+export default function SearchPage() {
   const [keyword, setKeyword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [results, setResults] = useState<SearchResult[]>([]);
+  const [results, setResults] = useState<VideoItem[]>([]);
   const [searched, setSearched] = useState(false);
-  const mountedRef = useMounted();
+  const [error, setError] = useState<string | null>(null);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,30 +21,16 @@ export function SearchPage() {
 
     setLoading(true);
     setSearched(true);
+    setError(null);
 
-    // 模拟搜索
-    setTimeout(() => {
-      if (!mountedRef.current) return;
-      setResults([
-        {
-          id: "1",
-          title: "搜索结果示例 1",
-          author: "用户A",
-          duration: "00:15",
-          diggCount: 5200,
-          commentCount: 320,
-        },
-        {
-          id: "2",
-          title: "搜索结果示例 2",
-          author: "用户B",
-          duration: "01:20",
-          diggCount: 1800,
-          commentCount: 95,
-        },
-      ]);
-      setLoading(false);
-    }, 1000);
+    const res = await search(keyword);
+    if (res.success && res.data?.videos) {
+      setResults(res.data.videos);
+    } else {
+      setResults([]);
+      if (!res.success) setError(res.error || "搜索失败");
+    }
+    setLoading(false);
   };
 
   return (
@@ -76,6 +54,13 @@ export function SearchPage() {
           </Button>
         </form>
 
+        {error && (
+          <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
         {searched && (
           <>
             {results.length === 0 ? (
@@ -89,12 +74,13 @@ export function SearchPage() {
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                 {results.map((item) => (
                   <VideoCard
-                    key={item.id}
-                    title={item.title}
+                    key={item.aweme_id}
+                    title={item.desc}
                     author={item.author}
-                    duration={item.duration}
-                    diggCount={item.diggCount}
-                    commentCount={item.commentCount}
+                    duration={String(item.duration)}
+                    diggCount={item.digg_count}
+                    commentCount={item.comment_count}
+                    shareCount={item.share_count}
                   />
                 ))}
               </div>

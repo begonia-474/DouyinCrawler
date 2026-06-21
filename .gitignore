@@ -66,6 +66,7 @@ downloads/**/*.m4a
 # 其他数据目录
 data/
 output/
+Download/
 test_Download/
 
 # CodeGraph 索引（本地生成）
