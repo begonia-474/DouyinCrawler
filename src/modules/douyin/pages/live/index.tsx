@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { getLiveInfo } from "@/lib/api";
+import { getLiveInfo, startLiveRecord, stopLiveRecord } from "@/lib/api";
 import type { LiveInfo as LiveInfoType } from "@/lib/api-types";
 import {
   Radio,
@@ -16,6 +16,8 @@ import {
   Circle,
   AlertCircle,
   Loader2,
+  Disc,
+  Square,
 } from "lucide-react";
 
 export default function LivePage() {
@@ -23,11 +25,15 @@ export default function LivePage() {
   const [liveInfo, setLiveInfo] = useState<LiveInfoType | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [recording, setRecording] = useState(false);
+  const [recordTaskId, setRecordTaskId] = useState<string | null>(null);
+  const [recordLoading, setRecordLoading] = useState(false);
 
   const handleParse = useCallback(async (url: string) => {
     setLoading(true);
     setLiveInfo(null);
     setError(null);
+    lastParsedUrl.current = url;
 
     const res = await getLiveInfo(url);
     if (res.success && res.data) {
@@ -44,6 +50,35 @@ export default function LivePage() {
     window.setTimeout(() => setCopied(null), 2000);
   };
 
+  const lastParsedUrl = { current: "" };
+
+  const handleStartRecord = useCallback(async () => {
+    if (!lastParsedUrl.current) return;
+    setRecordLoading(true);
+    const res = await startLiveRecord(lastParsedUrl.current);
+    if (res.success && res.data) {
+      setRecording(true);
+      setRecordTaskId(res.data.task_id);
+      setError(null);
+    } else {
+      setError(res.error || "启动录制失败");
+    }
+    setRecordLoading(false);
+  }, []);
+
+  const handleStopRecord = useCallback(async () => {
+    if (!recordTaskId) return;
+    setRecordLoading(true);
+    const res = await stopLiveRecord(recordTaskId);
+    if (res.success) {
+      setRecording(false);
+      setRecordTaskId(null);
+    } else {
+      setError(res.error || "停止录制失败");
+    }
+    setRecordLoading(false);
+  }, [recordTaskId]);
+
   return (
     <>
       <Header title="直播" description="获取直播信息和流地址" />
@@ -53,6 +88,7 @@ export default function LivePage() {
           onSubmit={handleParse}
           loading={loading}
           placeholder="粘贴直播间链接..."
+          allowedTypes={["live"]}
         />
 
         {error && (
@@ -74,11 +110,19 @@ export default function LivePage() {
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-lg">{liveInfo.title}</CardTitle>
-                  <Badge variant={liveInfo.is_live ? "default" : "secondary"}>
-                    {liveInfo.is_live ? (
-                      <><Circle className="h-2 w-2 fill-current mr-1" />直播中</>
-                    ) : "未开播"}
-                  </Badge>
+                  <div className="flex items-center gap-2">
+                    {recording && (
+                      <Badge variant="destructive" className="animate-pulse">
+                        <Disc className="h-3 w-3 mr-1" />
+                        录制中
+                      </Badge>
+                    )}
+                    <Badge variant={liveInfo.is_live ? "default" : "secondary"}>
+                      {liveInfo.is_live ? (
+                        <><Circle className="h-2 w-2 fill-current mr-1" />直播中</>
+                      ) : "未开播"}
+                    </Badge>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent>
@@ -99,6 +143,30 @@ export default function LivePage() {
                     <p className="font-medium">{liveInfo.room_id}</p>
                   </div>
                 </div>
+
+                {liveInfo.is_live && (
+                  <div className="mt-4 pt-4 border-t">
+                    {!recording ? (
+                      <Button onClick={handleStartRecord} disabled={recordLoading}>
+                        {recordLoading ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <Disc className="h-4 w-4 mr-2" />
+                        )}
+                        开始录制
+                      </Button>
+                    ) : (
+                      <Button variant="destructive" onClick={handleStopRecord} disabled={recordLoading}>
+                        {recordLoading ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <Square className="h-4 w-4 mr-2" />
+                        )}
+                        停止录制
+                      </Button>
+                    )}
+                  </div>
+                )}
               </CardContent>
             </Card>
 

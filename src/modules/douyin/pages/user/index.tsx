@@ -8,13 +8,13 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
-  getUserProfile, getUserPosts, getUserLikes, getUserCollects,
+  getUserProfile, getUserPosts,
   getUserFollowing, getUserFollowers, downloadOne,
 } from "@/lib/api";
-import type { UserProfile as UserProfileType, VideoItem, CollectsFolder, FollowItem } from "@/lib/api-types";
+import type { UserProfile as UserProfileType, VideoItem, FollowItem } from "@/lib/api-types";
 import {
-  Download, Users, Heart, Video, FolderOpen, Loader2,
-  ChevronRight, UserPlus, UserCheck, ThumbsUp, AlertCircle,
+  Download, Users, Heart, Video, Loader2,
+  UserPlus, UserCheck, ThumbsUp, AlertCircle,
 } from "lucide-react";
 
 function formatCount(n: number): string {
@@ -53,8 +53,6 @@ export default function UserPage() {
   const [loading, setLoading] = useState(false);
   const [profile, setProfile] = useState<UserProfileType | null>(null);
   const [videos, setVideos] = useState<VideoItem[]>([]);
-  const [likes, setLikes] = useState<VideoItem[]>([]);
-  const [collects, setCollects] = useState<CollectsFolder[]>([]);
   const [following, setFollowing] = useState<FollowItem[]>([]);
   const [followers, setFollowers] = useState<FollowItem[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -63,8 +61,6 @@ export default function UserPage() {
     setLoading(true);
     setProfile(null);
     setVideos([]);
-    setLikes([]);
-    setCollects([]);
     setFollowing([]);
     setFollowers([]);
     setError(null);
@@ -79,17 +75,13 @@ export default function UserPage() {
     }
 
     // 并行加载其他数据
-    const [postsRes, likesRes, collectsRes, followingRes, followersRes] = await Promise.all([
+    const [postsRes, followingRes, followersRes] = await Promise.all([
       getUserPosts(url),
-      getUserLikes(url),
-      getUserCollects(),
       getUserFollowing(url),
       getUserFollowers(url),
     ]);
 
     if (postsRes.success && postsRes.data?.videos) setVideos(postsRes.data.videos);
-    if (likesRes.success && likesRes.data?.videos) setLikes(likesRes.data.videos);
-    if (collectsRes.success && collectsRes.data?.collects) setCollects(collectsRes.data.collects as unknown as CollectsFolder[]);
     if (followingRes.success && followingRes.data?.followings) setFollowing(followingRes.data.followings);
     if (followersRes.success && followersRes.data?.followers) setFollowers(followersRes.data.followers);
 
@@ -104,7 +96,7 @@ export default function UserPage() {
 
   return (
     <>
-      <Header title="用户主页" description="查看用户作品、喜欢、收藏、关注">
+      <Header title="用户主页" description="查看用户资料和作品">
         {profile && (
           <Button onClick={handleDownloadAll}>
             <Download className="h-4 w-4 mr-2" />
@@ -114,7 +106,7 @@ export default function UserPage() {
       </Header>
 
       <div className="space-y-6">
-        <UrlInput onSubmit={handleParse} loading={loading} placeholder="粘贴用户主页链接..." />
+        <UrlInput onSubmit={handleParse} loading={loading} placeholder="粘贴用户主页链接..." allowedTypes={["user"]} />
 
         {error && (
           <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
@@ -173,8 +165,6 @@ export default function UserPage() {
             <Tabs defaultValue="posts">
               <TabsList>
                 <TabsTrigger value="posts">作品<Badge variant="secondary" className="ml-1.5">{videos.length}</Badge></TabsTrigger>
-                <TabsTrigger value="likes">喜欢<Badge variant="secondary" className="ml-1.5">{likes.length}</Badge></TabsTrigger>
-                <TabsTrigger value="collects">收藏夹<Badge variant="secondary" className="ml-1.5">{collects.length}</Badge></TabsTrigger>
                 <TabsTrigger value="following">关注<Badge variant="secondary" className="ml-1.5">{following.length}</Badge></TabsTrigger>
                 <TabsTrigger value="followers">粉丝<Badge variant="secondary" className="ml-1.5">{followers.length}</Badge></TabsTrigger>
               </TabsList>
@@ -193,39 +183,6 @@ export default function UserPage() {
                     />
                   ))}
                 </div>
-              </TabsContent>
-
-              <TabsContent value="likes" className="mt-4">
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                  {likes.map((video) => (
-                    <VideoCard
-                      key={video.aweme_id}
-                      title={video.desc}
-                      author={profile.nickname}
-                      duration={formatDuration(video.duration)}
-                      diggCount={video.digg_count}
-                      commentCount={video.comment_count}
-                      shareCount={video.share_count}
-                    />
-                  ))}
-                </div>
-              </TabsContent>
-
-              <TabsContent value="collects" className="mt-4 space-y-3">
-                {collects.map((folder) => (
-                  <Card key={folder.id} className="hover:bg-accent/50 transition-colors cursor-pointer">
-                    <CardContent className="p-4 flex items-center gap-4">
-                      <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                        <FolderOpen className="h-5 w-5 text-primary" />
-                      </div>
-                      <div className="flex-1">
-                        <h4 className="text-sm font-medium">{folder.name}</h4>
-                        <p className="text-xs text-muted-foreground">{folder.count} 个视频</p>
-                      </div>
-                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                    </CardContent>
-                  </Card>
-                ))}
               </TabsContent>
 
               <TabsContent value="following" className="mt-4 space-y-1">

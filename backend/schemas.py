@@ -65,3 +65,9 @@ class ConfigRequest(BaseModel):
 
 class LiveRecordRequest(BaseModel):
     url: str
+
+
+class MusicDownloadRequest(BaseModel):
+    play_url: str
+    title: str
+    author: str = ""

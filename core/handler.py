@@ -41,6 +41,28 @@ class DouyinHandler:
         return Downloader(self.cookie, progress_callback=progress_callback)
 
     # ============================================================
+    # 单视频解析 (parse)
+    # ============================================================
+
+    async def handle_parse_video(self, url: str) -> dict:
+        """只解析视频信息，不下载"""
+        aweme_id = await AwemeIdFetcher.get_aweme_id(url)
+        if not aweme_id:
+            return {"success": False, "error": "无法从 URL 提取 aweme_id"}
+
+        async with self._make_crawler() as crawler:
+            data = await crawler.fetch_post_detail(aweme_id)
+
+        if data.get("status_code", -1) != 0:
+            return {"success": False, "error": f"API 错误: {data.get('status_msg', 'unknown')}"}
+
+        detail = PostDetailFilter(data)
+        if detail.is_prohibited:
+            return {"success": False, "error": "视频侵权不可用"}
+
+        return {"success": True, "detail": detail.to_dict()}
+
+    # ============================================================
     # 单视频下载 (one)
     # ============================================================
 
@@ -245,6 +267,31 @@ class DouyinHandler:
             collects_filter = UserCollectsFilter(data)
             return {"success": True, "collects": collects_filter.to_list()}
 
+    async def handle_collects_video_list(self, collects_id: str) -> dict:
+        """获取收藏夹视频列表（不下载）"""
+        downloaded = 0
+        cursor = 0
+        all_details = []
+
+        async with self._make_crawler() as crawler:
+            while downloaded < self.max_counts:
+                current_request_size = min(self.page_counts, self.max_counts - downloaded)
+                data = await crawler.fetch_user_collects_video(collects_id, cursor, current_request_size)
+                video_filter = UserPostFilter(data)
+
+                for detail in video_filter.get_video_list():
+                    if downloaded >= self.max_counts:
+                        break
+                    all_details.append(detail)
+                    downloaded += 1
+
+                if not video_filter.has_more:
+                    break
+                cursor = video_filter.max_cursor
+                await asyncio.sleep(self.timeout)
+
+        return {"success": True, "videos": [d.to_dict() for d in all_details]}
+
     async def handle_collects_video(self, collects_id: str, progress_callback=None) -> dict:
         """下载收藏夹中的视频"""
         downloaded = 0
@@ -383,10 +430,12 @@ class DouyinHandler:
         if not m3u8_url:
             return {"success": False, "error": "拉流地址为空"}
 
-        # 构建保存路径
+        # 构建保存路径（对齐 f2 命名：{create}_{desc}_live.flv）
         nickname = sanitize_filename(live_filter.nickname or "unknown")
         save_dir = self.download_path / nickname
-        filename = f"{nickname}_{live_filter.room_id}_live.flv"
+        create_str = time.strftime("%Y-%m-%d_%H-%M-%S")
+        title = sanitize_filename(live_filter.live_title or "live")
+        filename = f"{create_str}_{title}_live.flv"
         full_path = save_dir / filename
 
         async with self._make_downloader(progress_callback) as dl:
@@ -537,9 +586,22 @@ class DouyinHandler:
         music_filter = UserMusicCollectionFilter(data)
         return {
             "success": True,
-            "music_list": music_filter.music_list,
+            "music_list": music_filter.to_list(),
             "has_more": music_filter.has_more,
         }
+
+    async def handle_download_music(self, play_url: str, title: str, author: str) -> dict:
+        """下载单首音乐"""
+        if not play_url:
+            return {"success": False, "error": "音乐播放地址为空"}
+
+        filename = sanitize_filename(f"{author} - {title}" if author else title)
+        save_dir = self.download_path / "music"
+        save_dir.mkdir(parents=True, exist_ok=True)
+
+        async with self._make_downloader() as dl:
+            path = await dl.download_music(play_url, save_dir, filename)
+        return {"success": True, "path": str(path)}
 
     # ============================================================
     # 关注/粉丝 (following/follower)

@@ -4,6 +4,7 @@ import {
   FolderDown,
   Rss,
   Heart,
+  Music,
   Database,
   Settings,
   Video,
@@ -23,6 +24,7 @@ const navItems = [
   { to: "/downloads", icon: FolderDown, label: "下载记录" },
   { to: "/douyin/feed", icon: Rss, label: "Feed" },
   { to: "/douyin/favorites", icon: Heart, label: "收藏" },
+  { to: "/douyin/music", icon: Music, label: "音乐" },
   { to: "/douyin/library", icon: Database, label: "资料库" },
 ];
 

@@ -126,7 +126,7 @@ class UserCollectsFilter:
         result = []
         for c in self.collects_list:
             result.append({
-                "collects_id": str(c.get("id", "")),
+                "id": str(c.get("id", "")),
                 "name": c.get("name", ""),
                 "count": c.get("collects_count", 0),
             })
@@ -150,6 +150,26 @@ class UserMusicCollectionFilter:
     @property
     def cursor(self) -> int:
         return self._data.get("cursor", 0)
+
+    def to_list(self) -> list[dict]:
+        result = []
+        for m in self.music_list:
+            play_url = ""
+            url_list = get_nested(m, "play_url", "url_list", default=[])
+            if url_list:
+                play_url = url_list[0]
+            cover = get_nested(m, "cover_hd", "url_list", 0, default="")
+            result.append({
+                "music_id": str(m.get("id", "")),
+                "mid": str(m.get("mid", "")),
+                "title": m.get("title", ""),
+                "author": m.get("author", ""),
+                "owner_nickname": m.get("owner_nickname", ""),
+                "duration": m.get("duration", 0),
+                "cover": cover,
+                "play_url": play_url,
+            })
+        return result
 
 
 class UserFollowingFilter:

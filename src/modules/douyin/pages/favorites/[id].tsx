@@ -1,0 +1,106 @@
+import { useState, useCallback, useEffect } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { Header } from "@/components/layout/header";
+import { VideoCard } from "@/components/shared/video-card";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { getCollectsVideoList, downloadOne } from "@/lib/api";
+import type { VideoItem } from "@/lib/api-types";
+import { Loader2, AlertCircle, Download, ArrowLeft } from "lucide-react";
+
+function formatDuration(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+}
+
+export default function CollectsDetailPage() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(false);
+  const [videos, setVideos] = useState<VideoItem[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchVideos = useCallback(async () => {
+    if (!id) return;
+    setLoading(true);
+    setError(null);
+
+    const res = await getCollectsVideoList(id);
+    if (res.success && res.data?.videos) {
+      setVideos(res.data.videos);
+    } else {
+      setError(res.error || "获取收藏夹视频失败");
+    }
+
+    setLoading(false);
+  }, [id]);
+
+  useEffect(() => {
+    fetchVideos();
+  }, [fetchVideos]);
+
+  const handleDownloadAll = async () => {
+    for (const video of videos) {
+      await downloadOne(`https://www.douyin.com/video/${video.aweme_id}`);
+    }
+  };
+
+  return (
+    <>
+      <Header title="收藏夹详情" description={`共 ${videos.length} 个视频`}>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => navigate("/douyin/favorites")}>
+            <ArrowLeft className="h-4 w-4 mr-1" />
+            返回
+          </Button>
+          {videos.length > 0 && (
+            <Button size="sm" onClick={handleDownloadAll}>
+              <Download className="h-4 w-4 mr-1" />
+              全部下载
+            </Button>
+          )}
+        </div>
+      </Header>
+
+      <div className="space-y-6">
+        {error && (
+          <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {loading && (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        )}
+
+        {!loading && videos.length === 0 && !error && (
+          <Card>
+            <CardContent className="p-8 text-center">
+              <p className="text-muted-foreground">暂无视频</p>
+            </CardContent>
+          </Card>
+        )}
+
+        {!loading && videos.length > 0 && (
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            {videos.map((video) => (
+              <VideoCard
+                key={video.aweme_id}
+                title={video.desc}
+                author={video.author}
+                duration={formatDuration(video.duration)}
+                diggCount={video.digg_count}
+                commentCount={video.comment_count}
+                shareCount={video.share_count}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}

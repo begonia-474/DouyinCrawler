@@ -8,6 +8,7 @@ interface UrlInputProps {
   onSubmit: (url: string) => void;
   loading?: boolean;
   placeholder?: string;
+  allowedTypes?: UrlType[];
 }
 
 type UrlType = "video" | "user" | "mix" | "live" | "unknown";
@@ -30,18 +31,25 @@ const typeLabels: Record<UrlType, string> = {
   unknown: "未知",
 };
 
-export function UrlInput({ onSubmit, loading, placeholder }: UrlInputProps) {
+export function UrlInput({ onSubmit, loading, placeholder, allowedTypes }: UrlInputProps) {
   const [url, setUrl] = useState("");
+  const [typeError, setTypeError] = useState<string | null>(null);
   const urlType = detectUrlType(url);
 
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
-      if (url.trim()) {
-        onSubmit(url.trim());
+      setTypeError(null);
+      if (!url.trim()) return;
+
+      if (allowedTypes && allowedTypes.length > 0 && urlType !== "unknown" && !allowedTypes.includes(urlType)) {
+        setTypeError(`当前页面不支持「${typeLabels[urlType]}」类型链接，请前往「${typeLabels[allowedTypes[0]]}」页面`);
+        return;
       }
+
+      onSubmit(url.trim());
     },
-    [url, onSubmit]
+    [url, onSubmit, allowedTypes, urlType]
   );
 
   const handlePaste = useCallback(() => {
@@ -51,33 +59,38 @@ export function UrlInput({ onSubmit, loading, placeholder }: UrlInputProps) {
   }, []);
 
   return (
-    <form onSubmit={handleSubmit} className="flex gap-2 items-start">
-      <div className="flex-1 relative">
-        <Input
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          placeholder={placeholder || "粘贴抖音链接..."}
-          className="pr-20"
-        />
-        {url && urlType !== "unknown" && (
-          <Badge
-            variant="secondary"
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-xs"
-          >
-            {typeLabels[urlType]}
-          </Badge>
-        )}
-      </div>
-      <Button type="button" variant="outline" size="icon" onClick={handlePaste}>
-        <Link className="h-4 w-4" />
-      </Button>
-      <Button type="submit" disabled={!url.trim() || loading}>
-        {loading ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
-        ) : (
-          "解析"
-        )}
-      </Button>
-    </form>
+    <div className="space-y-2">
+      <form onSubmit={handleSubmit} className="flex gap-2 items-start">
+        <div className="flex-1 relative">
+          <Input
+            value={url}
+            onChange={(e) => { setUrl(e.target.value); setTypeError(null); }}
+            placeholder={placeholder || "粘贴抖音链接..."}
+            className="pr-20"
+          />
+          {url && urlType !== "unknown" && (
+            <Badge
+              variant="secondary"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-xs"
+            >
+              {typeLabels[urlType]}
+            </Badge>
+          )}
+        </div>
+        <Button type="button" variant="outline" size="icon" onClick={handlePaste}>
+          <Link className="h-4 w-4" />
+        </Button>
+        <Button type="submit" disabled={!url.trim() || loading}>
+          {loading ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            "解析"
+          )}
+        </Button>
+      </form>
+      {typeError && (
+        <p className="text-xs text-destructive">{typeError}</p>
+      )}
+    </div>
   );
 }

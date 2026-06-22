@@ -6,7 +6,6 @@ import {
   User,
   Radio,
   Heart,
-  FolderOpen,
   Layers,
 } from "lucide-react";
 
@@ -46,15 +45,6 @@ const features = [
     path: "/douyin/likes",
     color: "text-pink-500",
     bgColor: "bg-pink-500/10",
-  },
-  {
-    id: "collects",
-    title: "用户收藏",
-    description: "查看用户的收藏夹",
-    icon: FolderOpen,
-    path: "/douyin/collects",
-    color: "text-purple-500",
-    bgColor: "bg-purple-500/10",
   },
   {
     id: "mix",

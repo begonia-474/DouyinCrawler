@@ -109,7 +109,7 @@ export default function VideoPage() {
       <Header title="单视频下载" description="粘贴视频或图文链接，解析后下载" />
 
       <div className="space-y-6">
-        <UrlInput onSubmit={handleParse} loading={loading} />
+        <UrlInput onSubmit={handleParse} loading={loading} allowedTypes={["video"]} />
 
         {error && (
           <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">

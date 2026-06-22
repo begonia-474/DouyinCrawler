@@ -10,6 +10,7 @@ from backend.schemas import (
     ApiResponse, UrlRequest, KeywordRequest, CommentRequest,
     CommentReplyRequest, FeedRequest, MusicRequest, UserListRequest,
     CollectsVideoRequest, ConfigRequest, LiveRecordRequest,
+    MusicDownloadRequest,
 )
 from backend.task_manager import task_manager
 from core.utils import detect_url_type
@@ -78,14 +79,8 @@ async def post_detail(req: UrlRequest):
     logger.info("解析: url=%s, 类型=%s", req.url, url_type)
     handler = task_manager.handler
     if url_type == "one":
-        return await safe_call(handler.handle_one_video(req.url), "单视频解析")
-    elif url_type == "post":
-        return await safe_call(handler.handle_user_post(req.url), "用户主页解析")
-    elif url_type == "mix":
-        return await safe_call(handler.handle_user_mix(req.url), "合集解析")
-    elif url_type == "live":
-        return await safe_call(handler.handle_user_live(req.url), "直播解析")
-    return await safe_call(handler.handle_one_video(req.url), "默认解析")
+        return await safe_call(handler.handle_parse_video(req.url), "单视频解析")
+    return ApiResponse(success=False, error=f"链接类型为「{url_type}」，请使用对应的接口")
 
 
 @app.post("/api/post/stats")
@@ -95,6 +90,9 @@ async def post_stats(req: UrlRequest):
 
 @app.post("/api/download/one")
 async def download_one(req: UrlRequest):
+    url_type = detect_url_type(req.url)
+    if url_type != "one":
+        return ApiResponse(success=False, error=f"链接类型为「{url_type}」，单视频下载仅支持视频/图文链接")
     return await safe_call(task_manager.handler.handle_one_video(req.url), "单视频下载")
 
 
@@ -162,6 +160,14 @@ async def music_collection(req: MusicRequest):
     )
 
 
+@app.post("/api/music/download")
+async def music_download(req: MusicDownloadRequest):
+    return await safe_call(
+        task_manager.handler.handle_download_music(req.play_url, req.title, req.author),
+        "音乐下载",
+    )
+
+
 # === 用户 ===
 
 @app.post("/api/user/profile")
@@ -208,7 +214,15 @@ async def user_collects():
 async def user_collects_video(req: CollectsVideoRequest):
     return await safe_call(
         task_manager.handler.handle_collects_video(req.collects_id),
-        "收藏夹视频",
+        "收藏夹视频下载",
+    )
+
+
+@app.post("/api/user/collects/video/list")
+async def user_collects_video_list(req: CollectsVideoRequest):
+    return await safe_call(
+        task_manager.handler.handle_collects_video_list(req.collects_id),
+        "收藏夹视频列表",
     )
 
 

@@ -82,7 +82,7 @@ export default function MixPage() {
       </Header>
 
       <div className="space-y-6">
-        <UrlInput onSubmit={handleParse} loading={loading} placeholder="粘贴合集链接..." />
+        <UrlInput onSubmit={handleParse} loading={loading} placeholder="粘贴合集链接..." allowedTypes={["mix"]} />
 
         {error && (
           <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">

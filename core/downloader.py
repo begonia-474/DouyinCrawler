@@ -11,6 +11,10 @@ from core.utils import sanitize_filename, format_filename  # noqa: F401
 from core.utils import get_segments_from_m3u8, get_content_length, get_chunk_size
 
 
+# 已下载 TS 分片记录上限，超过后清空以释放内存（允许少量重复下载）
+MAX_SEGMENT_COUNT = 1000
+
+
 class DownloadTask:
     """单个下载任务"""
 
@@ -175,6 +179,44 @@ class Downloader:
 
         return full_path
 
+    async def download_music(
+        self,
+        music_url: str,
+        save_dir: str | Path,
+        filename: str,
+        task_id: str | None = None,
+    ) -> Path:
+        """下载音乐文件"""
+        save_path = Path(save_dir)
+        save_path.mkdir(parents=True, exist_ok=True)
+
+        task = DownloadTask(url=music_url, save_path=save_path, filename=filename, suffix=".mp3")
+        tid = task_id or filename
+        self._tasks[tid] = task
+
+        headers = self._get_headers(task)
+
+        try:
+            task.status = "downloading"
+            async with self._client.stream("GET", music_url, headers=headers) as resp:
+                resp.raise_for_status()
+                task.total_size = int(resp.headers.get("content-length", 0))
+
+                async with aiofiles.open(task.full_path, "wb") as f:
+                    async for chunk in resp.aiter_bytes(self.CHUNK_SIZE):
+                        await f.write(chunk)
+                        task.downloaded += len(chunk)
+                        if self.progress_callback:
+                            self.progress_callback(tid, task.downloaded, task.total_size)
+
+            task.status = "completed"
+            return task.full_path
+
+        except Exception as e:
+            task.status = "error"
+            task.error_msg = str(e)
+            raise
+
     async def batch_download(
         self,
         tasks: list[dict],
@@ -298,7 +340,7 @@ class Downloader:
                             except Exception:
                                 pass
 
-                    if len(downloaded_segments) > self.MAX_SEGMENT_COUNT:
+                    if len(downloaded_segments) > MAX_SEGMENT_COUNT:
                         downloaded_segments = set()
 
                 # 等待最后一个分片的时长，避免过快请求
