@@ -61,3 +61,7 @@ class ConfigRequest(BaseModel):
     naming: Optional[str] = None
     encryption: Optional[str] = None
     proxy: Optional[str] = None
+
+
+class LiveRecordRequest(BaseModel):
+    url: str

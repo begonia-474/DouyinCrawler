@@ -14,6 +14,7 @@ from core.filter import (
 )
 from core.utils import (
     AwemeIdFetcher, SecUserIdFetcher, MixIdFetcher, WebCastIdFetcher,
+    sanitize_filename,
 )
 
 
@@ -163,6 +164,8 @@ class DouyinHandler:
             while downloaded < self.max_counts:
                 current_request_size = min(self.page_counts, self.max_counts - downloaded)
                 data = await crawler.fetch_user_favorite(sec_user_id, max_cursor, current_request_size)
+                if not data or not data.get("aweme_list"):
+                    break
                 video_filter = UserPostFilter(data)
 
                 for detail in video_filter.get_video_list():
@@ -342,12 +345,56 @@ class DouyinHandler:
         if not live_filter.is_live:
             return {"success": False, "error": f"未在直播中 (status={live_filter.live_status})"}
 
+        # 转换为前端期望的格式
+        flv_dict = live_filter.flv_pull_url or {}
+        m3u8_dict = live_filter.m3u8_pull_url or {}
+
         return {
             "success": True,
-            "live_info": live_filter.to_dict(),
-            "m3u8_urls": live_filter.m3u8_pull_url,
-            "flv_urls": live_filter.flv_pull_url,
+            "title": live_filter.live_title,
+            "nickname": live_filter.nickname,
+            "is_live": live_filter.is_live,
+            "user_count": live_filter.user_count,
+            "room_id": live_filter.room_id,
+            "cover": live_filter.cover_url,
+            "flv_urls": list(flv_dict.values()),
+            "m3u8_urls": list(m3u8_dict.values()),
         }
+
+    async def handle_live_record(self, url: str, task_id: str, progress_callback=None, stop_event=None) -> dict:
+        """录制直播流"""
+        webcast_id = await WebCastIdFetcher.get_webcast_id(url)
+        if not webcast_id:
+            return {"success": False, "error": "无法从 URL 提取直播 ID"}
+
+        async with self._make_crawler() as crawler:
+            data = await crawler.fetch_live_info(web_rid=webcast_id)
+
+        live_filter = UserLiveFilter(data)
+        if not live_filter.is_live:
+            return {"success": False, "error": f"未在直播中 (status={live_filter.live_status})"}
+
+        m3u8_urls = live_filter.m3u8_pull_url
+        if not m3u8_urls:
+            return {"success": False, "error": "未获取到 m3u8 拉流地址"}
+
+        # 选择最高画质
+        m3u8_url = m3u8_urls.get("FULL_HD1") or m3u8_urls.get("HD1") or next(iter(m3u8_urls.values()))
+        if not m3u8_url:
+            return {"success": False, "error": "拉流地址为空"}
+
+        # 构建保存路径
+        nickname = sanitize_filename(live_filter.nickname or "unknown")
+        save_dir = self.download_path / nickname
+        filename = f"{nickname}_{live_filter.room_id}_live.flv"
+        full_path = save_dir / filename
+
+        async with self._make_downloader(progress_callback) as dl:
+            if stop_event:
+                dl._stop_event = stop_event
+            await dl.download_m3u8_stream(task_id, m3u8_url, full_path)
+
+        return {"success": True, "file": str(full_path), "room_id": live_filter.room_id}
 
     # ============================================================
     # 相关推荐 (related)

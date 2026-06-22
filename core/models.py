@@ -48,6 +48,10 @@ class BaseLiveModel(BaseModel):
     browser_platform: str = "Win32"
     browser_name: str = "Edge"
     browser_version: str = "130.0.0.0"
+    enter_source: str = ""
+    is_need_double_stream: str = "false"
+    insert_task_id: str = ""
+    live_reason: str = ""
 
 
 # === 用户相关 ===

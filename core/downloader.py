@@ -1,4 +1,4 @@
-"""视频下载器 — 断点续传、进度回调"""
+"""视频下载器 — 断点续传、进度回调、M3U8 直播流录制"""
 
 import httpx
 import asyncio
@@ -8,6 +8,7 @@ from typing import Callable
 
 # 文件名工具统一在 utils.py 维护；此处重新导出以保持向后兼容
 from core.utils import sanitize_filename, format_filename  # noqa: F401
+from core.utils import get_segments_from_m3u8, get_content_length, get_chunk_size
 
 
 class DownloadTask:
@@ -61,6 +62,7 @@ class Downloader:
             limits=httpx.Limits(max_connections=max_connections),
         )
         self._tasks: dict[str, DownloadTask] = {}
+        self._stop_event = asyncio.Event()
 
     async def close(self):
         await self._client.aclose()
@@ -203,3 +205,114 @@ class Downloader:
 
         await asyncio.gather(*[_download_one(t) for t in tasks])
         return results
+
+    # ============================================================
+    # M3U8 直播流录制
+    # ============================================================
+
+    def stop_stream(self):
+        """停止当前录制流"""
+        self._stop_event.set()
+
+    def reset_stop(self):
+        """重置停止信号（开始新录制前调用）"""
+        self._stop_event.clear()
+
+    async def download_m3u8_stream(
+        self,
+        task_id: str,
+        url: str,
+        full_path: Path,
+    ) -> Path:
+        """
+        录制 M3U8 直播流，TS 分片追加写入 .flv 文件
+
+        Args:
+            task_id: 任务 ID
+            url: m3u8 拉流地址
+            full_path: 保存文件路径
+
+        Returns:
+            保存的文件路径
+        """
+        full_path = Path(full_path)
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+
+        headers = {
+            "User-Agent": self._client.headers.get("User-Agent", "Mozilla/5.0"),
+            "Referer": "https://www.douyin.com/",
+            "Cookie": self.cookie,
+        }
+
+        total_downloaded = 0
+        default_chunks = 409600
+        downloaded_segments: set = set()
+
+        task = DownloadTask(url=url, save_path=full_path.parent, filename=full_path.stem, suffix="")
+        task.full_path = full_path
+        task.status = "recording"
+        self._tasks[task_id] = task
+
+        while not self._stop_event.is_set():
+            try:
+                segments = await get_segments_from_m3u8(url)
+                if not segments:
+                    task.status = "completed"
+                    return full_path
+
+                async with aiofiles.open(full_path, "ab") as file:
+                    for segment in segments:
+                        if self._stop_event.is_set():
+                            break
+
+                        if segment.absolute_uri in downloaded_segments:
+                            continue
+
+                        ts_url = segment.absolute_uri
+                        ts_content_length = await get_content_length(ts_url, headers)
+                        if ts_content_length == 0:
+                            ts_content_length = default_chunks
+
+                        try:
+                            req = self._client.build_request("GET", ts_url, headers=headers)
+                            resp = await self._client.send(req, stream=True)
+
+                            async for chunk in resp.aiter_bytes(get_chunk_size(ts_content_length)):
+                                if self._stop_event.is_set():
+                                    break
+                                await file.write(chunk)
+                                total_downloaded += len(chunk)
+                                task.downloaded = total_downloaded
+                                if self.progress_callback:
+                                    self.progress_callback(task_id, total_downloaded, 0)
+
+                            downloaded_segments.add(segment.absolute_uri)
+
+                        except httpx.ReadTimeout:
+                            continue
+                        except httpx.RemoteProtocolError:
+                            continue
+                        finally:
+                            try:
+                                await resp.aclose()
+                            except Exception:
+                                pass
+
+                    if len(downloaded_segments) > self.MAX_SEGMENT_COUNT:
+                        downloaded_segments = set()
+
+                # 等待最后一个分片的时长，避免过快请求
+                if segments:
+                    await asyncio.sleep(segments[-1].duration)
+
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code in (404, 504):
+                    task.status = "completed"
+                    return full_path
+                continue
+            except Exception:
+                task.status = "error"
+                return full_path
+
+        task.status = "stopped"
+        return full_path

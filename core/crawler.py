@@ -51,8 +51,8 @@ class DouyinCrawler:
         param_str = urlencode(params)
         if self.encryption == "ab":
             fp = BrowserFingerprintGenerator.generate_fingerprint("Edge")
-            ab = ABogus(self.UA, fp)
-            signed, _, _, _ = ab.generate(param_str, body)
+            ab = ABogus(fp=fp, user_agent=self.UA)
+            signed, _, _, _ = ab.generate_abogus(param_str, body)
         else:
             xb = XBogus(self.UA)
             signed, _, _ = xb.generate(param_str)

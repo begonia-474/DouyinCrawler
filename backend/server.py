@@ -9,7 +9,7 @@ from backend.logger import setup_logging, get_logger
 from backend.schemas import (
     ApiResponse, UrlRequest, KeywordRequest, CommentRequest,
     CommentReplyRequest, FeedRequest, MusicRequest, UserListRequest,
-    CollectsVideoRequest, ConfigRequest,
+    CollectsVideoRequest, ConfigRequest, LiveRecordRequest,
 )
 from backend.task_manager import task_manager
 from core.utils import detect_url_type
@@ -197,7 +197,7 @@ async def user_collection(req: UrlRequest):
 
 
 @app.post("/api/user/collects")
-async def user_collects(req: UrlRequest):
+async def user_collects():
     return await safe_call(
         task_manager.handler.handle_user_collects(),
         "收藏夹列表",
@@ -236,6 +236,32 @@ async def live_info(req: UrlRequest):
         task_manager.handler.handle_user_live(req.url),
         "直播信息",
     )
+
+
+@app.post("/api/live/record")
+async def live_record(req: LiveRecordRequest):
+    logger.info("启动直播录制: url=%s", req.url)
+    try:
+        task_id = await task_manager.start_live_record(req.url)
+        return ApiResponse(success=True, data={"task_id": task_id})
+    except Exception as e:
+        logger.exception("启动录制异常")
+        return ApiResponse(success=False, error=str(e))
+
+
+@app.post("/api/live/stop")
+async def live_stop(req: LiveRecordRequest):
+    """停止直播录制，url 字段传 task_id"""
+    logger.info("停止直播录制: task_id=%s", req.url)
+    ok = await task_manager.stop_live_record(req.url)
+    if ok:
+        return ApiResponse(success=True, data={"task_id": req.url})
+    return ApiResponse(success=False, error="未找到该录制任务")
+
+
+@app.get("/api/live/status")
+async def live_status():
+    return ApiResponse(success=True, data=task_manager.get_live_status())
 
 
 # === 合集 ===

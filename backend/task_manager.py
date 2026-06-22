@@ -1,6 +1,8 @@
 """管理 DouyinHandler 实例和配置，支持持久化"""
 
 import json
+import asyncio
+import uuid
 from pathlib import Path
 from backend.logger import get_logger
 from core.handler import DouyinHandler
@@ -18,6 +20,7 @@ class TaskManager:
         self._encryption: str = "ab"
         self._proxy: str = ""
         self._handler: DouyinHandler | None = None
+        self._live_tasks: dict[str, dict] = {}
         self._load_config()
 
     def _load_config(self):
@@ -91,6 +94,57 @@ class TaskManager:
             "encryption": self._encryption,
             "has_proxy": bool(self._proxy),
         }
+
+    # ============================================================
+    # 直播录制任务管理
+    # ============================================================
+
+    async def start_live_record(self, url: str) -> str:
+        """启动直播录制，返回 task_id"""
+        task_id = str(uuid.uuid4())[:8]
+        stop_event = asyncio.Event()
+        self._live_tasks[task_id] = {
+            "task_id": task_id,
+            "url": url,
+            "status": "starting",
+            "file": "",
+            "error": "",
+            "_stop_event": stop_event,
+        }
+
+        async def _run():
+            try:
+                self._live_tasks[task_id]["status"] = "recording"
+                result = await self.handler.handle_live_record(url, task_id, stop_event=stop_event)
+                if result.get("success"):
+                    self._live_tasks[task_id]["status"] = "completed"
+                    self._live_tasks[task_id]["file"] = result.get("file", "")
+                else:
+                    self._live_tasks[task_id]["status"] = "error"
+                    self._live_tasks[task_id]["error"] = result.get("error", "未知错误")
+            except Exception as e:
+                self._live_tasks[task_id]["status"] = "error"
+                self._live_tasks[task_id]["error"] = str(e)
+
+        asyncio.create_task(_run())
+        return task_id
+
+    async def stop_live_record(self, task_id: str) -> bool:
+        """停止直播录制"""
+        if task_id not in self._live_tasks:
+            return False
+        stop_event = self._live_tasks[task_id].get("_stop_event")
+        if stop_event:
+            stop_event.set()
+        self._live_tasks[task_id]["status"] = "stopping"
+        return True
+
+    def get_live_status(self) -> list[dict]:
+        """获取所有录制任务状态（排除内部字段）"""
+        return [
+            {k: v for k, v in t.items() if not k.startswith("_")}
+            for t in self._live_tasks.values()
+        ]
 
 
 task_manager = TaskManager()
