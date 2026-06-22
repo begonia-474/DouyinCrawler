@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { useLocation } from "react-router-dom";
 import { Header } from "@/components/layout/header";
 import { UrlInput } from "@/components/shared/url-input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,6 +22,9 @@ import {
 } from "lucide-react";
 
 export default function LivePage() {
+  const location = useLocation();
+  const initialUrl = (location.state as { url?: string })?.url || "";
+
   const [loading, setLoading] = useState(false);
   const [liveInfo, setLiveInfo] = useState<LiveInfoType | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
@@ -81,7 +85,7 @@ export default function LivePage() {
 
   return (
     <>
-      <Header title="直播" description="获取直播信息和流地址" />
+      <Header title="直播" description="获取直播信息和流地址" parent={{ label: "首页", path: "/douyin" }} />
 
       <div className="space-y-6">
         <UrlInput
@@ -89,6 +93,8 @@ export default function LivePage() {
           loading={loading}
           placeholder="粘贴直播间链接..."
           allowedTypes={["live"]}
+          defaultValue={initialUrl}
+          autoSubmit={!!initialUrl}
         />
 
         {error && (

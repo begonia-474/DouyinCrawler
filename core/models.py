@@ -212,7 +212,7 @@ class UserLive2(BaseLiveModel):
 
 
 class FollowingUserLive(BaseRequestModel):
-    scene: int = 0
+    scene: str = "aweme_pc_follow_top"
 
 
 class UserLiveStatus(BaseRequestModel):

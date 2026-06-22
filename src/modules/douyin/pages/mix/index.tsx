@@ -72,7 +72,7 @@ export default function MixPage() {
 
   return (
     <>
-      <Header title="合集" description="下载整个合集/播放列表">
+      <Header title="合集" description="下载整个合集/播放列表" parent={{ label: "首页", path: "/douyin" }}>
         {videos.length > 0 && (
           <Button onClick={handleDownloadAll} disabled={downloading}>
             {downloading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}

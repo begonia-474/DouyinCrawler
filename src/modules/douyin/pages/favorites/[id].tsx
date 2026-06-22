@@ -48,7 +48,7 @@ export default function CollectsDetailPage() {
 
   return (
     <>
-      <Header title="收藏夹详情" description={`共 ${videos.length} 个视频`}>
+      <Header title="收藏夹详情" description={`共 ${videos.length} 个视频`} parent={{ label: "我的收藏", path: "/douyin/favorites" }}>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => navigate("/douyin/favorites")}>
             <ArrowLeft className="h-4 w-4 mr-1" />

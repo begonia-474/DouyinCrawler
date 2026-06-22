@@ -8,6 +8,7 @@ import {
   Database,
   Settings,
   Video,
+  Radio,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -24,6 +25,7 @@ const navItems = [
   { to: "/downloads", icon: FolderDown, label: "下载记录" },
   { to: "/douyin/feed", icon: Rss, label: "Feed" },
   { to: "/douyin/favorites", icon: Heart, label: "收藏" },
+  { to: "/douyin/following-live", icon: Radio, label: "关注直播" },
   { to: "/douyin/music", icon: Music, label: "音乐" },
   { to: "/douyin/library", icon: Database, label: "资料库" },
 ];

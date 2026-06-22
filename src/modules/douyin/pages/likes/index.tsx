@@ -46,7 +46,7 @@ export default function LikesPage() {
 
   return (
     <>
-      <Header title="用户点赞" description="查看用户的点赞列表">
+      <Header title="用户点赞" description="查看用户的点赞列表" parent={{ label: "首页", path: "/douyin" }}>
         {likes.length > 0 && (
           <Button variant="outline" size="sm">
             <Download className="h-4 w-4 mr-1" />

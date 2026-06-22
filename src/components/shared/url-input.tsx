@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -9,6 +9,8 @@ interface UrlInputProps {
   loading?: boolean;
   placeholder?: string;
   allowedTypes?: UrlType[];
+  defaultValue?: string;
+  autoSubmit?: boolean;
 }
 
 type UrlType = "video" | "user" | "mix" | "live" | "unknown";
@@ -31,10 +33,16 @@ const typeLabels: Record<UrlType, string> = {
   unknown: "未知",
 };
 
-export function UrlInput({ onSubmit, loading, placeholder, allowedTypes }: UrlInputProps) {
-  const [url, setUrl] = useState("");
+export function UrlInput({ onSubmit, loading, placeholder, allowedTypes, defaultValue, autoSubmit }: UrlInputProps) {
+  const [url, setUrl] = useState(defaultValue || "");
   const [typeError, setTypeError] = useState<string | null>(null);
   const urlType = detectUrlType(url);
+
+  useEffect(() => {
+    if (defaultValue && autoSubmit) {
+      onSubmit(defaultValue);
+    }
+  }, [defaultValue, autoSubmit, onSubmit]);
 
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {

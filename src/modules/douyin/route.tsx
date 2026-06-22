@@ -5,6 +5,7 @@ const DouyinIndex = React.lazy(() => import("./pages/index"));
 const VideoPage = React.lazy(() => import("./pages/video"));
 const UserPage = React.lazy(() => import("./pages/user"));
 const LivePage = React.lazy(() => import("./pages/live"));
+const FollowingLivePage = React.lazy(() => import("./pages/following-live"));
 const LikesPage = React.lazy(() => import("./pages/likes"));
 const MixPage = React.lazy(() => import("./pages/mix"));
 const FeedPage = React.lazy(() => import("./pages/feed"));
@@ -12,12 +13,17 @@ const FavoritesPage = React.lazy(() => import("./pages/favorites"));
 const FavoritesDetailPage = React.lazy(() => import("./pages/favorites/[id]"));
 const MusicPage = React.lazy(() => import("./pages/music"));
 const LibraryPage = React.lazy(() => import("./pages/library"));
+const LibraryVideosPage = React.lazy(() => import("./pages/library/videos"));
+const LibraryImagesPage = React.lazy(() => import("./pages/library/images"));
+const LibraryLivePage = React.lazy(() => import("./pages/library/live"));
+const LibraryMusicPage = React.lazy(() => import("./pages/library/music"));
 
 export const douyinRoutes: RouteObject[] = [
   { index: true, element: <DouyinIndex /> },
   { path: "video", element: <VideoPage /> },
   { path: "user", element: <UserPage /> },
   { path: "live", element: <LivePage /> },
+  { path: "following-live", element: <FollowingLivePage /> },
   { path: "likes", element: <LikesPage /> },
   { path: "mix", element: <MixPage /> },
   { path: "feed", element: <FeedPage /> },
@@ -25,4 +31,8 @@ export const douyinRoutes: RouteObject[] = [
   { path: "favorites/:id", element: <FavoritesDetailPage /> },
   { path: "music", element: <MusicPage /> },
   { path: "library", element: <LibraryPage /> },
+  { path: "library/videos", element: <LibraryVideosPage /> },
+  { path: "library/images", element: <LibraryImagesPage /> },
+  { path: "library/live", element: <LibraryLivePage /> },
+  { path: "library/music", element: <LibraryMusicPage /> },
 ];

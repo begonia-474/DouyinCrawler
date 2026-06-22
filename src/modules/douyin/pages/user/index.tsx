@@ -96,7 +96,7 @@ export default function UserPage() {
 
   return (
     <>
-      <Header title="用户主页" description="查看用户资料和作品">
+      <Header title="用户主页" description="查看用户资料和作品" parent={{ label: "首页", path: "/douyin" }}>
         {profile && (
           <Button onClick={handleDownloadAll}>
             <Download className="h-4 w-4 mr-2" />

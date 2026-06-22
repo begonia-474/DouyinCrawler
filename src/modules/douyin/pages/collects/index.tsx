@@ -40,7 +40,7 @@ export default function CollectsPage() {
 
   return (
     <>
-      <Header title="用户收藏" description="查看用户的收藏夹">
+      <Header title="用户收藏" description="查看用户的收藏夹" parent={{ label: "首页", path: "/douyin" }}>
         {collects.length > 0 && (
           <Button variant="outline" size="sm">
             <Download className="h-4 w-4 mr-1" />

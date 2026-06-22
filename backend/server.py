@@ -278,6 +278,14 @@ async def live_status():
     return ApiResponse(success=True, data=task_manager.get_live_status())
 
 
+@app.get("/api/live/following")
+async def following_live():
+    return await safe_call(
+        task_manager.handler.handle_following_live(),
+        "关注直播列表",
+    )
+
+
 # === 合集 ===
 
 @app.post("/api/mix")

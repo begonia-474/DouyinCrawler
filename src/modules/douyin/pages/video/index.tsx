@@ -106,7 +106,7 @@ export default function VideoPage() {
 
   return (
     <>
-      <Header title="单视频下载" description="粘贴视频或图文链接，解析后下载" />
+      <Header title="单视频下载" description="粘贴视频或图文链接，解析后下载" parent={{ label: "首页", path: "/douyin" }} />
 
       <div className="space-y-6">
         <UrlInput onSubmit={handleParse} loading={loading} allowedTypes={["video"]} />
