@@ -146,8 +146,17 @@ impl Database {
         let conn = Connection::open(path)?;
         // 启用 WAL 模式，与 Python 侧一致
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
+        // 执行 WAL checkpoint，确保读取到最新数据
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
         // 自动建表（与 core/db.py 的 _create_tables 保持一致）
         conn.execute_batch(CREATE_TABLES_SQL)?;
+        // 验证数据
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM download_history",
+            [],
+            |row| row.get(0),
+        ).unwrap_or(0);
+        println!("[DB] 数据库打开成功，download_history 表有 {} 条记录", count);
         Ok(Database {
             conn: Mutex::new(conn),
         })
@@ -161,6 +170,10 @@ impl Database {
         download_type: Option<String>,
     ) -> Result<Vec<DownloadRecord>> {
         let conn = self.conn.lock().unwrap();
+
+        // 每次查询前执行 WAL checkpoint，确保读取到最新数据
+        conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);")?;
+
         let mut sql = String::from(
             "SELECT id, aweme_id, download_type, title, author_nickname, author_sec_uid, \
              file_path, file_size, cover_url, status, error_msg, created_at \
@@ -188,6 +201,7 @@ impl Database {
 
         let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
 
+        println!("[DB] get_downloads SQL: {}", sql);
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(param_refs.as_slice(), |row| {
             Ok(DownloadRecord {
@@ -210,6 +224,7 @@ impl Database {
         for row in rows {
             records.push(row?);
         }
+        println!("[DB] get_downloads 返回 {} 条记录", records.len());
         Ok(records)
     }
 

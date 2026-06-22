@@ -179,6 +179,7 @@ class Database:
             int(time.time()),
         ))
         await self._db.commit()
+        await self._db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     async def get_user(self, sec_user_id: str) -> dict | None:
         """获取用户信息"""
@@ -221,6 +222,7 @@ class Database:
             int(time.time()),
         ))
         await self._db.commit()
+        await self._db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     async def get_video(self, aweme_id: str) -> dict | None:
         """获取视频信息"""
@@ -263,6 +265,8 @@ class Database:
             file_path, file_size, cover_url, status, error_msg, int(time.time()),
         ))
         await self._db.commit()
+        # WAL checkpoint，确保 Rust 侧能读取到最新数据
+        await self._db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     async def get_download_count(self) -> int:
         """获取总下载数"""
@@ -361,6 +365,7 @@ class Database:
             started_at or int(time.time()), ended_at,
         ))
         await self._db.commit()
+        await self._db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     async def get_live_records(
         self,

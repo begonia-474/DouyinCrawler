@@ -33,14 +33,17 @@ export default function DownloadsPage() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
+      console.log("[Downloads] 开始加载数据...");
       const [dl, lr] = await Promise.all([
         getDownloads({ limit: 50, status: "completed" }),
         getLiveRecords({ limit: 50 }),
       ]);
+      console.log("[Downloads] 下载记录:", dl);
+      console.log("[Downloads] 直播记录:", lr);
       setDownloads(dl);
       setLiveRecords(lr);
     } catch (err) {
-      console.error("加载下载记录失败:", err);
+      console.error("[Downloads] 加载下载记录失败:", err);
     }
     setLoading(false);
   }, []);
