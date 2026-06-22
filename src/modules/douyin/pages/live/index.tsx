@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useLocation } from "react-router-dom";
 import { Header } from "@/components/layout/header";
 import { UrlInput } from "@/components/shared/url-input";
@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { getLiveInfo, startLiveRecord, stopLiveRecord } from "@/lib/api";
+import { getLiveInfo, startLiveRecord, stopLiveRecord, getLiveStatus, saveLiveRecordAfterStop } from "@/lib/api";
 import type { LiveInfo as LiveInfoType } from "@/lib/api-types";
 import {
   Radio,
@@ -33,6 +33,15 @@ export default function LivePage() {
   const [recordTaskId, setRecordTaskId] = useState<string | null>(null);
   const [recordLoading, setRecordLoading] = useState(false);
 
+  const lastParsedUrl = useRef("");
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+    };
+  }, []);
+
   const handleParse = useCallback(async (url: string) => {
     setLoading(true);
     setLiveInfo(null);
@@ -54,8 +63,6 @@ export default function LivePage() {
     window.setTimeout(() => setCopied(null), 2000);
   };
 
-  const lastParsedUrl = { current: "" };
-
   const handleStartRecord = useCallback(async () => {
     if (!lastParsedUrl.current) return;
     setRecordLoading(true);
@@ -75,12 +82,51 @@ export default function LivePage() {
     setRecordLoading(true);
     const res = await stopLiveRecord(recordTaskId);
     if (res.success) {
-      setRecording(false);
-      setRecordTaskId(null);
+      // 轮询等待录制完成并保存记录
+      const taskId = recordTaskId;
+      let attempts = 0;
+      pollTimerRef.current = setInterval(async () => {
+        attempts++;
+        try {
+          const statusRes = await getLiveStatus();
+          if (statusRes.success && statusRes.data) {
+            const task = statusRes.data[taskId];
+            if (task?.status === "completed") {
+              if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+              try {
+                await saveLiveRecordAfterStop(task);
+              } catch (saveErr) {
+                console.error("保存录制记录失败:", saveErr);
+                setError("录制已完成，但保存记录失败");
+              }
+              setRecording(false);
+              setRecordTaskId(null);
+              setRecordLoading(false);
+              return;
+            } else if (task?.status === "error") {
+              if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+              setError(task.error || "录制出错");
+              setRecording(false);
+              setRecordTaskId(null);
+              setRecordLoading(false);
+              return;
+            }
+          }
+        } catch {
+          // 忽略轮询错误
+        }
+        if (attempts >= 30) {
+          // 超时 30 秒
+          if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+          setRecording(false);
+          setRecordTaskId(null);
+          setRecordLoading(false);
+        }
+      }, 1000);
     } else {
       setError(res.error || "停止录制失败");
+      setRecordLoading(false);
     }
-    setRecordLoading(false);
   }, [recordTaskId]);
 
   return (

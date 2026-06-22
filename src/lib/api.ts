@@ -1,168 +1,346 @@
+import { invoke } from "@tauri-apps/api/core";
 import type {
   ApiResponse, PostDetailResponse, DownloadResult,
   CommentItem, MusicItem, FollowItem, LiveInfo,
   LiveRecordTask, FollowingLiveItem,
 } from "./api-types";
+import type { DownloadRecord, DownloadStats, LiveRecord, VideoInfo, UserInfo, VideoStats, UserStats } from "./tauri-types";
 
-// 动态端口，由 Tauri sidecar 启动时设置
-let BASE_URL = "http://127.0.0.1:8765";
+// ============================================================
+// 通用代理调用
+// ============================================================
 
-export function setBackendPort(port: number) {
-  BASE_URL = `http://127.0.0.1:${port}`;
-}
-
-export function getBackendUrl() {
-  return BASE_URL;
-}
-
-async function request<T>(path: string, options?: RequestInit): Promise<ApiResponse<T>> {
+async function proxyPost<T>(path: string, body: unknown): Promise<ApiResponse<T>> {
   try {
-    const res = await fetch(`${BASE_URL}${path}`, {
-      headers: { "Content-Type": "application/json" },
-      ...options,
-    });
-    return await res.json();
+    return await invoke<ApiResponse<T>>("proxy_post", { path, body });
   } catch (e) {
-    return { success: false, error: e instanceof Error ? e.message : "网络错误" };
+    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
   }
 }
 
-function post<T>(path: string, body: unknown): Promise<ApiResponse<T>> {
-  return request(path, { method: "POST", body: JSON.stringify(body) });
+async function proxyGet<T>(path: string): Promise<ApiResponse<T>> {
+  try {
+    return await invoke<ApiResponse<T>>("proxy_get", { path });
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
+  }
 }
 
-// === 健康 & 配置 ===
+// ============================================================
+// 配置
+// ============================================================
 
-export async function healthCheck(): Promise<ApiResponse<{ configured: boolean }>> {
-  return request("/api/health");
+export interface AppConfig {
+  cookie: string;
+  download_path: string;
+  naming: string;
+  encryption: string;
+  proxy: string;
 }
 
-export interface ConfigParams {
-  cookie?: string;
-  download_path?: string;
-  naming?: string;
-  encryption?: string;
-  proxy?: string;
+export async function getConfig(): Promise<AppConfig> {
+  return invoke("get_config");
 }
 
-export async function updateConfig(params: ConfigParams): Promise<ApiResponse> {
-  return post("/api/config", params);
+export async function setConfig(updates: Record<string, string>): Promise<void> {
+  return invoke("set_config", { updates });
 }
 
-// === 视频解析 & 下载 ===
+// ============================================================
+// 健康检查
+// ============================================================
+
+export async function healthCheck(): Promise<boolean> {
+  return invoke("health_check");
+}
+
+// ============================================================
+// 视频解析 & 下载
+// ============================================================
 
 export async function getPostDetail(url: string): Promise<ApiResponse<PostDetailResponse>> {
-  return post("/api/post/detail", { url });
+  return proxyPost("/api/post/detail", { url });
 }
 
 export async function getPostStats(url: string): Promise<ApiResponse> {
-  return post("/api/post/stats", { url });
+  return proxyPost("/api/post/stats", { url });
 }
 
 export async function downloadOne(url: string): Promise<ApiResponse<DownloadResult>> {
-  return post("/api/download/one", { url });
+  try {
+    return await invoke<ApiResponse<DownloadResult>>("download_one_and_save", { url });
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
+  }
 }
 
-// === 评论 ===
+// ============================================================
+// 评论
+// ============================================================
 
 export async function getComments(url: string, cursor = 0, count = 20): Promise<ApiResponse<{ comments: CommentItem[]; has_more: boolean; cursor: number }>> {
-  return post("/api/comments", { url, cursor, count });
+  return proxyPost("/api/comments", { url, cursor, count });
 }
 
 export async function getCommentReplies(url: string, commentId: string, cursor = 0, count = 3): Promise<ApiResponse<{ comments: CommentItem[]; has_more: boolean; cursor: number }>> {
-  return post("/api/comments/reply", { url, comment_id: commentId, cursor, count });
+  return proxyPost("/api/comments/reply", { url, comment_id: commentId, cursor, count });
 }
 
-// === 搜索 ===
+// ============================================================
+// 搜索
+// ============================================================
 
 export async function search(keyword: string, offset = 0, count = 10): Promise<ApiResponse<PostDetailResponse>> {
-  return post("/api/search", { keyword, offset, count });
+  return proxyPost("/api/search", { keyword, offset, count });
 }
 
-// === Feed ===
+// ============================================================
+// Feed
+// ============================================================
 
 export async function getTabFeed(count = 10): Promise<ApiResponse<PostDetailResponse>> {
-  return post("/api/feed/tab", { count });
+  return proxyPost("/api/feed/tab", { count });
 }
 
 export async function getFollowFeed(cursor = 0, count = 10): Promise<ApiResponse<PostDetailResponse>> {
-  return post("/api/feed/follow", { cursor, count });
+  return proxyPost("/api/feed/follow", { cursor, count });
 }
 
 export async function getFriendFeed(cursor = 0, count = 10): Promise<ApiResponse<PostDetailResponse>> {
-  return post("/api/feed/friend", { cursor, count });
+  return proxyPost("/api/feed/friend", { cursor, count });
 }
 
-// === 音乐 ===
+// ============================================================
+// 音乐
+// ============================================================
 
 export async function getMusicCollection(cursor = 0, count = 18): Promise<ApiResponse<{ music_list: MusicItem[]; has_more: boolean }>> {
-  return post("/api/music/collection", { cursor, count });
+  return proxyPost("/api/music/collection", { cursor, count });
 }
 
 export async function downloadMusic(play_url: string, title: string, author = ""): Promise<ApiResponse<{ path: string }>> {
-  return post("/api/music/download", { play_url, title, author });
+  try {
+    return await invoke<ApiResponse<{ path: string }>>("download_music_and_save", { play_url, title, author });
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
+  }
 }
 
-// === 用户 ===
+// ============================================================
+// 用户
+// ============================================================
 
 export async function getUserProfile(url: string): Promise<ApiResponse<PostDetailResponse>> {
-  return post("/api/user/profile", { url });
+  return proxyPost("/api/user/profile", { url });
 }
 
 export async function getUserPosts(url: string): Promise<ApiResponse<PostDetailResponse>> {
-  return post("/api/user/posts", { url });
+  return proxyPost("/api/user/posts", { url });
 }
 
 export async function getUserLikes(url: string): Promise<ApiResponse<PostDetailResponse>> {
-  return post("/api/user/likes", { url });
+  return proxyPost("/api/user/likes", { url });
 }
 
 export async function getUserCollects(): Promise<ApiResponse<PostDetailResponse>> {
-  return post("/api/user/collects", {});
+  return proxyPost("/api/user/collects", {});
 }
 
 export async function getCollectsVideo(collectsId: string, cursor = 0): Promise<ApiResponse<PostDetailResponse>> {
-  return post("/api/user/collects/video", { collects_id: collectsId, cursor });
+  return proxyPost("/api/user/collects/video", { collects_id: collectsId, cursor });
 }
 
 export async function getCollectsVideoList(collectsId: string): Promise<ApiResponse<PostDetailResponse>> {
-  return post("/api/user/collects/video/list", { collects_id: collectsId });
+  return proxyPost("/api/user/collects/video/list", { collects_id: collectsId });
 }
 
 export async function getUserFollowing(url: string, offset = 0, count = 20): Promise<ApiResponse<{ followings: FollowItem[]; has_more: boolean }>> {
-  return post("/api/user/following", { url, offset, count });
+  return proxyPost("/api/user/following", { url, offset, count });
 }
 
 export async function getUserFollowers(url: string, offset = 0, count = 20): Promise<ApiResponse<{ followers: FollowItem[]; has_more: boolean }>> {
-  return post("/api/user/followers", { url, offset, count });
+  return proxyPost("/api/user/followers", { url, offset, count });
 }
 
-// === 直播 ===
+// ============================================================
+// 直播
+// ============================================================
 
 export async function getLiveInfo(url: string): Promise<ApiResponse<LiveInfo>> {
-  return post("/api/live", { url });
+  return proxyPost("/api/live", { url });
 }
 
-// === 合集 ===
+// ============================================================
+// 合集
+// ============================================================
 
 export async function getMixInfo(url: string): Promise<ApiResponse<PostDetailResponse>> {
-  return post("/api/mix", { url });
+  return proxyPost("/api/mix", { url });
 }
 
-// === 直播录制 ===
+// ============================================================
+// 直播录制
+// ============================================================
 
 export async function startLiveRecord(url: string): Promise<ApiResponse<{ task_id: string }>> {
-  return post("/api/live/record", { url });
+  return proxyPost("/api/live/record", { url });
 }
 
 export async function stopLiveRecord(taskId: string): Promise<ApiResponse<{ task_id: string }>> {
-  return post("/api/live/stop", { url: taskId });
+  return proxyPost("/api/live/stop", { url: taskId });
 }
 
 export async function getLiveStatus(): Promise<ApiResponse<Record<string, LiveRecordTask>>> {
-  return request("/api/live/status");
+  return proxyGet("/api/live/status");
+}
+
+export async function saveLiveRecordAfterStop(task: LiveRecordTask): Promise<void> {
+  if (!task.file) return;
+  await invoke("save_live_record_record", {
+    record: {
+      room_id: task.room_id || "",
+      web_rid: null,
+      title: task.title || "",
+      nickname: task.nickname || "",
+      sec_user_id: null,
+      file_path: task.file,
+      file_size: task.file_size || 0,
+      duration_sec: task.duration_sec || 0,
+      status: "completed",
+      started_at: task.started_at || 0,
+      ended_at: task.ended_at || 0,
+      cover_url: task.cover_url || null,
+    },
+  });
 }
 
 export async function getFollowingLive(): Promise<ApiResponse<{ lives: FollowingLiveItem[] }>> {
-  return request("/api/live/following");
+  return proxyGet("/api/live/following");
+}
+
+// ============================================================
+// 数据库查询 (Tauri 直接调用)
+// ============================================================
+
+export async function getDownloads(params: {
+  limit?: number;
+  offset?: number;
+  status?: string;
+  download_type?: string;
+}): Promise<DownloadRecord[]> {
+  return invoke("get_downloads", {
+    limit: params.limit ?? 20,
+    offset: params.offset ?? 0,
+    status: params.status ?? null,
+    download_type: params.download_type ?? null,
+  });
+}
+
+export async function getDownloadStats(): Promise<DownloadStats> {
+  return invoke("get_download_stats");
+}
+
+export async function getLiveRecords(params: {
+  limit?: number;
+  offset?: number;
+}): Promise<LiveRecord[]> {
+  return invoke("get_live_records", {
+    limit: params.limit ?? 20,
+    offset: params.offset ?? 0,
+  });
+}
+
+// === video_info / user_info 查询 ===
+
+export async function getVideos(params: {
+  limit?: number;
+  offset?: number;
+  keyword?: string;
+  author_sec_uid?: string;
+  sort_by?: string;
+  sort_order?: string;
+  post_type?: string;
+}): Promise<VideoInfo[]> {
+  return invoke("get_videos", {
+    limit: params.limit ?? 20,
+    offset: params.offset ?? 0,
+    keyword: params.keyword ?? null,
+    author_sec_uid: params.author_sec_uid ?? null,
+    sort_by: params.sort_by ?? null,
+    sort_order: params.sort_order ?? null,
+    post_type: params.post_type ?? null,
+  });
+}
+
+export async function getVideoCount(params?: {
+  keyword?: string;
+  author_sec_uid?: string;
+  post_type?: string;
+}): Promise<number> {
+  return invoke("get_video_count", {
+    keyword: params?.keyword ?? null,
+    author_sec_uid: params?.author_sec_uid ?? null,
+    post_type: params?.post_type ?? null,
+  });
+}
+
+export async function getUsers(params: {
+  limit?: number;
+  offset?: number;
+  keyword?: string;
+  sort_by?: string;
+  sort_order?: string;
+}): Promise<UserInfo[]> {
+  return invoke("get_users", {
+    limit: params.limit ?? 20,
+    offset: params.offset ?? 0,
+    keyword: params.keyword ?? null,
+    sort_by: params.sort_by ?? null,
+    sort_order: params.sort_order ?? null,
+  });
+}
+
+export async function getUserCount(params?: {
+  keyword?: string;
+}): Promise<number> {
+  return invoke("get_user_count", {
+    keyword: params?.keyword ?? null,
+  });
+}
+
+export async function getUserBySecUid(secUserId: string): Promise<UserInfo | null> {
+  return invoke("get_user_by_sec_uid", { sec_user_id: secUserId });
+}
+
+export async function getVideoStats(): Promise<VideoStats> {
+  return invoke("get_video_stats");
+}
+
+export async function getUserStats(): Promise<UserStats> {
+  return invoke("get_user_stats");
+}
+
+// ============================================================
+// 数据库写入 (Tauri 直接调用)
+// ============================================================
+
+export interface NewDownloadRecord {
+  aweme_id?: string;
+  download_type: string;
+  title?: string;
+  author_nickname?: string;
+  author_sec_uid?: string;
+  file_path?: string;
+  file_size: number;
+  cover_url?: string;
+  status: string;
+  error_msg?: string;
+}
+
+export async function saveDownloadRecord(record: NewDownloadRecord): Promise<number> {
+  return invoke("save_download_record", { record });
+}
+
+export async function isVideoDownloaded(awemeId: string): Promise<boolean> {
+  return invoke("is_video_downloaded", { awemeId });
 }

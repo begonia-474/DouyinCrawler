@@ -8,8 +8,12 @@ export function StatusBar() {
 
   useEffect(() => {
     const check = async () => {
-      const res = await healthCheck();
-      setConnected(res.success);
+      try {
+        const ok = await healthCheck();
+        setConnected(ok);
+      } catch {
+        setConnected(false);
+      }
     };
     check();
     const timer = setInterval(check, 10000);

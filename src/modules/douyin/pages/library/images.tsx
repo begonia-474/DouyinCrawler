@@ -1,5 +1,5 @@
-import { DownloadList } from "./_shared";
+import { VideoList } from "./_shared";
 
 export default function LibraryImagesPage() {
-  return <DownloadList type="images" title="图集" />;
+  return <VideoList postType="images" title="图集" />;
 }

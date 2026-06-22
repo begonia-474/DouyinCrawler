@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { updateConfig } from "@/lib/api";
+import { setConfig } from "@/lib/api";
 import {
   Cookie,
   FolderOpen,
@@ -75,17 +75,17 @@ export default function SettingsPage() {
   const handleSave = async () => {
     setSaving(true);
     setSaveMsg(null);
-    const res = await updateConfig({
-      cookie,
-      download_path: downloadPath,
-      naming,
-      encryption,
-      proxy,
-    });
-    if (res.success) {
+    try {
+      await setConfig({
+        cookie,
+        download_path: downloadPath,
+        naming,
+        encryption,
+        proxy,
+      });
       setSaveMsg("保存成功");
-    } else {
-      setSaveMsg(res.error || "保存失败");
+    } catch (e) {
+      setSaveMsg(e instanceof Error ? e.message : "保存失败");
     }
     setSaving(false);
     window.setTimeout(() => setSaveMsg(null), 2000);

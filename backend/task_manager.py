@@ -117,8 +117,18 @@ class TaskManager:
                 self._live_tasks[task_id]["status"] = "recording"
                 result = await self.handler.handle_live_record(url, task_id, stop_event=stop_event)
                 if result.get("success"):
-                    self._live_tasks[task_id]["status"] = "completed"
-                    self._live_tasks[task_id]["file"] = result.get("file", "")
+                    self._live_tasks[task_id].update({
+                        "status": "completed",
+                        "file": result.get("file", ""),
+                        "room_id": result.get("room_id", ""),
+                        "title": result.get("title", ""),
+                        "nickname": result.get("nickname", ""),
+                        "file_size": result.get("file_size", 0),
+                        "duration_sec": result.get("duration_sec", 0),
+                        "started_at": result.get("started_at", 0),
+                        "ended_at": result.get("ended_at", 0),
+                        "cover_url": result.get("cover_url", ""),
+                    })
                 else:
                     self._live_tasks[task_id]["status"] = "error"
                     self._live_tasks[task_id]["error"] = result.get("error", "未知错误")
@@ -139,12 +149,12 @@ class TaskManager:
         self._live_tasks[task_id]["status"] = "stopping"
         return True
 
-    def get_live_status(self) -> list[dict]:
-        """获取所有录制任务状态（排除内部字段）"""
-        return [
-            {k: v for k, v in t.items() if not k.startswith("_")}
+    def get_live_status(self) -> dict[str, dict]:
+        """获取所有录制任务状态（排除内部字段），以 task_id 为 key"""
+        return {
+            t["task_id"]: {k: v for k, v in t.items() if not k.startswith("_")}
             for t in self._live_tasks.values()
-        ]
+        }
 
 
 task_manager = TaskManager()

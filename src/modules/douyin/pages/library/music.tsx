@@ -1,5 +1,5 @@
-import { DownloadList } from "./_shared";
+import { VideoList } from "./_shared";
 
 export default function LibraryMusicPage() {
-  return <DownloadList type="music" title="音乐" />;
+  return <VideoList postType="music" title="音乐" />;
 }

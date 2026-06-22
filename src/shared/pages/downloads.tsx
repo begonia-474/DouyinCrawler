@@ -14,7 +14,7 @@ import {
   Radio,
   Music,
 } from "lucide-react";
-import { getDownloads, getLiveRecords } from "@/lib/tauri-api";
+import { getDownloads, getLiveRecords } from "@/lib/api";
 import type { DownloadRecord, LiveRecord } from "@/lib/tauri-types";
 import { formatFileSize, formatTimestamp } from "@/lib/utils";
 

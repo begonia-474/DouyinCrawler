@@ -117,8 +117,16 @@ export interface LiveRecordTask {
   task_id: string;
   status: string;
   url?: string;
+  file?: string;
+  room_id?: string;
+  title?: string;
   nickname?: string;
-  live_title?: string;
+  file_size?: number;
+  duration_sec?: number;
+  started_at?: number;
+  ended_at?: number;
+  cover_url?: string;
+  error?: string;
 }
 
 export interface FollowingLiveItem {

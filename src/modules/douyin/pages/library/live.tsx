@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Radio, Loader2, FolderOpen, Clock, Search } from "lucide-react";
-import { getLiveRecords } from "@/lib/tauri-api";
+import { getLiveRecords } from "@/lib/api";
 import type { LiveRecord } from "@/lib/tauri-types";
 import { formatFileSize, formatTimestamp, formatDuration } from "@/lib/utils";
 
@@ -93,7 +93,18 @@ export default function LibraryLivePage() {
                 key={item.id}
                 className="flex items-center gap-4 p-3 border rounded-lg hover:bg-muted/50 transition-colors"
               >
-                <Radio className="h-5 w-5 text-red-500 shrink-0" />
+                {item.cover_url ? (
+                  <img
+                    src={item.cover_url}
+                    alt={item.title || "直播封面"}
+                    className="h-12 w-20 object-cover rounded shrink-0"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.display = "none";
+                    }}
+                  />
+                ) : (
+                  <Radio className="h-5 w-5 text-red-500 shrink-0" />
+                )}
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{item.title || "直播录制"}</p>
                   <div className="flex items-center gap-3 mt-1">

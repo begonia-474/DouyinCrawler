@@ -16,7 +16,6 @@ from core.utils import (
     AwemeIdFetcher, SecUserIdFetcher, MixIdFetcher, WebCastIdFetcher,
     sanitize_filename,
 )
-from core.db import Database
 
 
 class DouyinHandler:
@@ -34,35 +33,6 @@ class DouyinHandler:
         self.timeout = timeout
         self.encryption = encryption
         self.proxies = proxies
-        self._db: Database | None = None
-
-    async def _get_db(self) -> Database:
-        """获取或创建数据库连接（懒初始化）"""
-        if self._db is None:
-            self._db = Database()
-            await self._db.connect()
-        return self._db
-
-    async def close(self):
-        """关闭数据库连接"""
-        if self._db:
-            await self._db.close()
-            self._db = None
-
-    async def _record_download(
-        self, *, download_type: str = "video", aweme_id: str | None = None,
-        desc: str | None = None, author_nickname: str | None = None,
-        author_sec_uid: str | None = None, file_path: str | None = None,
-        cover_url: str | None = None, status: str = "completed",
-    ):
-        """统一记录下载历史"""
-        db = await self._get_db()
-        await db.save_download(
-            aweme_id=aweme_id, download_type=download_type,
-            title=desc, author_nickname=author_nickname,
-            author_sec_uid=author_sec_uid, file_path=file_path,
-            cover_url=cover_url, status=status,
-        )
 
     def _make_crawler(self) -> DouyinCrawler:
         return DouyinCrawler(self.cookie, self.proxies, self.encryption)
@@ -90,7 +60,7 @@ class DouyinHandler:
         if detail.is_prohibited:
             return {"success": False, "error": "视频侵权不可用"}
 
-        return {"success": True, "detail": detail.to_dict()}
+        return {"success": True, "detail": detail.to_db_dict()}
 
     # ============================================================
     # 单视频下载 (one)
@@ -125,26 +95,14 @@ class DouyinHandler:
                     if img_url:
                         path = await dl.download_image(img_url, save_dir, f"{filename}_{i}")
                         paths.append(str(path))
-            await self._record_download(
-                download_type="images", aweme_id=detail.aweme_id,
-                desc=detail.desc, author_nickname=detail.author_nickname,
-                author_sec_uid=detail.author_sec_uid,
-                file_path=paths[0] if paths else None, cover_url=detail.cover_url,
-            )
-            return {"success": True, "type": "images", "paths": paths, "detail": detail.to_dict()}
+            return {"success": True, "type": "images", "paths": paths, "detail": detail.to_db_dict()}
         else:
             # 视频下载
             if not detail.video_url:
                 return {"success": False, "error": "无法获取视频下载链接"}
             async with self._make_downloader(progress_callback) as dl:
                 path = await dl.download_video(detail.video_url, save_dir, filename)
-            await self._record_download(
-                download_type="video", aweme_id=detail.aweme_id,
-                desc=detail.desc, author_nickname=detail.author_nickname,
-                author_sec_uid=detail.author_sec_uid,
-                file_path=str(path), cover_url=detail.cover_url,
-            )
-            return {"success": True, "type": "video", "path": str(path), "detail": detail.to_dict()}
+            return {"success": True, "type": "video", "path": str(path), "detail": detail.to_db_dict()}
 
     # ============================================================
     # 用户主页视频 (post)
@@ -204,16 +162,6 @@ class DouyinHandler:
         async with self._make_downloader(progress_callback) as dl:
             paths = await dl.batch_download(download_tasks)
 
-        # 写入下载记录
-        for i, detail in enumerate(all_details):
-            if i < len(paths) and paths[i]:
-                await self._record_download(
-                    download_type="video", aweme_id=detail.aweme_id,
-                    desc=detail.desc, author_nickname=detail.author_nickname,
-                    author_sec_uid=detail.author_sec_uid,
-                    file_path=str(paths[i]), cover_url=detail.cover_url,
-                )
-
         return {"success": True, "count": len(paths), "paths": [str(p) for p in paths]}
 
     # ============================================================
@@ -265,16 +213,6 @@ class DouyinHandler:
         async with self._make_downloader(progress_callback) as dl:
             paths = await dl.batch_download(download_tasks)
 
-        # 写入下载记录
-        for i, detail in enumerate(all_details):
-            if i < len(paths) and paths[i]:
-                await self._record_download(
-                    download_type="video", aweme_id=detail.aweme_id,
-                    desc=detail.desc, author_nickname=detail.author_nickname,
-                    author_sec_uid=detail.author_sec_uid,
-                    file_path=str(paths[i]), cover_url=detail.cover_url,
-                )
-
         return {"success": True, "count": len(paths)}
 
     # ============================================================
@@ -315,16 +253,6 @@ class DouyinHandler:
 
         async with self._make_downloader(progress_callback) as dl:
             paths = await dl.batch_download(download_tasks)
-
-        # 写入下载记录
-        for i, detail in enumerate(all_details):
-            if i < len(paths) and paths[i]:
-                await self._record_download(
-                    download_type="video", aweme_id=detail.aweme_id,
-                    desc=detail.desc, author_nickname=detail.author_nickname,
-                    author_sec_uid=detail.author_sec_uid,
-                    file_path=str(paths[i]), cover_url=detail.cover_url,
-                )
 
         return {"success": True, "count": len(paths)}
 
@@ -399,16 +327,6 @@ class DouyinHandler:
         async with self._make_downloader(progress_callback) as dl:
             paths = await dl.batch_download(download_tasks)
 
-        # 写入下载记录
-        for i, detail in enumerate(all_details):
-            if i < len(paths) and paths[i]:
-                await self._record_download(
-                    download_type="video", aweme_id=detail.aweme_id,
-                    desc=detail.desc, author_nickname=detail.author_nickname,
-                    author_sec_uid=detail.author_sec_uid,
-                    file_path=str(paths[i]), cover_url=detail.cover_url,
-                )
-
         return {"success": True, "count": len(paths)}
 
     # ============================================================
@@ -454,16 +372,6 @@ class DouyinHandler:
 
         async with self._make_downloader(progress_callback) as dl:
             paths = await dl.batch_download(download_tasks)
-
-        # 写入下载记录
-        for i, detail in enumerate(all_details):
-            if i < len(paths) and paths[i]:
-                await self._record_download(
-                    download_type="video", aweme_id=detail.aweme_id,
-                    desc=detail.desc, author_nickname=detail.author_nickname,
-                    author_sec_uid=detail.author_sec_uid,
-                    file_path=str(paths[i]), cover_url=detail.cover_url,
-                )
 
         return {"success": True, "count": len(paths), "mix_name": mix_name}
 
@@ -537,18 +445,21 @@ class DouyinHandler:
             await dl.download_m3u8_stream(task_id, m3u8_url, full_path)
         ended_at = int(time.time())
 
-        # 写入直播录制记录
         file_size = full_path.stat().st_size if full_path.exists() else 0
-        db = await self._get_db()
-        await db.save_live_record(
-            room_id=live_filter.room_id, web_rid=webcast_id,
-            title=live_filter.live_title, nickname=live_filter.nickname,
-            file_path=str(full_path), file_size=file_size,
-            duration_sec=ended_at - started_at, status="completed",
-            started_at=started_at, ended_at=ended_at,
-        )
 
-        return {"success": True, "file": str(full_path), "room_id": live_filter.room_id}
+        return {
+            "success": True,
+            "file": str(full_path),
+            "room_id": live_filter.room_id,
+            "web_rid": webcast_id,
+            "title": live_filter.live_title,
+            "nickname": live_filter.nickname,
+            "file_size": file_size,
+            "duration_sec": ended_at - started_at,
+            "started_at": started_at,
+            "ended_at": ended_at,
+            "cover_url": live_filter.cover_url,
+        }
 
     async def handle_following_live(self) -> dict:
         """获取关注用户中正在直播的列表"""
@@ -739,12 +650,6 @@ class DouyinHandler:
 
         async with self._make_downloader() as dl:
             path = await dl.download_music(play_url, save_dir, filename)
-
-        # 写入下载记录
-        await self._record_download(
-            download_type="music", desc=title, author_nickname=author,
-            file_path=str(path),
-        )
 
         return {"success": True, "path": str(path)}
 
