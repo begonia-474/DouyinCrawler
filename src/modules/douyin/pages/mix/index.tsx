@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { getMixInfo, downloadOne } from "@/lib/api";
+import { getMixInfo, downloadMix } from "@/lib/api";
 import type { VideoItem } from "@/lib/api-types";
 import {
   Download,
@@ -35,12 +35,14 @@ export default function MixPage() {
   const [mixName, setMixName] = useState("");
   const [videos, setVideos] = useState<(VideoItem & { downloaded?: boolean })[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [currentUrl, setCurrentUrl] = useState("");
 
   const handleParse = useCallback(async (url: string) => {
     setLoading(true);
     setVideos([]);
     setMixName("");
     setError(null);
+    setCurrentUrl(url);
 
     const res = await getMixInfo(url);
     if (res.success && res.data?.videos) {
@@ -57,15 +59,13 @@ export default function MixPage() {
     setDownloadProgress(0);
     setDownloadedCount(0);
 
-    for (let i = 0; i < videos.length; i++) {
-      await downloadOne(`https://www.douyin.com/video/${videos[i].aweme_id}`);
-      setDownloadedCount(i + 1);
-      setDownloadProgress(((i + 1) / videos.length) * 100);
-      setVideos((prev) => {
-        const next = [...prev];
-        next[i] = { ...next[i], downloaded: true };
-        return next;
-      });
+    const res = await downloadMix(currentUrl);
+    if (res.success) {
+      setDownloadedCount(videos.length);
+      setDownloadProgress(100);
+      setVideos((prev) => prev.map((v) => ({ ...v, downloaded: true })));
+    } else {
+      setError(res.error || "下载失败");
     }
     setDownloading(false);
   };

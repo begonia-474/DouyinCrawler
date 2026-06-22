@@ -3,7 +3,7 @@ import { Header } from "@/components/layout/header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { getMusicCollection, downloadMusic } from "@/lib/api";
+import { getMusicCollection, downloadMusic, saveMusicCollectionBatch } from "@/lib/api";
 import type { MusicItem } from "@/lib/api-types";
 import { Loader2, AlertCircle, Download, Music, CheckCircle2 } from "lucide-react";
 
@@ -28,6 +28,23 @@ export default function MusicPage() {
     const res = await getMusicCollection();
     if (res.success && res.data?.music_list) {
       setMusicList(res.data.music_list);
+      // 保存到数据库
+      try {
+        await saveMusicCollectionBatch(
+          res.data.music_list.map((item) => ({
+            music_id: item.music_id,
+            mid: item.mid,
+            title: item.title,
+            author: item.author,
+            owner_nickname: item.owner_nickname,
+            duration: Math.floor(item.duration / 1000), // 毫秒转秒
+            cover: item.cover,
+            play_url: item.play_url,
+          }))
+        );
+      } catch (e) {
+        console.error("保存音乐收藏到数据库失败:", e);
+      }
     } else {
       setError(res.error || "获取音乐收藏失败");
     }

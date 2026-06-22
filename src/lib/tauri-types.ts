@@ -176,3 +176,30 @@ export interface UserStats {
   total_follower: number;
   total_aweme: number;
 }
+
+/** 音乐收藏 */
+export interface MusicCollection {
+  music_id: string;
+  mid: string | null;
+  title: string | null;
+  author: string | null;
+  owner_nickname: string | null;
+  duration: number;
+  cover: string | null;
+  play_url: string | null;
+  file_path: string | null;
+  status: string;
+  created_at: number;
+}
+
+/** 新增音乐收藏 */
+export interface NewMusicCollection {
+  music_id: string;
+  mid?: string;
+  title?: string;
+  author?: string;
+  owner_nickname?: string;
+  duration: number;
+  cover?: string;
+  play_url?: string;
+}

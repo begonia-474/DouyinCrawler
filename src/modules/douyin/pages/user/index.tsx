@@ -9,13 +9,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   getUserProfile, getUserPosts,
-  getUserFollowing, getUserFollowers, downloadOne,
+  getUserFollowing, getUserFollowers, downloadUserPosts,
 } from "@/lib/api";
 import type { UserProfile as UserProfileType, VideoItem, FollowItem } from "@/lib/api-types";
 import {
   Download, Users, Heart, Video, Loader2,
   UserPlus, UserCheck, ThumbsUp, AlertCircle,
 } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
 
 function formatCount(n: number): string {
   if (n >= 10000) return `${(n / 10000).toFixed(1)}w`;
@@ -56,6 +57,9 @@ export default function UserPage() {
   const [following, setFollowing] = useState<FollowItem[]>([]);
   const [followers, setFollowers] = useState<FollowItem[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadedCount, setDownloadedCount] = useState(0);
+  const [downloadProgress, setDownloadProgress] = useState(0);
 
   const handleParse = useCallback(async (url: string) => {
     setLoading(true);
@@ -89,18 +93,27 @@ export default function UserPage() {
   }, []);
 
   const handleDownloadAll = async () => {
-    for (const video of videos) {
-      await downloadOne(`https://www.douyin.com/video/${video.aweme_id}`);
+    setDownloading(true);
+    setDownloadProgress(0);
+    setDownloadedCount(0);
+
+    const res = await downloadUserPosts(profile?.sec_user_id ? `https://www.douyin.com/user/${profile.sec_user_id}` : "");
+    if (res.success) {
+      setDownloadedCount(videos.length);
+      setDownloadProgress(100);
+    } else {
+      setError(res.error || "下载失败");
     }
+    setDownloading(false);
   };
 
   return (
     <>
       <Header title="用户主页" description="查看用户资料和作品" parent={{ label: "首页", path: "/douyin" }}>
         {profile && (
-          <Button onClick={handleDownloadAll}>
-            <Download className="h-4 w-4 mr-2" />
-            全部下载
+          <Button onClick={handleDownloadAll} disabled={downloading}>
+            {downloading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
+            {downloading ? `下载中 ${downloadedCount}/${videos.length}` : "全部下载"}
           </Button>
         )}
       </Header>
@@ -119,6 +132,17 @@ export default function UserPage() {
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
+        )}
+
+        {downloading && (
+          <Card>
+            <CardContent className="p-4">
+              <div className="space-y-1">
+                <Progress value={downloadProgress} />
+                <p className="text-xs text-muted-foreground text-right">{downloadedCount} / {videos.length}</p>
+              </div>
+            </CardContent>
+          </Card>
         )}
 
         {profile && !loading && (

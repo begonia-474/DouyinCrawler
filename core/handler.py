@@ -87,13 +87,19 @@ class DouyinHandler:
         save_dir = self.download_path / "one" / detail.author_nickname
         save_dir.mkdir(parents=True, exist_ok=True)
 
-        if detail.is_image_post and detail.images:
-            # 图集下载
+        if detail.is_image_post and (detail.images or detail.images_video):
+            # 图文下载（动图 + 图片）
             paths = []
             async with self._make_downloader(progress_callback) as dl:
+                # 下载动图/实况
+                for i, live_url in enumerate(detail.images_video):
+                    if live_url:
+                        path = await dl.download_live_image(live_url, save_dir, f"{filename}_live_{i + 1}")
+                        paths.append(str(path))
+                # 下载静态图片
                 for i, img_url in enumerate(detail.images):
                     if img_url:
-                        path = await dl.download_image(img_url, save_dir, f"{filename}_{i}")
+                        path = await dl.download_image(img_url, save_dir, f"{filename}_image_{i + 1}")
                         paths.append(str(path))
             return {"success": True, "type": "images", "paths": paths, "detail": detail.to_db_dict()}
         else:
@@ -101,12 +107,43 @@ class DouyinHandler:
             if not detail.video_url:
                 return {"success": False, "error": "无法获取视频下载链接"}
             async with self._make_downloader(progress_callback) as dl:
-                path = await dl.download_video(detail.video_url, save_dir, filename)
+                path = await dl.download_video(detail.video_url, save_dir, f"{filename}_video")
             return {"success": True, "type": "video", "path": str(path), "detail": detail.to_db_dict()}
 
     # ============================================================
     # 用户主页视频 (post)
     # ============================================================
+
+    async def handle_user_post_list(self, url: str) -> dict:
+        """获取用户主页视频列表（不下载）"""
+        sec_user_id = await SecUserIdFetcher.get_sec_user_id(url)
+        if not sec_user_id:
+            return {"success": False, "error": "无法从 URL 提取 sec_user_id"}
+
+        downloaded = 0
+        max_cursor = 0
+        all_details = []
+
+        async with self._make_crawler() as crawler:
+            while downloaded < self.max_counts:
+                current_request_size = min(self.page_counts, self.max_counts - downloaded)
+                data = await crawler.fetch_user_post(sec_user_id, max_cursor, current_request_size)
+                video_filter = UserPostFilter(data)
+
+                for detail in video_filter.get_video_list():
+                    if downloaded >= self.max_counts:
+                        break
+                    if detail.is_prohibited:
+                        continue
+                    all_details.append(detail)
+                    downloaded += 1
+
+                if not video_filter.has_more:
+                    break
+                max_cursor = video_filter.max_cursor
+                await asyncio.sleep(self.timeout)
+
+        return {"success": True, "videos": [d.to_dict() for d in all_details]}
 
     async def handle_user_post(self, url: str, progress_callback=None) -> dict:
         """下载用户主页视频"""
@@ -149,24 +186,103 @@ class DouyinHandler:
         save_dir.mkdir(parents=True, exist_ok=True)
 
         download_tasks = []
+        task_details = {}
+        image_tasks = []  # 图文任务单独处理
+
         for detail in all_details:
-            if detail.video_url:
+            if detail.is_image_post and (detail.images or detail.images_video):
+                # 图文作品：下载动图和图片
+                image_tasks.append(detail)
+            elif detail.video_url:
+                # 视频作品：下载视频
                 filename = format_filename(self.naming, detail.to_dict())
                 download_tasks.append({
                     "url": detail.video_url,
                     "dir": str(save_dir),
-                    "filename": filename,
+                    "filename": f"{filename}_video",
                     "task_id": detail.aweme_id,
                 })
+                task_details[detail.aweme_id] = detail
 
+        # 下载视频
         async with self._make_downloader(progress_callback) as dl:
-            paths = await dl.batch_download(download_tasks)
+            download_results = await dl.batch_download(download_tasks)
 
-        return {"success": True, "count": len(paths), "paths": [str(p) for p in paths]}
+            # 下载图文（动图 + 图片）
+            for detail in image_tasks:
+                filename = format_filename(self.naming, detail.to_dict())
+
+                # 下载动图/实况
+                for i, live_url in enumerate(detail.images_video):
+                    if live_url:
+                        path = await dl.download_live_image(live_url, save_dir, f"{filename}_live_{i + 1}")
+                        download_results.append({
+                            "task_id": detail.aweme_id,
+                            "path": path,
+                        })
+
+                # 下载静态图片
+                for i, img_url in enumerate(detail.images):
+                    if img_url:
+                        path = await dl.download_image(img_url, save_dir, f"{filename}_image_{i + 1}")
+                        download_results.append({
+                            "task_id": detail.aweme_id,
+                            "path": path,
+                        })
+
+                task_details[detail.aweme_id] = detail
+
+        # 构建返回结果
+        results = []
+        for item in download_results:
+            detail = task_details.get(item["task_id"])
+            if detail:
+                results.append({
+                    "path": str(item["path"]),
+                    "detail": detail.to_db_dict(),
+                })
+            else:
+                results.append({
+                    "path": str(item["path"]),
+                    "detail": {},
+                })
+
+        return {"success": True, "count": len(results), "results": results}
 
     # ============================================================
     # 用户点赞 (like)
     # ============================================================
+
+    async def handle_user_like_list(self, url: str) -> dict:
+        """获取用户点赞视频列表（不下载）"""
+        sec_user_id = await SecUserIdFetcher.get_sec_user_id(url)
+        if not sec_user_id:
+            return {"success": False, "error": "无法从 URL 提取 sec_user_id"}
+
+        downloaded = 0
+        max_cursor = 0
+        all_details = []
+
+        async with self._make_crawler() as crawler:
+            while downloaded < self.max_counts:
+                current_request_size = min(self.page_counts, self.max_counts - downloaded)
+                data = await crawler.fetch_user_favorite(sec_user_id, max_cursor, current_request_size)
+                if not data or not data.get("aweme_list"):
+                    break
+                video_filter = UserPostFilter(data)
+
+                for detail in video_filter.get_video_list():
+                    if downloaded >= self.max_counts:
+                        break
+                    all_details.append(detail)
+                    downloaded += 1
+
+                if not video_filter.has_more:
+                    break
+                max_cursor = video_filter.max_cursor
+                await asyncio.sleep(self.timeout)
+
+        return {"success": True, "videos": [d.to_dict() for d in all_details]}
 
     async def handle_user_like(self, url: str, progress_callback=None) -> dict:
         """下载用户点赞视频"""
@@ -205,15 +321,44 @@ class DouyinHandler:
         save_dir.mkdir(parents=True, exist_ok=True)
 
         download_tasks = []
+        task_details = {}
+        image_tasks = []
+
         for detail in all_details:
-            if detail.video_url:
+            if detail.is_image_post and (detail.images or detail.images_video):
+                image_tasks.append(detail)
+            elif detail.video_url:
                 filename = format_filename(self.naming, detail.to_dict())
-                download_tasks.append({"url": detail.video_url, "dir": str(save_dir), "filename": filename, "task_id": detail.aweme_id})
+                download_tasks.append({"url": detail.video_url, "dir": str(save_dir), "filename": f"{filename}_video", "task_id": detail.aweme_id})
+                task_details[detail.aweme_id] = detail
 
         async with self._make_downloader(progress_callback) as dl:
-            paths = await dl.batch_download(download_tasks)
+            download_results = await dl.batch_download(download_tasks)
 
-        return {"success": True, "count": len(paths)}
+            for detail in image_tasks:
+                filename = format_filename(self.naming, detail.to_dict())
+                # 下载动图/实况
+                for i, live_url in enumerate(detail.images_video):
+                    if live_url:
+                        path = await dl.download_live_image(live_url, save_dir, f"{filename}_live_{i + 1}")
+                        download_results.append({"task_id": detail.aweme_id, "path": path})
+                # 下载静态图片
+                for i, img_url in enumerate(detail.images):
+                    if img_url:
+                        path = await dl.download_image(img_url, save_dir, f"{filename}_image_{i + 1}")
+                        download_results.append({"task_id": detail.aweme_id, "path": path})
+                task_details[detail.aweme_id] = detail
+
+        # 构建返回结果
+        results = []
+        for item in download_results:
+            detail = task_details.get(item["task_id"])
+            if detail:
+                results.append({"path": str(item["path"]), "detail": detail.to_db_dict()})
+            else:
+                results.append({"path": str(item["path"]), "detail": {}})
+
+        return {"success": True, "count": len(results), "results": results}
 
     # ============================================================
     # 用户收藏 (collection)
@@ -319,19 +464,78 @@ class DouyinHandler:
         save_dir.mkdir(parents=True, exist_ok=True)
 
         download_tasks = []
+        task_details = {}
+        image_tasks = []
+
         for detail in all_details:
-            if detail.video_url:
+            if detail.is_image_post and (detail.images or detail.images_video):
+                image_tasks.append(detail)
+            elif detail.video_url:
                 filename = format_filename(self.naming, detail.to_dict())
-                download_tasks.append({"url": detail.video_url, "dir": str(save_dir), "filename": filename, "task_id": detail.aweme_id})
+                download_tasks.append({"url": detail.video_url, "dir": str(save_dir), "filename": f"{filename}_video", "task_id": detail.aweme_id})
+                task_details[detail.aweme_id] = detail
 
         async with self._make_downloader(progress_callback) as dl:
-            paths = await dl.batch_download(download_tasks)
+            download_results = await dl.batch_download(download_tasks)
 
-        return {"success": True, "count": len(paths)}
+            for detail in image_tasks:
+                filename = format_filename(self.naming, detail.to_dict())
+                # 下载动图/实况
+                for i, live_url in enumerate(detail.images_video):
+                    if live_url:
+                        path = await dl.download_live_image(live_url, save_dir, f"{filename}_live_{i + 1}")
+                        download_results.append({"task_id": detail.aweme_id, "path": path})
+                # 下载静态图片
+                for i, img_url in enumerate(detail.images):
+                    if img_url:
+                        path = await dl.download_image(img_url, save_dir, f"{filename}_image_{i + 1}")
+                        download_results.append({"task_id": detail.aweme_id, "path": path})
+                task_details[detail.aweme_id] = detail
+
+        # 构建返回结果
+        results = []
+        for item in download_results:
+            detail = task_details.get(item["task_id"])
+            if detail:
+                results.append({"path": str(item["path"]), "detail": detail.to_db_dict()})
+            else:
+                results.append({"path": str(item["path"]), "detail": {}})
+
+        return {"success": True, "count": len(results), "results": results}
 
     # ============================================================
     # 合集 (mix)
     # ============================================================
+
+    async def handle_user_mix_list(self, url: str) -> dict:
+        """获取合集视频列表（不下载）"""
+        mix_id = await MixIdFetcher.get_mix_id(url)
+        if not mix_id:
+            return {"success": False, "error": "无法从 URL 提取 mix_id"}
+
+        downloaded = 0
+        cursor = 0
+        all_details = []
+
+        async with self._make_crawler() as crawler:
+            while downloaded < self.max_counts:
+                current_request_size = min(self.page_counts, self.max_counts - downloaded)
+                data = await crawler.fetch_mix_aweme(mix_id, cursor, current_request_size)
+                video_filter = UserPostFilter(data)
+
+                for detail in video_filter.get_video_list():
+                    if downloaded >= self.max_counts:
+                        break
+                    all_details.append(detail)
+                    downloaded += 1
+
+                if not video_filter.has_more:
+                    break
+                cursor = video_filter.max_cursor
+                await asyncio.sleep(self.timeout)
+
+        mix_name = all_details[0].mix_name if all_details else mix_id
+        return {"success": True, "videos": [d.to_dict() for d in all_details], "detail": {"desc": mix_name}}
 
     async def handle_user_mix(self, url: str, progress_callback=None) -> dict:
         """下载合集视频"""
@@ -365,15 +569,44 @@ class DouyinHandler:
         save_dir.mkdir(parents=True, exist_ok=True)
 
         download_tasks = []
+        task_details = {}
+        image_tasks = []
+
         for detail in all_details:
-            if detail.video_url:
+            if detail.is_image_post and (detail.images or detail.images_video):
+                image_tasks.append(detail)
+            elif detail.video_url:
                 filename = format_filename(self.naming, detail.to_dict())
-                download_tasks.append({"url": detail.video_url, "dir": str(save_dir), "filename": filename, "task_id": detail.aweme_id})
+                download_tasks.append({"url": detail.video_url, "dir": str(save_dir), "filename": f"{filename}_video", "task_id": detail.aweme_id})
+                task_details[detail.aweme_id] = detail
 
         async with self._make_downloader(progress_callback) as dl:
-            paths = await dl.batch_download(download_tasks)
+            download_results = await dl.batch_download(download_tasks)
 
-        return {"success": True, "count": len(paths), "mix_name": mix_name}
+            for detail in image_tasks:
+                filename = format_filename(self.naming, detail.to_dict())
+                # 下载动图/实况
+                for i, live_url in enumerate(detail.images_video):
+                    if live_url:
+                        path = await dl.download_live_image(live_url, save_dir, f"{filename}_live_{i + 1}")
+                        download_results.append({"task_id": detail.aweme_id, "path": path})
+                # 下载静态图片
+                for i, img_url in enumerate(detail.images):
+                    if img_url:
+                        path = await dl.download_image(img_url, save_dir, f"{filename}_image_{i + 1}")
+                        download_results.append({"task_id": detail.aweme_id, "path": path})
+                task_details[detail.aweme_id] = detail
+
+        # 构建返回结果
+        results = []
+        for item in download_results:
+            detail = task_details.get(item["task_id"])
+            if detail:
+                results.append({"path": str(item["path"]), "detail": detail.to_db_dict()})
+            else:
+                results.append({"path": str(item["path"]), "detail": {}})
+
+        return {"success": True, "count": len(results), "results": results, "mix_name": mix_name}
 
     # ============================================================
     # 直播 (live)

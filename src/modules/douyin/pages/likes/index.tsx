@@ -5,9 +5,10 @@ import { VideoCard } from "@/components/shared/video-card";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { getUserProfile, getUserLikes } from "@/lib/api";
+import { getUserProfile, getUserLikes, downloadUserLikes } from "@/lib/api";
 import type { UserProfile as UserProfileType, VideoItem } from "@/lib/api-types";
-import { Heart, Loader2, AlertCircle, Download } from "lucide-react";
+import { Loader2, AlertCircle, Download } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
 
 function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -20,6 +21,9 @@ export default function LikesPage() {
   const [profile, setProfile] = useState<UserProfileType | null>(null);
   const [likes, setLikes] = useState<VideoItem[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadedCount, setDownloadedCount] = useState(0);
+  const [downloadProgress, setDownloadProgress] = useState(0);
 
   const handleParse = useCallback(async (url: string) => {
     setLoading(true);
@@ -44,13 +48,28 @@ export default function LikesPage() {
     setLoading(false);
   }, []);
 
+  const handleDownloadAll = async () => {
+    setDownloading(true);
+    setDownloadProgress(0);
+    setDownloadedCount(0);
+
+    const res = await downloadUserLikes(profile?.sec_user_id ? `https://www.douyin.com/user/${profile.sec_user_id}` : "");
+    if (res.success) {
+      setDownloadedCount(likes.length);
+      setDownloadProgress(100);
+    } else {
+      setError(res.error || "下载失败");
+    }
+    setDownloading(false);
+  };
+
   return (
     <>
       <Header title="用户点赞" description="查看用户的点赞列表" parent={{ label: "首页", path: "/douyin" }}>
         {likes.length > 0 && (
-          <Button variant="outline" size="sm">
-            <Download className="h-4 w-4 mr-1" />
-            全部下载
+          <Button variant="outline" size="sm" onClick={handleDownloadAll} disabled={downloading}>
+            {downloading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Download className="h-4 w-4 mr-1" />}
+            {downloading ? `下载中 ${downloadedCount}/${likes.length}` : "全部下载"}
           </Button>
         )}
       </Header>
@@ -69,6 +88,17 @@ export default function LikesPage() {
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
+        )}
+
+        {downloading && (
+          <Card>
+            <CardContent className="p-4">
+              <div className="space-y-1">
+                <Progress value={downloadProgress} />
+                <p className="text-xs text-muted-foreground text-right">{downloadedCount} / {likes.length}</p>
+              </div>
+            </CardContent>
+          </Card>
         )}
 
         {profile && !loading && (

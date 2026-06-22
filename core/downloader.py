@@ -179,6 +179,26 @@ class Downloader:
 
         return full_path
 
+    async def download_live_image(self, video_url: str, save_dir: str | Path, filename: str) -> Path:
+        """下载动图/实况（保存为 mp4）"""
+        save_path = Path(save_dir)
+        save_path.mkdir(parents=True, exist_ok=True)
+        full_path = save_path / f"{filename}.mp4"
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            "Referer": "https://www.douyin.com/",
+            "Cookie": self.cookie,
+        }
+
+        async with self._client.stream("GET", video_url, headers=headers) as resp:
+            resp.raise_for_status()
+            async with aiofiles.open(full_path, "wb") as f:
+                async for chunk in resp.aiter_bytes(self.CHUNK_SIZE):
+                    await f.write(chunk)
+
+        return full_path
+
     async def download_music(
         self,
         music_url: str,
@@ -221,16 +241,16 @@ class Downloader:
         self,
         tasks: list[dict],
         max_concurrent: int = 3,
-    ) -> list[Path]:
+    ) -> list[dict]:
         """
         批量下载
 
         Args:
-            tasks: [{"url": ..., "dir": ..., "filename": ...}, ...]
+            tasks: [{"url": ..., "dir": ..., "filename": ..., "task_id": ...}, ...]
             max_concurrent: 最大并发数
 
         Returns:
-            下载完成的文件路径列表
+            [{"task_id": ..., "path": ...}, ...]
         """
         semaphore = asyncio.Semaphore(max_concurrent)
         results = []
@@ -243,7 +263,10 @@ class Downloader:
                     filename=t["filename"],
                     task_id=t.get("task_id", t["filename"]),
                 )
-                results.append(path)
+                results.append({
+                    "task_id": t.get("task_id", t["filename"]),
+                    "path": path,
+                })
 
         await asyncio.gather(*[_download_one(t) for t in tasks])
         return results

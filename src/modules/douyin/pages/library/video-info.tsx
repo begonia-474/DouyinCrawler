@@ -47,8 +47,9 @@ export default function LibraryVideoInfoPage() {
           keyword: search || undefined,
           sort_by: sortBy,
           sort_order: sortOrder,
+          post_type: "video",
         }),
-        getVideoCount({ keyword: search || undefined }),
+        getVideoCount({ keyword: search || undefined, post_type: "video" }),
       ]);
       setItems(data);
       setTotal(count);
@@ -190,7 +191,7 @@ export default function LibraryVideoInfoPage() {
                     {item.duration > 0 && (
                       <span className="text-xs text-muted-foreground flex items-center gap-1">
                         <Clock className="h-3 w-3" />
-                        {formatDuration(item.duration)}
+                        {formatDuration(Math.floor(item.duration / 1000))}
                       </span>
                     )}
                     {item.create_time && (

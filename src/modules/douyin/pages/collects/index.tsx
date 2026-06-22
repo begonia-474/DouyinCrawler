@@ -1,15 +1,16 @@
 import { useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { Header } from "@/components/layout/header";
 import { UrlInput } from "@/components/shared/url-input";
 import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { getUserProfile, getUserCollects } from "@/lib/api";
 import type { UserProfile as UserProfileType, CollectsFolder } from "@/lib/api-types";
-import { FolderOpen, ChevronRight, Loader2, AlertCircle, Download } from "lucide-react";
+import { FolderOpen, ChevronRight, Loader2, AlertCircle } from "lucide-react";
 
 export default function CollectsPage() {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [profile, setProfile] = useState<UserProfileType | null>(null);
   const [collects, setCollects] = useState<CollectsFolder[]>([]);
@@ -40,14 +41,7 @@ export default function CollectsPage() {
 
   return (
     <>
-      <Header title="用户收藏" description="查看用户的收藏夹" parent={{ label: "首页", path: "/douyin" }}>
-        {collects.length > 0 && (
-          <Button variant="outline" size="sm">
-            <Download className="h-4 w-4 mr-1" />
-            全部下载
-          </Button>
-        )}
-      </Header>
+      <Header title="用户收藏" description="查看用户的收藏夹，点击进入下载" parent={{ label: "首页", path: "/douyin" }} />
 
       <div className="space-y-6">
         <UrlInput onSubmit={handleParse} loading={loading} placeholder="粘贴用户主页链接..." allowedTypes={["user"]} />
@@ -82,7 +76,7 @@ export default function CollectsPage() {
 
             <div className="space-y-3">
               {collects.map((folder) => (
-                <Card key={folder.id} className="hover:bg-accent/50 transition-colors cursor-pointer">
+                <Card key={folder.id} className="hover:bg-accent/50 transition-colors cursor-pointer" onClick={() => navigate(`/douyin/favorites/${folder.id}`)}>
                   <CardContent className="p-4 flex items-center gap-4">
                     <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
                       <FolderOpen className="h-5 w-5 text-primary" />

@@ -3,8 +3,8 @@ mod proxy;
 
 use db::{
     AppConfig, Database, DownloadRecord, DownloadStats, LiveRecord,
-    NewDownloadRecord, NewLiveRecord, UserInfo, VideoInfo,
-    VideoStats, UserStats,
+    MusicCollection, NewDownloadRecord, NewLiveRecord, NewMusicCollection,
+    UserInfo, VideoInfo, VideoStats, UserStats,
 };
 use proxy::PythonProxy;
 use std::collections::HashMap;
@@ -306,6 +306,118 @@ async fn download_one_and_save(
     Ok(result)
 }
 
+/// 保存单个视频的下载记录和视频信息
+async fn save_download_result(
+    db: &Database,
+    proxy: &PythonProxy,
+    path: &str,
+    detail: &Value,
+    download_type: &str,
+) {
+    let dget = |key: &str| detail.get(key);
+    let dstr_opt = |key: &str| dget(key).and_then(|v| v.as_str()).map(String::from);
+    let di64 = |key: &str| dget(key).and_then(|v| v.as_i64()).unwrap_or(0);
+    let di32 = |key: &str| dget(key).and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+
+    let aweme_id = dstr_opt("aweme_id");
+    let author_nickname = dstr_opt("author_nickname");
+    let author_sec_uid = dstr_opt("author_sec_uid");
+
+    // 写入 download_history
+    let record = NewDownloadRecord {
+        aweme_id: aweme_id.clone(),
+        download_type: download_type.to_string(),
+        title: dstr_opt("desc"),
+        author_nickname: author_nickname.clone(),
+        author_sec_uid: author_sec_uid.clone(),
+        file_path: Some(path.to_string()),
+        file_size: 0,
+        cover_url: dstr_opt("cover_url"),
+        status: "completed".to_string(),
+        error_msg: None,
+    };
+    if let Err(e) = db.save_download(&record) {
+        eprintln!("[Rust] 保存下载记录失败: {}", e);
+    }
+
+    // 写入 video_info
+    if let Some(aweme_id) = aweme_id.as_ref().filter(|s| !s.is_empty()) {
+        let video = VideoInfo {
+            aweme_id: aweme_id.clone(),
+            desc: dstr_opt("desc"),
+            aweme_type: di32("aweme_type"),
+            author_nickname: author_nickname.clone(),
+            author_sec_uid: author_sec_uid.clone(),
+            author_uid: dstr_opt("author_uid"),
+            create_time: dget("create_time").and_then(|v| v.as_i64()),
+            duration: di32("duration"),
+            video_url: dstr_opt("video_url"),
+            cover_url: dstr_opt("cover_url"),
+            music_title: dstr_opt("music_title"),
+            digg_count: di64("digg_count"),
+            comment_count: di64("comment_count"),
+            share_count: di64("share_count"),
+            collect_count: di64("collect_count"),
+            mix_id: dstr_opt("mix_id"),
+            mix_name: dstr_opt("mix_name"),
+            author_nickname_raw: dstr_opt("author_nickname_raw"),
+            author_short_id: dstr_opt("author_short_id"),
+            author_unique_id: dstr_opt("author_unique_id"),
+            desc_raw: dstr_opt("desc_raw"),
+            is_ads: di32("is_ads"),
+            is_story: di32("is_story"),
+            is_top: di32("is_top"),
+            is_long_video: di32("is_long_video"),
+            video_bit_rate: dstr_opt("video_bit_rate"),
+            animated_cover: dstr_opt("animated_cover"),
+            private_status: di32("private_status"),
+            is_delete: di32("is_delete"),
+            music_author: dstr_opt("music_author"),
+            music_author_raw: dstr_opt("music_author_raw"),
+            music_duration: di32("music_duration"),
+            music_id: dstr_opt("music_id"),
+            music_mid: dstr_opt("music_mid"),
+            pgc_author: dstr_opt("pgc_author"),
+            pgc_author_title: dstr_opt("pgc_author_title"),
+            pgc_music_type: di32("pgc_music_type"),
+            music_status: di32("music_status"),
+            music_owner_handle: dstr_opt("music_owner_handle"),
+            music_owner_id: dstr_opt("music_owner_id"),
+            music_owner_nickname: dstr_opt("music_owner_nickname"),
+            music_play_url: dstr_opt("music_play_url"),
+            is_commerce_music: di32("is_commerce_music"),
+            mix_desc: dstr_opt("mix_desc"),
+            mix_create_time: di64("mix_create_time"),
+            mix_pic_type: di32("mix_pic_type"),
+            mix_type: di32("mix_type"),
+            mix_share_url: dstr_opt("mix_share_url"),
+            can_comment: di32("can_comment"),
+            can_forward: di32("can_forward"),
+            can_share: di32("can_share"),
+            download_setting: di32("download_setting"),
+            allow_douplus: di32("allow_douplus"),
+            allow_share: di32("allow_share"),
+            admire_count: di64("admire_count"),
+            hashtag_ids: dstr_opt("hashtag_ids"),
+            hashtag_names: dstr_opt("hashtag_names"),
+            images: dstr_opt("images"),
+            region: dstr_opt("region"),
+            is_prohibited: di32("is_prohibited"),
+        };
+        if let Err(e) = db.save_video(&video) {
+            eprintln!("[Rust] 保存视频信息失败: {}", e);
+        }
+    }
+
+    // 写入 user_info
+    if let Some(sec_uid) = author_sec_uid.as_ref().filter(|s| !s.is_empty()) {
+        let user = fetch_and_build_user_info(proxy, sec_uid, Some(detail)).await;
+        if let Err(e) = db.save_user(&user) {
+            eprintln!("[Rust] 保存用户信息失败: {}", e);
+        }
+    }
+}
+
 /// 从 detail JSON 中提取字符串值
 fn detail_str(detail: &Option<&Value>, key: &str) -> Option<String> {
     detail.and_then(|d| d.get(key)).and_then(|v| v.as_str()).map(String::from)
@@ -456,6 +568,50 @@ async fn download_music_and_save(
     Ok(result)
 }
 
+#[tauri::command]
+async fn download_batch_and_save(
+    proxy: State<'_, PythonProxy>,
+    db: State<'_, Database>,
+    path: String,
+    body: Value,
+) -> Result<Value, String> {
+    // 1. 调用 Python 批量下载
+    let result = proxy.post(&path, body).await?;
+
+    // 2. 检查是否成功
+    let success = result.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
+    if !success {
+        return Ok(result);
+    }
+
+    // 3. 解析结果并保存
+    let data = result.get("data").unwrap_or(&result);
+    let results = data.get("results").and_then(|v| v.as_array());
+
+    if let Some(results) = results {
+        // 确定下载类型
+        let download_type = if path.contains("/posts") {
+            "user_post"
+        } else if path.contains("/likes") {
+            "user_like"
+        } else if path.contains("/mix") {
+            "mix"
+        } else if path.contains("/collects") {
+            "collects"
+        } else {
+            "batch"
+        };
+
+        for item in results {
+            let file_path = item.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            let detail = item.get("detail").unwrap_or(&serde_json::Value::Null);
+            save_download_result(&db, &proxy, file_path, detail, download_type).await;
+        }
+    }
+
+    Ok(result)
+}
+
 // ============================================================
 // Tauri Commands - 数据库写入
 // ============================================================
@@ -500,6 +656,53 @@ fn is_video_downloaded(
     db.is_video_downloaded(&aweme_id).map_err(|e| e.to_string())
 }
 
+// === 音乐收藏 ===
+
+#[tauri::command]
+fn save_music_collection(
+    db: State<'_, Database>,
+    music: NewMusicCollection,
+) -> Result<(), String> {
+    db.save_music_collection(&music).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn save_music_collection_batch(
+    db: State<'_, Database>,
+    musics: Vec<NewMusicCollection>,
+) -> Result<(), String> {
+    db.save_music_collection_batch(&musics).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_music_collection(
+    db: State<'_, Database>,
+    limit: i64,
+    offset: i64,
+    keyword: Option<String>,
+    status: Option<String>,
+) -> Result<Vec<MusicCollection>, String> {
+    db.get_music_collection(limit, offset, keyword, status).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_music_collection_count(
+    db: State<'_, Database>,
+    keyword: Option<String>,
+    status: Option<String>,
+) -> Result<i64, String> {
+    db.get_music_collection_count(keyword, status).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn update_music_file_path(
+    db: State<'_, Database>,
+    music_id: String,
+    file_path: String,
+) -> Result<(), String> {
+    db.update_music_file_path(&music_id, &file_path).map_err(|e| e.to_string())
+}
+
 // ============================================================
 // Entry Point
 // ============================================================
@@ -530,6 +733,7 @@ pub fn run() {
             // 代理 + 自动写入数据库
             download_one_and_save,
             download_music_and_save,
+            download_batch_and_save,
             // 数据库读取
             get_downloads,
             get_download_stats,
@@ -541,11 +745,16 @@ pub fn run() {
             get_user_by_sec_uid,
             get_video_stats,
             get_user_stats,
+            get_music_collection,
+            get_music_collection_count,
             // 数据库写入
             save_download_record,
             save_live_record_record,
             save_user_info,
             save_video_info,
+            save_music_collection,
+            save_music_collection_batch,
+            update_music_file_path,
             is_video_downloaded,
         ])
         .run(tauri::generate_context!())

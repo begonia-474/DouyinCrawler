@@ -12,7 +12,7 @@ import {
   Image,
   Music,
 } from "lucide-react";
-import { getLiveRecords, getVideoStats, getUserStats, getVideoCount } from "@/lib/api";
+import { getLiveRecords, getVideoStats, getUserStats, getVideoCount, getMusicCollectionCountFromDB } from "@/lib/api";
 import type { VideoStats, UserStats } from "@/lib/tauri-types";
 
 const categories = [
@@ -31,18 +31,19 @@ export default function LibraryPage() {
 
   const loadStats = useCallback(async () => {
     try {
-      const [liveData, vs, us, imgCount, musicCount] = await Promise.all([
+      const [liveData, vs, us, videoCount, imgCount, musicCount] = await Promise.all([
         getLiveRecords({ limit: 1 }),
         getVideoStats().catch(() => null),
         getUserStats().catch(() => null),
+        getVideoCount({ post_type: "video" }).catch(() => 0),
         getVideoCount({ post_type: "images" }).catch(() => 0),
-        getVideoCount({ post_type: "music" }).catch(() => 0),
+        getMusicCollectionCountFromDB(undefined, "downloaded").catch(() => 0),
       ]);
       setVideoStats(vs);
       setUserStats(us);
 
       const counts: Record<string, number> = {};
-      if (vs) counts.video_info = vs.total_count;
+      counts.video_info = videoCount;
       if (us) counts.user_info = us.total_count;
       counts.images = imgCount;
       counts.music = musicCount;

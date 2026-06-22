@@ -74,6 +74,50 @@ export async function downloadOne(url: string): Promise<ApiResponse<DownloadResu
   }
 }
 
+export async function downloadUserPosts(url: string): Promise<ApiResponse> {
+  try {
+    return await invoke<ApiResponse>("download_batch_and_save", {
+      path: "/api/download/user/posts",
+      body: { url },
+    });
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
+  }
+}
+
+export async function downloadUserLikes(url: string): Promise<ApiResponse> {
+  try {
+    return await invoke<ApiResponse>("download_batch_and_save", {
+      path: "/api/download/user/likes",
+      body: { url },
+    });
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
+  }
+}
+
+export async function downloadMix(url: string): Promise<ApiResponse> {
+  try {
+    return await invoke<ApiResponse>("download_batch_and_save", {
+      path: "/api/download/mix",
+      body: { url },
+    });
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
+  }
+}
+
+export async function downloadCollectsVideo(collectsId: string): Promise<ApiResponse> {
+  try {
+    return await invoke<ApiResponse>("download_batch_and_save", {
+      path: "/api/download/collects/video",
+      body: { collects_id: collectsId },
+    });
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
+  }
+}
+
 // ============================================================
 // 评论
 // ============================================================
@@ -265,10 +309,10 @@ export async function getVideos(params: {
     limit: params.limit ?? 20,
     offset: params.offset ?? 0,
     keyword: params.keyword ?? null,
-    author_sec_uid: params.author_sec_uid ?? null,
-    sort_by: params.sort_by ?? null,
-    sort_order: params.sort_order ?? null,
-    post_type: params.post_type ?? null,
+    authorSecUid: params.author_sec_uid ?? null,
+    sortBy: params.sort_by ?? null,
+    sortOrder: params.sort_order ?? null,
+    postType: params.post_type ?? null,
   });
 }
 
@@ -277,10 +321,11 @@ export async function getVideoCount(params?: {
   author_sec_uid?: string;
   post_type?: string;
 }): Promise<number> {
+  // 测试: 直接传 postType (camelCase)
   return invoke("get_video_count", {
     keyword: params?.keyword ?? null,
     author_sec_uid: params?.author_sec_uid ?? null,
-    post_type: params?.post_type ?? null,
+    postType: params?.post_type ?? null,
   });
 }
 
@@ -343,4 +388,61 @@ export async function saveDownloadRecord(record: NewDownloadRecord): Promise<num
 
 export async function isVideoDownloaded(awemeId: string): Promise<boolean> {
   return invoke("is_video_downloaded", { awemeId });
+}
+
+// === 音乐收藏 ===
+
+export interface MusicCollectionItem {
+  music_id: string;
+  mid: string | null;
+  title: string | null;
+  author: string | null;
+  owner_nickname: string | null;
+  duration: number;
+  cover: string | null;
+  play_url: string | null;
+  file_path: string | null;
+  status: string;
+  created_at: number;
+}
+
+export interface NewMusicCollectionItem {
+  music_id: string;
+  mid?: string;
+  title?: string;
+  author?: string;
+  owner_nickname?: string;
+  duration: number;
+  cover?: string;
+  play_url?: string;
+}
+
+export async function getMusicCollectionFromDB(params: {
+  limit?: number;
+  offset?: number;
+  keyword?: string;
+  status?: string;
+}): Promise<MusicCollectionItem[]> {
+  return invoke("get_music_collection", {
+    limit: params.limit ?? 20,
+    offset: params.offset ?? 0,
+    keyword: params.keyword ?? null,
+    status: params.status ?? null,
+  });
+}
+
+export async function getMusicCollectionCountFromDB(keyword?: string, status?: string): Promise<number> {
+  return invoke("get_music_collection_count", { keyword: keyword ?? null, status: status ?? null });
+}
+
+export async function saveMusicCollection(music: NewMusicCollectionItem): Promise<void> {
+  return invoke("save_music_collection", { music });
+}
+
+export async function saveMusicCollectionBatch(musics: NewMusicCollectionItem[]): Promise<void> {
+  return invoke("save_music_collection_batch", { musics });
+}
+
+export async function updateMusicFilePath(musicId: string, filePath: string): Promise<void> {
+  return invoke("update_music_file_path", { musicId, filePath });
 }

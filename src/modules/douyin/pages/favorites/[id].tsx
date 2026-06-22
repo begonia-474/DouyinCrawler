@@ -4,9 +4,10 @@ import { Header } from "@/components/layout/header";
 import { VideoCard } from "@/components/shared/video-card";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { getCollectsVideoList, downloadOne } from "@/lib/api";
+import { getCollectsVideoList, downloadCollectsVideo } from "@/lib/api";
 import type { VideoItem } from "@/lib/api-types";
 import { Loader2, AlertCircle, Download, ArrowLeft } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
 
 function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -20,6 +21,9 @@ export default function CollectsDetailPage() {
   const [loading, setLoading] = useState(false);
   const [videos, setVideos] = useState<VideoItem[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadedCount, setDownloadedCount] = useState(0);
+  const [downloadProgress, setDownloadProgress] = useState(0);
 
   const fetchVideos = useCallback(async () => {
     if (!id) return;
@@ -41,9 +45,19 @@ export default function CollectsDetailPage() {
   }, [fetchVideos]);
 
   const handleDownloadAll = async () => {
-    for (const video of videos) {
-      await downloadOne(`https://www.douyin.com/video/${video.aweme_id}`);
+    if (!id) return;
+    setDownloading(true);
+    setDownloadProgress(0);
+    setDownloadedCount(0);
+
+    const res = await downloadCollectsVideo(id);
+    if (res.success) {
+      setDownloadedCount(videos.length);
+      setDownloadProgress(100);
+    } else {
+      setError(res.error || "下载失败");
     }
+    setDownloading(false);
   };
 
   return (
@@ -55,9 +69,9 @@ export default function CollectsDetailPage() {
             返回
           </Button>
           {videos.length > 0 && (
-            <Button size="sm" onClick={handleDownloadAll}>
-              <Download className="h-4 w-4 mr-1" />
-              全部下载
+            <Button size="sm" onClick={handleDownloadAll} disabled={downloading}>
+              {downloading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Download className="h-4 w-4 mr-1" />}
+              {downloading ? `下载中 ${downloadedCount}/${videos.length}` : "全部下载"}
             </Button>
           )}
         </div>
@@ -75,6 +89,17 @@ export default function CollectsDetailPage() {
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
+        )}
+
+        {downloading && (
+          <Card>
+            <CardContent className="p-4">
+              <div className="space-y-1">
+                <Progress value={downloadProgress} />
+                <p className="text-xs text-muted-foreground text-right">{downloadedCount} / {videos.length}</p>
+              </div>
+            </CardContent>
+          </Card>
         )}
 
         {!loading && videos.length === 0 && !error && (

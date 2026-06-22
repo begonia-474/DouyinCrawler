@@ -373,6 +373,17 @@ class PostDetailFilter:
         return [get_nested(img, "url_list", 0, default="") for img in imgs if img]
 
     @property
+    def images_video(self) -> list[str]:
+        """图集动图/实况 URL 列表"""
+        imgs = self._aweme.get("images") or []
+        result = []
+        for img in imgs:
+            if img:
+                video_url = get_nested(img, "video", "play_addr", "url_list", 0, default="")
+                result.append(video_url)
+        return result
+
+    @property
     def is_image_post(self) -> bool:
         return self.aweme_type == 68
 
@@ -637,7 +648,8 @@ class PostDetailFilter:
             "author_uid": self.author_uid, "author_sec_uid": self.author_sec_uid,
             "create_time": self.create_time, "duration": self.duration,
             "video_url": self.video_url, "cover_url": self.cover_url,
-            "images": self.images, "is_image_post": self.is_image_post,
+            "images": self.images, "images_video": self.images_video,
+            "is_image_post": self.is_image_post,
             "music_title": self.music_title, "music_url": self.music_url,
             "digg_count": self.digg_count, "comment_count": self.comment_count,
             "share_count": self.share_count, "collect_count": self.collect_count,
@@ -653,6 +665,8 @@ class PostDetailFilter:
             "author_uid": self.author_uid, "author_sec_uid": self.author_sec_uid,
             "create_time": self.create_time, "duration": self.duration,
             "video_url": self.video_url, "cover_url": self.cover_url,
+            "images": self.images, "images_video": self.images_video,
+            "is_image_post": self.is_image_post,
             "music_title": self.music_title, "music_url": self.music_url,
             "digg_count": self.digg_count, "comment_count": self.comment_count,
             "share_count": self.share_count, "collect_count": self.collect_count,

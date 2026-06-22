@@ -96,6 +96,26 @@ async def download_one(req: UrlRequest):
     return await safe_call(task_manager.handler.handle_one_video(req.url), "单视频下载")
 
 
+@app.post("/api/download/user/posts")
+async def download_user_posts(req: UrlRequest):
+    return await safe_call(task_manager.handler.handle_user_post(req.url), "用户作品下载")
+
+
+@app.post("/api/download/user/likes")
+async def download_user_likes(req: UrlRequest):
+    return await safe_call(task_manager.handler.handle_user_like(req.url), "用户点赞下载")
+
+
+@app.post("/api/download/mix")
+async def download_mix(req: UrlRequest):
+    return await safe_call(task_manager.handler.handle_user_mix(req.url), "合集下载")
+
+
+@app.post("/api/download/collects/video")
+async def download_collects_video(req: CollectsVideoRequest):
+    return await safe_call(task_manager.handler.handle_collects_video(req.collects_id), "收藏夹视频下载")
+
+
 # === 评论 ===
 
 @app.post("/api/comments")
@@ -181,16 +201,16 @@ async def user_profile(req: UrlRequest):
 @app.post("/api/user/posts")
 async def user_posts(req: UrlRequest):
     return await safe_call(
-        task_manager.handler.handle_user_post(req.url),
-        "用户作品",
+        task_manager.handler.handle_user_post_list(req.url),
+        "用户作品列表",
     )
 
 
 @app.post("/api/user/likes")
 async def user_likes(req: UrlRequest):
     return await safe_call(
-        task_manager.handler.handle_user_like(req.url),
-        "用户点赞",
+        task_manager.handler.handle_user_like_list(req.url),
+        "用户点赞列表",
     )
 
 
@@ -291,8 +311,8 @@ async def following_live():
 @app.post("/api/mix")
 async def mix_info(req: UrlRequest):
     return await safe_call(
-        task_manager.handler.handle_user_mix(req.url),
-        "合集信息",
+        task_manager.handler.handle_user_mix_list(req.url),
+        "合集列表",
     )
 
 
