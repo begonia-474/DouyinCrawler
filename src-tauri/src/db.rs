@@ -1160,6 +1160,22 @@ impl Database {
         Ok(conn.last_insert_rowid())
     }
 
+    pub fn get_download_file_path(&self, id: i64) -> Result<Option<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT file_path FROM download_history WHERE id = ?1")?;
+        let mut rows = stmt.query_map(rusqlite::params![id], |row| row.get(0))?;
+        match rows.next() {
+            Some(row) => row,
+            None => Ok(None),
+        }
+    }
+
+    pub fn delete_download(&self, id: i64) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM download_history WHERE id = ?1", rusqlite::params![id])?;
+        Ok(())
+    }
+
     pub fn save_live_record(&self, record: &NewLiveRecord) -> Result<i64> {
         let conn = self.conn.lock().unwrap();
         let now = SystemTime::now()
@@ -1187,6 +1203,22 @@ impl Database {
             ],
         )?;
         Ok(conn.last_insert_rowid())
+    }
+
+    pub fn get_live_record_file_path(&self, id: i64) -> Result<Option<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT file_path FROM live_records WHERE id = ?1")?;
+        let mut rows = stmt.query_map(rusqlite::params![id], |row| row.get(0))?;
+        match rows.next() {
+            Some(row) => row,
+            None => Ok(None),
+        }
+    }
+
+    pub fn delete_live_record(&self, id: i64) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM live_records WHERE id = ?1", rusqlite::params![id])?;
+        Ok(())
     }
 
     pub fn save_user(&self, user: &UserInfo) -> Result<()> {
@@ -1225,6 +1257,12 @@ impl Database {
                 user.custom_verify,
             ],
         )?;
+        Ok(())
+    }
+
+    pub fn delete_user(&self, sec_user_id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM user_info WHERE sec_user_id = ?1", rusqlite::params![sec_user_id])?;
         Ok(())
     }
 
@@ -1285,6 +1323,12 @@ impl Database {
                 video.images, video.region, video.is_prohibited,
             ],
         )?;
+        Ok(())
+    }
+
+    pub fn delete_video(&self, aweme_id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM video_info WHERE aweme_id = ?1", rusqlite::params![aweme_id])?;
         Ok(())
     }
 
@@ -1461,6 +1505,22 @@ impl Database {
             "UPDATE music_collection SET file_path = ?1, status = 'downloaded' WHERE music_id = ?2",
             rusqlite::params![file_path, music_id],
         )?;
+        Ok(())
+    }
+
+    pub fn get_music_file_path(&self, music_id: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT file_path FROM music_collection WHERE music_id = ?1")?;
+        let mut rows = stmt.query_map(rusqlite::params![music_id], |row| row.get(0))?;
+        match rows.next() {
+            Some(row) => row,
+            None => Ok(None),
+        }
+    }
+
+    pub fn delete_music_collection(&self, music_id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM music_collection WHERE music_id = ?1", rusqlite::params![music_id])?;
         Ok(())
     }
 }

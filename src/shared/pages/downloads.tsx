@@ -14,8 +14,9 @@ import {
   Image,
   Radio,
   Music,
+  Trash2,
 } from "lucide-react";
-import { getDownloads, getLiveRecords } from "@/lib/api";
+import { deleteDownloadRecord, deleteLiveRecord, getDownloads, getLiveRecords } from "@/lib/api";
 import type { DownloadRecord, LiveRecord } from "@/lib/tauri-types";
 import { formatFileSize, formatTimestamp } from "@/lib/utils";
 
@@ -49,6 +50,31 @@ export default function DownloadsPage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  const askDeleteFile = (filePath: string | null) => {
+    if (!filePath) return false;
+    return window.confirm("是否同时删除这条记录对应的本地文件？\n\n取消则只删除记录。");
+  };
+
+  const handleDeleteDownload = async (item: DownloadRecord) => {
+    if (!window.confirm("确定删除这条下载记录？")) return;
+    try {
+      await deleteDownloadRecord(item.id, askDeleteFile(item.file_path));
+      await loadData();
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "删除失败");
+    }
+  };
+
+  const handleDeleteLiveRecord = async (item: LiveRecord) => {
+    if (!window.confirm("确定删除这条直播录制记录？")) return;
+    try {
+      await deleteLiveRecord(item.id, askDeleteFile(item.file_path));
+      await loadData();
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "删除失败");
+    }
+  };
 
   const completedDownloads = downloads.filter((d) => d.status === "completed");
 
@@ -131,6 +157,14 @@ export default function DownloadsPage() {
                             <FolderOpen className="h-4 w-4" />
                           </Button>
                         )}
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          title="删除记录"
+                          onClick={() => handleDeleteDownload(item)}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
                       </div>
                     </div>
                   </Bezel>
@@ -178,6 +212,14 @@ export default function DownloadsPage() {
                     <Badge variant={item.status === "completed" ? "default" : "destructive"} className="text-[11px] rounded-full">
                       {item.status === "completed" ? "已完成" : item.status}
                     </Badge>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      title="删除记录"
+                      onClick={() => handleDeleteLiveRecord(item)}
+                    >
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
                   </div>
                 </Bezel>
               </AnimateEntry>

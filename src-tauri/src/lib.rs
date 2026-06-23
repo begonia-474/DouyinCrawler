@@ -8,7 +8,7 @@ use db::{
 };
 use proxy::PythonProxy;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::{Manager, State};
 use serde_json::Value;
 
@@ -153,6 +153,21 @@ fn get_video_stats(db: State<'_, Database>) -> Result<VideoStats, String> {
 #[tauri::command]
 fn get_user_stats(db: State<'_, Database>) -> Result<UserStats, String> {
     db.get_user_stats().map_err(|e| e.to_string())
+}
+
+fn delete_local_path(path: Option<String>) -> Result<(), String> {
+    let Some(path) = path.filter(|value| !value.trim().is_empty()) else {
+        return Ok(());
+    };
+    let local_path = Path::new(&path);
+    if !local_path.exists() {
+        return Ok(());
+    }
+    if local_path.is_dir() {
+        std::fs::remove_dir_all(local_path).map_err(|e| format!("删除本地文件夹失败: {}", e))
+    } else {
+        std::fs::remove_file(local_path).map_err(|e| format!("删除本地文件失败: {}", e))
+    }
 }
 
 // ============================================================
@@ -703,6 +718,61 @@ fn update_music_file_path(
     db.update_music_file_path(&music_id, &file_path).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn delete_download_record(
+    db: State<'_, Database>,
+    id: i64,
+    delete_file: bool,
+) -> Result<(), String> {
+    if delete_file {
+        let file_path = db.get_download_file_path(id).map_err(|e| e.to_string())?;
+        delete_local_path(file_path)?;
+    }
+    db.delete_download(id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_live_record(
+    db: State<'_, Database>,
+    id: i64,
+    delete_file: bool,
+) -> Result<(), String> {
+    if delete_file {
+        let file_path = db.get_live_record_file_path(id).map_err(|e| e.to_string())?;
+        delete_local_path(file_path)?;
+    }
+    db.delete_live_record(id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_video_info(
+    db: State<'_, Database>,
+    aweme_id: String,
+) -> Result<(), String> {
+    db.delete_video(&aweme_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_user_info(
+    db: State<'_, Database>,
+    sec_user_id: String,
+) -> Result<(), String> {
+    db.delete_user(&sec_user_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_music_collection(
+    db: State<'_, Database>,
+    music_id: String,
+    delete_file: bool,
+) -> Result<(), String> {
+    if delete_file {
+        let file_path = db.get_music_file_path(&music_id).map_err(|e| e.to_string())?;
+        delete_local_path(file_path)?;
+    }
+    db.delete_music_collection(&music_id).map_err(|e| e.to_string())
+}
+
 // ============================================================
 // Entry Point
 // ============================================================
@@ -755,6 +825,11 @@ pub fn run() {
             save_music_collection,
             save_music_collection_batch,
             update_music_file_path,
+            delete_download_record,
+            delete_live_record,
+            delete_video_info,
+            delete_user_info,
+            delete_music_collection,
             is_video_downloaded,
         ])
         .run(tauri::generate_context!())

@@ -446,3 +446,23 @@ export async function saveMusicCollectionBatch(musics: NewMusicCollectionItem[])
 export async function updateMusicFilePath(musicId: string, filePath: string): Promise<void> {
   return invoke("update_music_file_path", { musicId, filePath });
 }
+
+export async function deleteDownloadRecord(id: number, deleteFile = false): Promise<void> {
+  return invoke("delete_download_record", { id, deleteFile });
+}
+
+export async function deleteLiveRecord(id: number, deleteFile = false): Promise<void> {
+  return invoke("delete_live_record", { id, deleteFile });
+}
+
+export async function deleteVideoInfo(awemeId: string): Promise<void> {
+  return invoke("delete_video_info", { awemeId });
+}
+
+export async function deleteUserInfo(secUserId: string): Promise<void> {
+  return invoke("delete_user_info", { secUserId });
+}
+
+export async function deleteMusicCollection(musicId: string, deleteFile = false): Promise<void> {
+  return invoke("delete_music_collection", { musicId, deleteFile });
+}
