@@ -55,11 +55,10 @@ function SidebarLink({
       end={to === "/douyin"}
       className={({ isActive }) =>
         cn(
-          "flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-all duration-300 relative group",
-          "hover:bg-foreground/[0.05]",
+          "flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-200 relative group",
           isActive
-            ? "bg-foreground/[0.07] text-foreground font-medium"
-            : "text-muted-foreground"
+            ? "bg-foreground/[0.06] text-foreground font-medium"
+            : "text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground"
         )
       }
     >
@@ -91,8 +90,8 @@ export function Sidebar() {
   const { theme, setTheme } = useAppStore();
 
   return (
-    <aside className="w-[232px] shrink-0 p-3">
-      <div className="h-full flex flex-col rounded-[1.5rem] bg-card/70 glass ring-1 ring-foreground/[0.06] shadow-ambient overflow-hidden">
+    <aside className="w-[232px] shrink-0 py-6 px-4">
+      <div className="h-full flex flex-col overflow-hidden">
         <div className="p-5 pb-4">
           <h1 className="text-lg font-bold tracking-tight text-foreground flex items-center gap-2.5">
             <span className="inline-flex items-center justify-center h-8 w-8 rounded-xl bg-brand text-brand-foreground text-[11px] font-bold tracking-wide shadow-ambient">
@@ -127,7 +126,7 @@ export function Sidebar() {
           ))}
         </nav>
 
-        <div className="px-3 py-4 border-t border-foreground/[0.06] space-y-2">
+        <div className="px-3 py-4 space-y-2">
           <div className="flex gap-1 p-1 bg-foreground/[0.04] rounded-xl">
             {themeOptions.map((opt) => (
               <button

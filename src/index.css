@@ -1,15 +1,14 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "@fontsource-variable/geist";
+@import "cn-fontsource-source-han-sans-sc-vf/font.css";
 @import "@fontsource-variable/geist-mono";
-@import "@fontsource-variable/playfair-display";
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-    --font-heading: 'Playfair Display Variable', Georgia, serif;
-    --font-sans: 'Geist Variable', system-ui, sans-serif;
+    --font-heading: 'Source Han Sans SC VF', 'Noto Sans SC', system-ui, sans-serif;
+    --font-sans: 'Source Han Sans SC VF', 'Noto Sans SC', system-ui, sans-serif;
     --font-mono: 'Geist Mono Variable', ui-monospace, monospace;
     --color-brand: var(--brand);
     --color-brand-foreground: var(--brand-foreground);
@@ -57,85 +56,87 @@
     --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/* ── Light mode: Win11 neutral Mica-inspired ── */
 :root {
-    --background: oklch(0.978 0.006 80);
-    --foreground: oklch(0.18 0.02 50);
-    --card: oklch(0.99 0.003 80);
-    --card-foreground: oklch(0.18 0.02 50);
-    --popover: oklch(0.99 0.003 80);
-    --popover-foreground: oklch(0.18 0.02 50);
-    --primary: oklch(0.30 0.04 50);
-    --primary-foreground: oklch(0.98 0.005 80);
-    --secondary: oklch(0.945 0.01 75);
-    --secondary-foreground: oklch(0.25 0.03 50);
-    --muted: oklch(0.945 0.01 75);
-    --muted-foreground: oklch(0.50 0.02 60);
-    --accent: oklch(0.94 0.015 70);
-    --accent-foreground: oklch(0.25 0.03 50);
+    --background: oklch(0.965 0 0);              /* #F3F3F3 Mica base */
+    --foreground: oklch(0.18 0 0);               /* #1C1C1C deep text */
+    --card: oklch(1 0 0);                        /* #FFFFFF pure white cards */
+    --card-foreground: oklch(0.26 0 0);          /* #333333 card text */
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.26 0 0);
+    --primary: oklch(0.545 0.178 252.8);         /* #0078D4 Win11 blue accent */
+    --primary-foreground: oklch(1 0 0);
+    --secondary: oklch(0.93 0 0);                /* #EBEBEB hover surface */
+    --secondary-foreground: oklch(0.26 0 0);
+    --muted: oklch(0.93 0 0);                    /* #EBEBEB */
+    --muted-foreground: oklch(0.55 0 0);         /* #5C5C5C — icons, secondary */
+    --accent: oklch(0.92 0.03 250);              /* #E5F0FF selected item bg */
+    --accent-foreground: oklch(0.545 0.178 252.8); /* blue text on selected */
     --destructive: oklch(0.55 0.22 25);
-    --border: oklch(0.90 0.015 75);
-    --input: oklch(0.90 0.015 75);
-    --ring: oklch(0.45 0.10 50);
-    --brand: oklch(0.45 0.12 50);
-    --brand-foreground: oklch(0.98 0.005 80);
-    --brand-muted: oklch(0.94 0.025 55);
+    --border: oklch(0.85 0 0);                   /* #D0D0D0 input borders */
+    --input: oklch(0.85 0 0);
+    --ring: oklch(0.545 0.178 252.8);            /* blue focus ring */
+    --brand: oklch(0.545 0.178 252.8);           /* unified with primary */
+    --brand-foreground: oklch(1 0 0);
+    --brand-muted: oklch(0.92 0.03 250);
     --success: oklch(0.55 0.14 155);
-    --success-foreground: oklch(0.98 0.005 80);
+    --success-foreground: oklch(1 0 0);
     --surface-raised: oklch(1 0 0);
-    --chart-1: oklch(0.45 0.12 50);
+    --chart-1: oklch(0.545 0.178 252.8);
     --chart-2: oklch(0.55 0.14 155);
     --chart-3: oklch(0.60 0.15 30);
     --chart-4: oklch(0.55 0.12 330);
     --chart-5: oklch(0.50 0.10 200);
-    --radius: 0.75rem;
-    --sidebar: oklch(0.985 0.004 80);
-    --sidebar-foreground: oklch(0.18 0.02 50);
-    --sidebar-primary: oklch(0.30 0.04 50);
-    --sidebar-primary-foreground: oklch(0.98 0.005 80);
-    --sidebar-accent: oklch(0.94 0.015 70);
-    --sidebar-accent-foreground: oklch(0.25 0.03 50);
-    --sidebar-border: oklch(0.90 0.015 75);
-    --sidebar-ring: oklch(0.45 0.10 50);
+    --radius: 0.5rem;                            /* 8px — Win11 default radius */
+    --sidebar: oklch(0.975 0 0);                 /* #F9F9F9 sidebar bg */
+    --sidebar-foreground: oklch(0.18 0 0);
+    --sidebar-primary: oklch(0.545 0.178 252.8);
+    --sidebar-primary-foreground: oklch(1 0 0);
+    --sidebar-accent: oklch(0.92 0.03 250);
+    --sidebar-accent-foreground: oklch(0.545 0.178 252.8);
+    --sidebar-border: oklch(0.88 0 0);
+    --sidebar-ring: oklch(0.545 0.178 252.8);
 }
 
+/* ── Dark mode: Win11 dark Mica-inspired ── */
 .dark {
-    --background: oklch(0.12 0.012 50);
-    --foreground: oklch(0.92 0.008 70);
-    --card: oklch(0.16 0.015 50);
-    --card-foreground: oklch(0.92 0.008 70);
-    --popover: oklch(0.16 0.015 50);
-    --popover-foreground: oklch(0.92 0.008 70);
-    --primary: oklch(0.78 0.08 55);
-    --primary-foreground: oklch(0.12 0.012 50);
-    --secondary: oklch(0.22 0.018 50);
-    --secondary-foreground: oklch(0.92 0.008 70);
-    --muted: oklch(0.22 0.018 50);
-    --muted-foreground: oklch(0.62 0.02 60);
-    --accent: oklch(0.22 0.025 50);
-    --accent-foreground: oklch(0.92 0.008 70);
+    --background: oklch(0.16 0 0);               /* #202020 */
+    --foreground: oklch(0.93 0 0);               /* #EEEEEE */
+    --card: oklch(0.20 0 0);                     /* #333333 elevated surface */
+    --card-foreground: oklch(0.93 0 0);
+    --popover: oklch(0.20 0 0);
+    --popover-foreground: oklch(0.93 0 0);
+    --primary: oklch(0.65 0.155 252.8);          /* lighter blue for dark bg */
+    --primary-foreground: oklch(0.16 0 0);
+    --secondary: oklch(0.25 0 0);                /* #404040 hover surface */
+    --secondary-foreground: oklch(0.93 0 0);
+    --muted: oklch(0.25 0 0);
+    --muted-foreground: oklch(0.62 0 0);         /* #8A8A8A */
+    --accent: oklch(0.25 0.04 250);              /* subtle blue tint surface */
+    --accent-foreground: oklch(0.65 0.155 252.8);
     --destructive: oklch(0.65 0.18 22);
-    --border: oklch(0.28 0.02 50 / 60%);
-    --input: oklch(0.28 0.02 50 / 60%);
-    --ring: oklch(0.65 0.12 55);
-    --brand: oklch(0.68 0.14 55);
-    --brand-foreground: oklch(0.12 0.012 50);
-    --brand-muted: oklch(0.20 0.04 50);
+    --border: oklch(0.32 0 0);                   /* #525252 */
+    --input: oklch(0.32 0 0);
+    --ring: oklch(0.65 0.155 252.8);
+    --brand: oklch(0.65 0.155 252.8);
+    --brand-foreground: oklch(0.16 0 0);
+    --brand-muted: oklch(0.25 0.04 250);
     --success: oklch(0.62 0.14 155);
-    --success-foreground: oklch(0.12 0.012 50);
-    --surface-raised: oklch(0.19 0.018 50);
-    --chart-1: oklch(0.68 0.14 55);
+    --success-foreground: oklch(0.16 0 0);
+    --surface-raised: oklch(0.22 0 0);
+    --chart-1: oklch(0.65 0.155 252.8);
     --chart-2: oklch(0.62 0.14 155);
     --chart-3: oklch(0.65 0.15 30);
     --chart-4: oklch(0.60 0.12 330);
     --chart-5: oklch(0.55 0.10 200);
-    --sidebar: oklch(0.14 0.014 50);
-    --sidebar-foreground: oklch(0.92 0.008 70);
-    --sidebar-primary: oklch(0.68 0.14 55);
-    --sidebar-primary-foreground: oklch(0.12 0.012 50);
-    --sidebar-accent: oklch(0.22 0.025 50);
-    --sidebar-accent-foreground: oklch(0.92 0.008 70);
-    --sidebar-border: oklch(0.28 0.02 50 / 60%);
-    --sidebar-ring: oklch(0.65 0.12 55);
+    --sidebar: oklch(0.14 0 0);                  /* #1E1E1E */
+    --sidebar-foreground: oklch(0.93 0 0);
+    --sidebar-primary: oklch(0.65 0.155 252.8);
+    --sidebar-primary-foreground: oklch(0.16 0 0);
+    --sidebar-accent: oklch(0.25 0.04 250);
+    --sidebar-accent-foreground: oklch(0.65 0.155 252.8);
+    --sidebar-border: oklch(0.32 0 0);
+    --sidebar-ring: oklch(0.65 0.155 252.8);
 }
 
 @layer base {
@@ -144,6 +145,7 @@
   }
   body {
     @apply bg-background text-foreground antialiased;
+    font-weight: 450;
   }
   html {
     @apply font-sans;
@@ -160,28 +162,40 @@
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: oklch(0.60 0.02 60 / 30%);
+    background: oklch(0.75 0 0 / 30%);
     border-radius: 999px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: oklch(0.45 0.03 50 / 40%);
+    background: oklch(0.55 0 0 / 40%);
   }
   .dark ::-webkit-scrollbar-thumb {
-    background: oklch(0.50 0.02 60 / 25%);
+    background: oklch(0.50 0 0 / 25%);
   }
   .dark ::-webkit-scrollbar-thumb:hover {
-    background: oklch(0.65 0.03 60 / 35%);
+    background: oklch(0.70 0 0 / 35%);
   }
 }
 
-/* Film grain overlay — fixed, pointer-events-none */
+/* Mica-inspired background: subtle radial gradient + grain noise */
+.grain-overlay {
+  background-image:
+    radial-gradient(ellipse 120% 80% at 50% 0%, oklch(0.97 0.004 250 / 0.5), transparent 70%),
+    radial-gradient(ellipse 100% 60% at 80% 100%, oklch(0.96 0.003 80 / 0.3), transparent 60%);
+}
+.dark .grain-overlay {
+  background-image:
+    radial-gradient(ellipse 120% 80% at 50% 0%, oklch(0.18 0.006 250 / 0.4), transparent 70%),
+    radial-gradient(ellipse 100% 60% at 80% 100%, oklch(0.17 0.004 80 / 0.3), transparent 60%);
+}
+
+/* Grain noise overlay — simulates DWM noise texture layer */
 .grain-overlay::after {
   content: "";
   position: fixed;
   inset: 0;
   z-index: 50;
   pointer-events: none;
-  opacity: 0.035;
+  opacity: 0.018;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
   background-repeat: repeat;
   background-size: 128px 128px;
@@ -189,7 +203,7 @@
 }
 .dark .grain-overlay::after {
   mix-blend-mode: soft-light;
-  opacity: 0.05;
+  opacity: 0.025;
 }
 
 /* Scroll-driven entry animation */
@@ -219,12 +233,12 @@
 .stagger-6 { animation-delay: 0.3s; }
 .stagger-7 { animation-delay: 0.35s; }
 
-/* Lucide icon thin stroke override */
+/* Lucide icon stroke */
 svg[class*="lucide"] {
-  stroke-width: 1.5;
+  stroke-width: 1.75;
 }
 
-/* Soft ambient shadow — replaces all harsh shadows */
+/* Soft ambient shadow */
 .shadow-ambient {
   box-shadow: 0 8px 32px oklch(0 0 0 / 0.04), 0 2px 8px oklch(0 0 0 / 0.02);
 }

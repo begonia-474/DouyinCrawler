@@ -22,7 +22,7 @@ export function StatusBar() {
   }, [setConnected]);
 
   return (
-    <div className="h-8 mx-3 mb-3 rounded-xl bg-foreground/[0.03] ring-1 ring-foreground/[0.04] flex items-center px-5 text-xs text-muted-foreground gap-4">
+    <div className="h-8 px-10 flex items-center text-xs text-muted-foreground gap-4">
       <div className="flex items-center gap-1.5">
         <Circle
           className={`h-1.5 w-1.5 fill-current transition-colors duration-500 ${

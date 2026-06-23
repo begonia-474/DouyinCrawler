@@ -11,13 +11,7 @@ importers:
       '@base-ui/react':
         specifier: ^1.6.0
         version: 1.6.0(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      '@fontsource-variable/geist':
-        specifier: ^5.2.9
-        version: 5.2.9
       '@fontsource-variable/geist-mono':
-        specifier: ^5.2.8
-        version: 5.2.8
-      '@fontsource-variable/playfair-display':
         specifier: ^5.2.8
         version: 5.2.8
       '@tailwindcss/vite':
@@ -41,6 +35,9 @@ importers:
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
+      cn-fontsource-source-han-sans-sc-vf:
+        specifier: ^1.0.10
+        version: 1.0.10
       lucide-react:
         specifier: ^1.21.0
         version: 1.21.0(react@19.2.7)
@@ -442,12 +439,6 @@ packages:
 
   '@fontsource-variable/geist-mono@5.2.8':
     resolution: {integrity: sha512-KI5bj+hkkRiHttYHmccotUZ80ZuZyai+RwI1d7UId0clkx/jXxlo8qYK8j54WzmpBjtMoEMPyllV7faDcj+6RA==}
-
-  '@fontsource-variable/geist@5.2.9':
-    resolution: {integrity: sha512-TP+QSBG3wxKGPE33CbMy/L0Nu3qvJ6Fy81Yc4LnQ95xH+i+cfEp8fyU8/kfV14YwszxIFPhnoMTbjL71waVpyQ==}
-
-  '@fontsource-variable/playfair-display@5.2.8':
-    resolution: {integrity: sha512-ZzVIXPOrL85yyOvZYoBzUszIJM+xKkHqni4IYn2CVLaGQQdJR8sBeC8yFNgjxSJ7ludTwta8qpULeOFuk5X75A==}
 
   '@hono/node-server@1.19.14':
     resolution: {integrity: sha512-GwtvgtXxnWsucXvbQXkRgqksiH2Qed37H9xHZocE5sA3N8O8O8/8FA3uclQXxXVzc9XBZuEOMK7+r02FmSpHtw==}
@@ -975,6 +966,9 @@ packages:
   clsx@2.1.1:
     resolution: {integrity: sha512-eYm0QWBtUrBWZWG0d386OGAw16Z995PiOVo2B7bjWSbHedGl5e0ZWaq65kOGgUSNesEIDkB9ISbTg/JK9dhCZA==}
     engines: {node: '>=6'}
+
+  cn-fontsource-source-han-sans-sc-vf@1.0.10:
+    resolution: {integrity: sha512-R2/EZDuZXcDns8urAv690S4FanBSULEYPkXmzQR9VvdqldpGuRqjjsYVX9TAgmHFzVwdL7oE5+1+swrUy6d5Xw==}
 
   code-block-writer@13.0.3:
     resolution: {integrity: sha512-Oofo0pq3IKnsFtuHqSF7TqBfr71aeyZDVJ0HpmqB7FBM2qEigL0iPONSCZSO9pE9dZTAxANe5XHG9Uy0YMv8cg==}
@@ -2525,10 +2519,6 @@ snapshots:
 
   '@fontsource-variable/geist-mono@5.2.8': {}
 
-  '@fontsource-variable/geist@5.2.9': {}
-
-  '@fontsource-variable/playfair-display@5.2.8': {}
-
   '@hono/node-server@1.19.14(hono@4.12.26)':
     dependencies:
       hono: 4.12.26
@@ -2950,6 +2940,8 @@ snapshots:
   cli-spinners@2.9.2: {}
 
   clsx@2.1.1: {}
+
+  cn-fontsource-source-han-sans-sc-vf@1.0.10: {}
 
   code-block-writer@13.0.3: {}
 

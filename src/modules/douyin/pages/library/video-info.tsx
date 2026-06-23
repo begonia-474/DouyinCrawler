@@ -1,13 +1,14 @@
 import { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
-import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Header } from "@/components/layout/header";
+import { AnimateEntry } from "@/components/shared/animate-entry";
+import { Bezel } from "@/components/shared/bezel";
 import {
   Film, Loader2, Search, Clock, Heart, MessageCircle,
-  Share2, Bookmark, ChevronDown,
+  Share2, Bookmark, ChevronDown, Trash2,
 } from "lucide-react";
-import { getVideos, getVideoCount } from "@/lib/api";
+import { deleteVideoInfo, getVideos, getVideoCount } from "@/lib/api";
 import type { VideoInfo } from "@/lib/tauri-types";
 import { formatDuration, formatTimestamp } from "@/lib/utils";
 
@@ -26,7 +27,6 @@ function formatCount(n: number): string {
 }
 
 export default function LibraryVideoInfoPage() {
-  const navigate = useNavigate();
   const [items, setItems] = useState<VideoInfo[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -68,165 +68,163 @@ export default function LibraryVideoInfoPage() {
     setPage(0);
   };
 
+  const handleDelete = async (item: VideoInfo) => {
+    if (!window.confirm("确定删除这条视频记录？")) return;
+    try {
+      await deleteVideoInfo(item.aweme_id);
+      await loadData();
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "删除失败");
+    }
+  };
+
   return (
-    <div className="flex flex-col h-full">
-      {/* 搜索栏 + 排序 */}
-      <div className="p-4 border-b flex gap-2">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(e) => handleSearch(e.target.value)}
-            placeholder="搜索视频标题或作者..."
-            className="pl-9"
-          />
-        </div>
-        <div className="relative">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowSort(!showSort)}
-            className="gap-1"
-          >
-            {SORT_OPTIONS.find((o) => o.value === sortBy)?.label}
-            <ChevronDown className="h-3 w-3" />
-          </Button>
-          {showSort && (
-            <div className="absolute right-0 top-full mt-1 z-10 bg-popover border rounded-md shadow-md py-1 min-w-[140px]">
-              {SORT_OPTIONS.map((opt) => (
-                <button
-                  key={opt.value}
-                  className={`w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors ${
-                    sortBy === opt.value ? "font-medium" : ""
-                  }`}
-                  onClick={() => {
-                    setSortBy(opt.value);
-                    setShowSort(false);
-                    setPage(0);
-                  }}
-                >
-                  {opt.label}
-                </button>
-              ))}
-              <div className="border-t mt-1 pt-1">
-                <button
-                  className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent"
-                  onClick={() => {
-                    setSortOrder(sortOrder === "desc" ? "asc" : "desc");
-                    setShowSort(false);
-                    setPage(0);
-                  }}
-                >
-                  {sortOrder === "desc" ? "降序 ↓" : "升序 ↑"}
-                </button>
-              </div>
+    <>
+      <AnimateEntry>
+        <Header title="视频库" description={`${total} 条记录`} parent={{ label: "资料库", path: "/douyin/library" }} />
+      </AnimateEntry>
+
+      <div className="space-y-6">
+        <AnimateEntry delay={50}>
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(e) => handleSearch(e.target.value)}
+                placeholder="搜索视频标题或作者..."
+                className="h-11 rounded-xl pl-10 border-foreground/[0.08] bg-foreground/[0.03]"
+              />
             </div>
-          )}
-        </div>
-      </div>
+            <div className="relative">
+              <Button
+                variant="capsule"
+                size="sm"
+                onClick={() => setShowSort(!showSort)}
+                className="gap-1 h-11"
+              >
+                {SORT_OPTIONS.find((o) => o.value === sortBy)?.label}
+                <ChevronDown className="h-3 w-3" />
+              </Button>
+              {showSort && (
+                <div className="absolute right-0 top-full mt-1 z-10 bg-popover border rounded-md shadow-md py-1 min-w-[140px]">
+                  {SORT_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      className={`w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors ${
+                        sortBy === opt.value ? "font-medium" : ""
+                      }`}
+                      onClick={() => {
+                        setSortBy(opt.value);
+                        setShowSort(false);
+                        setPage(0);
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                  <div className="border-t mt-1 pt-1">
+                    <button
+                      className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent"
+                      onClick={() => {
+                        setSortOrder(sortOrder === "desc" ? "asc" : "desc");
+                        setShowSort(false);
+                        setPage(0);
+                      }}
+                    >
+                      {sortOrder === "desc" ? "降序 ↓" : "升序 ↑"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </AnimateEntry>
 
-      {/* 面包屑 */}
-      <div className="px-4 py-3 flex items-center gap-2 text-sm">
-        <button
-          className="text-muted-foreground hover:text-foreground transition-colors"
-          onClick={() => navigate("/douyin/library")}
-        >
-          &lt;
-        </button>
-        <button
-          className="text-muted-foreground hover:text-foreground transition-colors"
-          onClick={() => navigate("/douyin/library")}
-        >
-          资料库
-        </button>
-        <span className="text-muted-foreground">/</span>
-        <span className="font-medium">视频库</span>
-        <span className="text-muted-foreground ml-auto text-xs">{total} 条记录</span>
-      </div>
-
-      {/* 内容区 */}
-      <div className="flex-1 overflow-auto p-4">
         {loading ? (
-          <div className="flex justify-center py-12">
+          <div className="flex justify-center py-16">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         ) : items.length === 0 ? (
-          <Card className="border-border/40 bg-card/60">
-            <CardContent className="p-8 text-center text-muted-foreground">
-              <Film className="h-10 w-10 mx-auto mb-3" />
-              <p className="tracking-wide">暂无视频记录</p>
-            </CardContent>
-          </Card>
+          <AnimateEntry>
+            <Bezel radius="xl">
+              <div className="p-12 text-center text-muted-foreground">
+                <Film className="h-10 w-10 mx-auto mb-4 opacity-30" />
+                <p className="text-sm tracking-wide">暂无视频记录</p>
+              </div>
+            </Bezel>
+          </AnimateEntry>
         ) : (
           <div className="space-y-2">
-            {items.map((item) => (
-              <div
-                key={item.aweme_id}
-                className="flex items-center gap-4 p-3 border rounded-lg hover:bg-muted/50 transition-colors"
-              >
-                {/* 封面 */}
-                {item.cover_url ? (
-                  <img
-                    src={item.cover_url}
-                    alt=""
-                    className="h-16 w-28 object-cover rounded shrink-0 bg-muted"
-                  />
-                ) : (
-                  <div className="h-16 w-28 rounded bg-muted flex items-center justify-center shrink-0">
-                    <Film className="h-6 w-6 text-muted-foreground" />
-                  </div>
-                )}
+            {items.map((item, i) => (
+              <AnimateEntry key={item.aweme_id} delay={i * 30}>
+                <Bezel radius="lg" padding="sm">
+                  <div className="flex items-center gap-4 p-4 bg-card hover:bg-foreground/[0.02] transition-all duration-300">
+                    {item.cover_url ? (
+                      <img
+                        src={item.cover_url}
+                        alt={item.desc || "视频封面"}
+                        className="h-16 w-28 object-cover rounded-lg shrink-0 ring-1 ring-foreground/[0.06]"
+                      />
+                    ) : (
+                      <div className="h-16 w-28 rounded-lg bg-foreground/[0.04] ring-1 ring-foreground/[0.06] flex items-center justify-center shrink-0">
+                        <Film className="h-6 w-6 text-muted-foreground" />
+                      </div>
+                    )}
 
-                {/* 信息 */}
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">
-                    {item.desc || "无标题"}
-                  </p>
-                  <div className="flex items-center gap-3 mt-1 flex-wrap">
-                    {item.author_nickname && (
-                      <span className="text-xs text-muted-foreground">
-                        {item.author_nickname}
-                      </span>
-                    )}
-                    {item.duration > 0 && (
-                      <span className="text-xs text-muted-foreground flex items-center gap-1">
-                        <Clock className="h-3 w-3" />
-                        {formatDuration(Math.floor(item.duration / 1000))}
-                      </span>
-                    )}
-                    {item.create_time && (
-                      <span className="text-xs text-muted-foreground">
-                        {formatTimestamp(item.create_time)}
-                      </span>
-                    )}
-                    {item.mix_name && (
-                      <span className="text-xs text-brand">
-                        合集: {item.mix_name}
-                      </span>
-                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">
+                        {item.desc || "无标题"}
+                      </p>
+                      <div className="flex items-center gap-3 mt-1 flex-wrap">
+                        {item.author_nickname && (
+                          <span className="text-xs text-muted-foreground">
+                            {item.author_nickname}
+                          </span>
+                        )}
+                        {item.duration > 0 && (
+                          <span className="text-xs text-muted-foreground flex items-center gap-1">
+                            <Clock className="h-3 w-3" />
+                            {formatDuration(Math.floor(item.duration / 1000))}
+                          </span>
+                        )}
+                        {item.create_time && (
+                          <span className="text-xs text-muted-foreground">
+                            {formatTimestamp(item.create_time)}
+                          </span>
+                        )}
+                        {item.mix_name && (
+                          <span className="text-xs text-brand">
+                            合集: {item.mix_name}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-4 mt-1">
+                        <span className="text-xs text-muted-foreground flex items-center gap-1">
+                          <Heart className="h-3 w-3" /> {formatCount(item.digg_count)}
+                        </span>
+                        <span className="text-xs text-muted-foreground flex items-center gap-1">
+                          <MessageCircle className="h-3 w-3" /> {formatCount(item.comment_count)}
+                        </span>
+                        <span className="text-xs text-muted-foreground flex items-center gap-1">
+                          <Share2 className="h-3 w-3" /> {formatCount(item.share_count)}
+                        </span>
+                        <span className="text-xs text-muted-foreground flex items-center gap-1">
+                          <Bookmark className="h-3 w-3" /> {formatCount(item.collect_count)}
+                        </span>
+                      </div>
+                    </div>
+                    <Button variant="ghost" size="icon-sm" title="删除记录" onClick={() => handleDelete(item)}>
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
                   </div>
-                  <div className="flex items-center gap-4 mt-1">
-                    <span className="text-xs text-muted-foreground flex items-center gap-1">
-                      <Heart className="h-3 w-3" /> {formatCount(item.digg_count)}
-                    </span>
-                    <span className="text-xs text-muted-foreground flex items-center gap-1">
-                      <MessageCircle className="h-3 w-3" /> {formatCount(item.comment_count)}
-                    </span>
-                    <span className="text-xs text-muted-foreground flex items-center gap-1">
-                      <Share2 className="h-3 w-3" /> {formatCount(item.share_count)}
-                    </span>
-                    <span className="text-xs text-muted-foreground flex items-center gap-1">
-                      <Bookmark className="h-3 w-3" /> {formatCount(item.collect_count)}
-                    </span>
-                  </div>
-                </div>
-              </div>
+                </Bezel>
+              </AnimateEntry>
             ))}
 
-            {/* 分页 */}
             <div className="flex justify-between items-center pt-4">
               <Button
-                variant="outline"
+                variant="capsule"
                 size="sm"
                 disabled={page === 0}
                 onClick={() => setPage((p) => p - 1)}
@@ -237,7 +235,7 @@ export default function LibraryVideoInfoPage() {
                 第 {page + 1} 页 / 共 {Math.ceil(total / pageSize)} 页
               </span>
               <Button
-                variant="outline"
+                variant="capsule"
                 size="sm"
                 disabled={(page + 1) * pageSize >= total}
                 onClick={() => setPage((p) => p + 1)}
@@ -248,6 +246,6 @@ export default function LibraryVideoInfoPage() {
           </div>
         )}
       </div>
-    </div>
+    </>
   );
 }

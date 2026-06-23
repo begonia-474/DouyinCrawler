@@ -10,8 +10,8 @@ export function MainLayout() {
     <TooltipProvider>
       <div className="flex h-screen overflow-hidden grain-overlay bg-background">
         <Sidebar />
-        <main className="flex-1 flex flex-col overflow-hidden py-3 pr-3">
-          <div className="flex-1 overflow-auto rounded-[1.5rem] bg-card/40 ring-1 ring-foreground/[0.04] px-10 py-10">
+        <main className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex-1 overflow-auto px-10 py-8">
             <Suspense fallback={<Loading />}>
               <Outlet />
             </Suspense>
