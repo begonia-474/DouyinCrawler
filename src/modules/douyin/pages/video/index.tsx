@@ -1,11 +1,11 @@
 import { useState, useCallback } from "react";
 import { Header } from "@/components/layout/header";
 import { UrlInput } from "@/components/shared/url-input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { AnimateEntry } from "@/components/shared/animate-entry";
+import { Bezel } from "@/components/shared/bezel";
 import { getPostDetail, downloadOne } from "@/lib/api";
 import {
   Download,
@@ -16,6 +16,7 @@ import {
   Share2,
   Bookmark,
   BarChart3,
+  ArrowRight,
 } from "lucide-react";
 
 interface ParsedInfo {
@@ -117,7 +118,7 @@ export default function VideoPage() {
 
         {error && (
           <AnimateEntry>
-            <div className="flex items-center gap-2.5 p-4 rounded-xl bg-destructive/[0.06] border border-destructive/20 text-destructive text-sm">
+            <div className="flex items-center gap-2.5 p-4 rounded-2xl bg-destructive/[0.06] ring-1 ring-destructive/20 text-destructive text-sm">
               <AlertCircle className="h-4 w-4 shrink-0" />
               <span>{error}</span>
             </div>
@@ -126,12 +127,12 @@ export default function VideoPage() {
 
         {parsed && (
           <AnimateEntry delay={100}>
-            <Card className="border-border/40 bg-card/60">
-              <CardContent className="p-6">
+            <Bezel radius="xl">
+              <div className="p-7">
                 <div className="flex items-start justify-between">
                   <div className="space-y-2">
                     <div className="flex items-center gap-2">
-                      <Badge variant={parsed.type === "video" ? "default" : "secondary"} className="text-[11px] tracking-wide">
+                      <Badge variant={parsed.type === "video" ? "default" : "secondary"} className="text-[11px] tracking-wide rounded-full">
                         {parsed.type === "video" ? "视频" : "图文"}
                       </Badge>
                       <h3 className="font-heading text-xl font-semibold tracking-tight">{parsed.title}</h3>
@@ -145,7 +146,6 @@ export default function VideoPage() {
                     onClick={handleDownload}
                     disabled={downloading || downloaded}
                     size="lg"
-                    className="rounded-xl"
                   >
                     {downloaded ? (
                       <>
@@ -159,8 +159,10 @@ export default function VideoPage() {
                       </>
                     ) : (
                       <>
-                        <Download className="h-4 w-4 mr-2" />
                         下载
+                        <span className="ml-2 inline-flex items-center justify-center w-6 h-6 rounded-full bg-foreground/10 group-hover/button:translate-x-0.5 transition-transform duration-300">
+                          <ArrowRight className="h-3 w-3" />
+                        </span>
                       </>
                     )}
                   </Button>
@@ -173,21 +175,21 @@ export default function VideoPage() {
                     </p>
                   </div>
                 )}
-              </CardContent>
-            </Card>
+              </div>
+            </Bezel>
           </AnimateEntry>
         )}
 
         {stats && (
           <AnimateEntry delay={150}>
-            <Card className="border-border/40 bg-card/60">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-xs uppercase tracking-[0.15em] font-medium text-muted-foreground flex items-center gap-2">
-                  <BarChart3 className="h-3.5 w-3.5" />
-                  作品统计
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="pt-0">
+            <Bezel radius="xl">
+              <div className="p-7">
+                <div className="flex items-center gap-2 mb-6">
+                  <BarChart3 className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="text-xs uppercase tracking-[0.15em] font-medium text-muted-foreground">
+                    作品统计
+                  </span>
+                </div>
                 <div className="grid grid-cols-4 gap-6">
                   <div className="text-center">
                     <ThumbsUp className="h-4 w-4 text-muted-foreground mx-auto mb-2" />
@@ -210,8 +212,8 @@ export default function VideoPage() {
                     <p className="text-xs text-muted-foreground mt-0.5 tracking-wide">收藏</p>
                   </div>
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+            </Bezel>
           </AnimateEntry>
         )}
       </div>

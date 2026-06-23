@@ -2,9 +2,9 @@ import { useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Header } from "@/components/layout/header";
 import { UrlInput } from "@/components/shared/url-input";
-import { Card, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { Bezel } from "@/components/shared/bezel";
 import { getUserProfile, getUserCollects } from "@/lib/api";
 import type { UserProfile as UserProfileType, CollectsFolder } from "@/lib/api-types";
 import { FolderOpen, ChevronRight, Loader2, AlertCircle } from "lucide-react";
@@ -47,22 +47,22 @@ export default function CollectsPage() {
         <UrlInput onSubmit={handleParse} loading={loading} placeholder="粘贴用户主页链接..." allowedTypes={["user"]} />
 
         {error && (
-          <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
+          <div className="flex items-center gap-2 p-4 rounded-2xl bg-destructive/[0.06] ring-1 ring-destructive/20 text-destructive text-sm">
             <AlertCircle className="h-4 w-4 shrink-0" />
             <span>{error}</span>
           </div>
         )}
 
         {loading && (
-          <div className="flex items-center justify-center py-12">
+          <div className="flex items-center justify-center py-16">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         )}
 
         {profile && !loading && (
           <>
-            <Card>
-              <CardContent className="p-4 flex items-center gap-4">
+            <Bezel radius="xl" padding="sm">
+              <div className="flex items-center gap-4 p-5 bg-card">
                 <Avatar className="h-12 w-12">
                   <AvatarImage src={profile.avatar} />
                   <AvatarFallback>{profile.nickname?.[0] || "?"}</AvatarFallback>
@@ -71,24 +71,27 @@ export default function CollectsPage() {
                   <h3 className="font-semibold">{profile.nickname}</h3>
                   <p className="text-sm text-muted-foreground">{collects.length} 个收藏夹</p>
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+            </Bezel>
 
             <div className="space-y-3">
               {collects.map((folder) => (
-                <Card key={folder.id} className="hover:bg-accent/50 transition-colors cursor-pointer" onClick={() => navigate(`/douyin/favorites/${folder.id}`)}>
-                  <CardContent className="p-4 flex items-center gap-4">
-                    <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                <Bezel key={folder.id} radius="xl" padding="sm">
+                  <button
+                    className="w-full flex items-center gap-4 p-5 bg-card hover:bg-foreground/[0.02] transition-all duration-300 cursor-pointer"
+                    onClick={() => navigate(`/douyin/favorites/${folder.id}`)}
+                  >
+                    <div className="h-11 w-11 rounded-2xl bg-primary/10 ring-1 ring-primary/15 flex items-center justify-center shrink-0">
                       <FolderOpen className="h-5 w-5 text-primary" />
                     </div>
-                    <div className="flex-1">
+                    <div className="flex-1 text-left">
                       <h4 className="text-sm font-medium">{folder.name}</h4>
                       <p className="text-xs text-muted-foreground">{folder.count} 个视频</p>
                     </div>
-                    <Badge variant="secondary">{folder.count}</Badge>
+                    <Badge variant="secondary" className="rounded-full">{folder.count}</Badge>
                     <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                  </CardContent>
-                </Card>
+                  </button>
+                </Bezel>
               ))}
             </div>
           </>

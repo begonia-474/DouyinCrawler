@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { Header } from "@/components/layout/header";
 import { AnimateEntry } from "@/components/shared/animate-entry";
-import { Card, CardContent } from "@/components/ui/card";
+import { Bezel } from "@/components/shared/bezel";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { getMusicCollection, downloadMusic, saveMusicCollectionBatch } from "@/lib/api";
@@ -29,7 +29,6 @@ export default function MusicPage() {
     const res = await getMusicCollection();
     if (res.success && res.data?.music_list) {
       setMusicList(res.data.music_list);
-      // 保存到数据库
       try {
         await saveMusicCollectionBatch(
           res.data.music_list.map((item) => ({
@@ -38,7 +37,7 @@ export default function MusicPage() {
             title: item.title,
             author: item.author,
             owner_nickname: item.owner_nickname,
-            duration: Math.floor(item.duration / 1000), // 毫秒转秒
+            duration: Math.floor(item.duration / 1000),
             cover: item.cover,
             play_url: item.play_url,
           }))
@@ -82,7 +81,7 @@ export default function MusicPage() {
       <AnimateEntry>
         <Header title="我的音乐" description="当前账号的音乐收藏">
           {musicList.length > 0 && (
-            <Button variant="outline" size="sm" onClick={handleDownloadAll}>
+            <Button variant="capsule" size="sm" onClick={handleDownloadAll}>
               <Download className="h-4 w-4 mr-1" />
               全部下载
             </Button>
@@ -92,72 +91,70 @@ export default function MusicPage() {
 
       <div className="space-y-6">
         {error && (
-          <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
+          <div className="flex items-center gap-2 p-4 rounded-2xl bg-destructive/[0.06] ring-1 ring-destructive/20 text-destructive text-sm">
             <AlertCircle className="h-4 w-4 shrink-0" />
             <span>{error}</span>
           </div>
         )}
 
         {loading && (
-          <div className="flex items-center justify-center py-12">
+          <div className="flex items-center justify-center py-16">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         )}
 
         {!loading && musicList.length === 0 && !error && (
-          <Card className="border-border/40 bg-card/60">
-            <CardContent className="p-8 text-center">
-              <Music className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+          <Bezel radius="xl">
+            <div className="p-12 text-center">
+              <Music className="h-12 w-12 text-muted-foreground/30 mx-auto mb-4" />
               <h3 className="text-lg font-semibold mb-2">暂无音乐收藏</h3>
               <p className="text-muted-foreground tracking-wide">
                 请先在设置中配置 Cookie
               </p>
-            </CardContent>
-          </Card>
+            </div>
+          </Bezel>
         )}
 
         {!loading && musicList.length > 0 && (
           <div className="space-y-2">
-            {musicList.map((item) => (
-              <Card key={item.music_id} className="border-border/40 bg-card/60 hover:-translate-y-1 transition-all duration-500">
-                <CardContent className="p-4 flex items-center gap-4">
-                  {item.cover ? (
-                    <img
-                      src={item.cover}
-                      alt={item.title}
-                      className="h-12 w-12 rounded-lg object-cover"
-                    />
-                  ) : (
-                    <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center">
-                      <Music className="h-5 w-5 text-primary" />
-                    </div>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <h4 className="text-sm font-medium truncate">{item.title}</h4>
-                    <p className="text-xs text-muted-foreground tracking-wide truncate">
-                      {item.author || item.owner_nickname}
-                    </p>
-                  </div>
-                  <Badge variant="secondary" className="text-xs">
-                    {formatDuration(item.duration)}
-                  </Badge>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    className="h-8 w-8 shrink-0"
-                    onClick={() => handleDownload(item)}
-                    disabled={downloadingId === item.music_id || downloadedIds.has(item.music_id)}
-                  >
-                    {downloadedIds.has(item.music_id) ? (
-                      <CheckCircle2 className="h-4 w-4 text-success" />
-                    ) : downloadingId === item.music_id ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
+            {musicList.map((item, i) => (
+              <AnimateEntry key={item.music_id} delay={i * 25}>
+                <Bezel radius="lg" padding="sm">
+                  <div className="flex items-center gap-4 p-4 bg-card hover:bg-foreground/[0.02] transition-all duration-300">
+                    {item.cover ? (
+                      <img src={item.cover} alt={item.title} className="h-12 w-12 rounded-xl object-cover ring-1 ring-foreground/[0.06]" />
                     ) : (
-                      <Download className="h-4 w-4" />
+                      <div className="h-12 w-12 rounded-xl bg-primary/10 ring-1 ring-primary/15 flex items-center justify-center">
+                        <Music className="h-5 w-5 text-primary" />
+                      </div>
                     )}
-                  </Button>
-                </CardContent>
-              </Card>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-sm font-medium truncate">{item.title}</h4>
+                      <p className="text-xs text-muted-foreground tracking-wide truncate">
+                        {item.author || item.owner_nickname}
+                      </p>
+                    </div>
+                    <Badge variant="secondary" className="text-xs rounded-full font-mono tabular-nums">
+                      {formatDuration(item.duration)}
+                    </Badge>
+                    <Button
+                      variant="capsule"
+                      size="icon"
+                      className="h-8 w-8 shrink-0"
+                      onClick={() => handleDownload(item)}
+                      disabled={downloadingId === item.music_id || downloadedIds.has(item.music_id)}
+                    >
+                      {downloadedIds.has(item.music_id) ? (
+                        <CheckCircle2 className="h-4 w-4 text-success" />
+                      ) : downloadingId === item.music_id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Download className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </div>
+                </Bezel>
+              </AnimateEntry>
             ))}
           </div>
         )}

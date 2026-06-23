@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Header } from "@/components/layout/header";
-import { Card, CardContent } from "@/components/ui/card";
 import { AnimateEntry } from "@/components/shared/animate-entry";
+import { Bezel } from "@/components/shared/bezel";
 import {
   Radio,
   TrendingUp,
@@ -17,11 +17,11 @@ import { getLiveRecords, getVideoStats, getUserStats, getVideoCount, getMusicCol
 import type { VideoStats, UserStats } from "@/lib/tauri-types";
 
 const categories = [
-  { key: "video_info", title: "视频库", icon: Film, path: "/douyin/library/video-info", span: "col-span-2 row-span-1" },
-  { key: "user_info", title: "用户库", icon: Users, path: "/douyin/library/user-info", span: "col-span-1 row-span-1" },
-  { key: "images", title: "图集", icon: Image, path: "/douyin/library/images", span: "col-span-1 row-span-1" },
-  { key: "music", title: "音乐", icon: Music, path: "/douyin/library/music", span: "col-span-1 row-span-1" },
-  { key: "live", title: "直播", icon: Radio, path: "/douyin/library/live", span: "col-span-2 row-span-1" },
+  { key: "video_info", title: "视频库", icon: Film, path: "/douyin/library/video-info", span: "col-span-8" },
+  { key: "user_info", title: "用户库", icon: Users, path: "/douyin/library/user-info", span: "col-span-4" },
+  { key: "images", title: "图集", icon: Image, path: "/douyin/library/images", span: "col-span-4" },
+  { key: "music", title: "音乐", icon: Music, path: "/douyin/library/music", span: "col-span-4" },
+  { key: "live", title: "直播", icon: Radio, path: "/douyin/library/live", span: "col-span-4" },
 ];
 
 export default function LibraryPage() {
@@ -62,21 +62,20 @@ export default function LibraryPage() {
   return (
     <>
       <AnimateEntry>
-        <Header title="资料库" description="数据管理中心" />
+        <Header title="资料库" description="数据管理中心" eyebrow="Library" />
       </AnimateEntry>
 
-      <div className="space-y-6">
-        <div className="grid grid-cols-3 gap-4">
+      <div className="space-y-8">
+        <div className="grid grid-cols-12 gap-5">
           {categories.map((cat, i) => (
-            <AnimateEntry key={cat.key} delay={i * 60}>
-              <Card
-                className={`group cursor-pointer border-border/40 bg-card/60 backdrop-blur-sm hover:bg-card hover:border-border/60 hover:-translate-y-1 transition-all duration-500 ${cat.span}`}
-                style={{ transitionTimingFunction: "cubic-bezier(0.32, 0.72, 0, 1)" }}
-                onClick={() => navigate(cat.path)}
-              >
-                <CardContent className="p-6">
+            <AnimateEntry key={cat.key} delay={i * 60} className={cat.span}>
+              <Bezel radius="xl">
+                <button
+                  className="w-full text-left p-7 group cursor-pointer transition-all duration-500 hover:bg-foreground/[0.02]"
+                  onClick={() => navigate(cat.path)}
+                >
                   <div className="flex items-start gap-5">
-                    <div className="h-12 w-12 rounded-2xl bg-foreground/[0.04] ring-1 ring-foreground/[0.06] flex items-center justify-center shrink-0 group-hover:bg-brand/[0.08] group-hover:ring-brand/20 transition-all duration-500">
+                    <div className="h-12 w-12 rounded-2xl bg-foreground/[0.04] ring-1 ring-foreground/[0.07] flex items-center justify-center shrink-0 group-hover:bg-brand/[0.1] group-hover:ring-brand/25 transition-all duration-500">
                       <cat.icon className="h-5 w-5 text-muted-foreground group-hover:text-brand transition-colors duration-500" />
                     </div>
                     <div className="min-w-0">
@@ -89,20 +88,19 @@ export default function LibraryPage() {
                       </p>
                     </div>
                   </div>
-                </CardContent>
-              </Card>
+                </button>
+              </Bezel>
             </AnimateEntry>
           ))}
         </div>
 
         {(videoStats || userStats) && (
           <AnimateEntry delay={300}>
-            <Card className="border-border/40 bg-card/60">
-              <CardContent className="p-8">
-                <h3 className="text-xs uppercase tracking-[0.15em] font-medium text-muted-foreground mb-6 flex items-center gap-2">
-                  <TrendingUp className="h-3.5 w-3.5" />
-                  总览
-                </h3>
+            <Bezel radius="xl">
+              <div className="p-8">
+                <span className="inline-block rounded-full px-3 py-1 text-[10px] uppercase tracking-[0.2em] font-medium bg-foreground/[0.05] text-muted-foreground mb-6">
+                  <span className="flex items-center gap-1.5"><TrendingUp className="h-3 w-3" />总览</span>
+                </span>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
                   {videoStats && (
                     <>
@@ -135,8 +133,8 @@ export default function LibraryPage() {
                     </>
                   )}
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+            </Bezel>
           </AnimateEntry>
         )}
       </div>

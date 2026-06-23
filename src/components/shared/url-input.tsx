@@ -2,7 +2,8 @@ import { useState, useCallback, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Link, Loader2 } from "lucide-react";
+import { Bezel } from "@/components/shared/bezel";
+import { Link, Loader2, ArrowRight } from "lucide-react";
 
 interface UrlInputProps {
   onSubmit: (url: string) => void;
@@ -70,29 +71,38 @@ export function UrlInput({ onSubmit, loading, placeholder, allowedTypes, default
     <div className="space-y-3">
       <form onSubmit={handleSubmit} className="flex gap-3 items-start">
         <div className="flex-1 relative">
-          <Input
-            value={url}
-            onChange={(e) => { setUrl(e.target.value); setTypeError(null); }}
-            placeholder={placeholder || "粘贴抖音链接..."}
-            className="h-11 rounded-xl border-border/60 bg-card/60 backdrop-blur-sm pr-20 text-sm"
-          />
-          {url && urlType !== "unknown" && (
-            <Badge
-              variant="secondary"
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] tracking-wide bg-foreground/[0.06]"
-            >
-              {typeLabels[urlType]}
-            </Badge>
-          )}
+          <Bezel radius="xl" padding="sm">
+            <div className="relative">
+              <Input
+                value={url}
+                onChange={(e) => { setUrl(e.target.value); setTypeError(null); }}
+                placeholder={placeholder || "粘贴抖音链接..."}
+                className="h-12 rounded-[calc(1.5rem-0.25rem)] border-0 bg-transparent pr-22 text-sm focus-visible:ring-0 focus-visible:border-0"
+              />
+              {url && urlType !== "unknown" && (
+                <Badge
+                  variant="secondary"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] tracking-wide bg-foreground/[0.06]"
+                >
+                  {typeLabels[urlType]}
+                </Badge>
+              )}
+            </div>
+          </Bezel>
         </div>
-        <Button type="button" variant="outline" size="icon" className="h-11 w-11 rounded-xl border-border/60" onClick={handlePaste}>
+        <Button type="button" variant="capsule" size="icon" className="h-12 w-12 shrink-0" onClick={handlePaste}>
           <Link className="h-4 w-4" />
         </Button>
-        <Button type="submit" disabled={!url.trim() || loading} className="h-11 rounded-xl px-6">
+        <Button type="submit" disabled={!url.trim() || loading} className="h-12 px-6 shrink-0">
           {loading ? (
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
-            "解析"
+            <>
+              解析
+              <span className="ml-1.5 inline-flex items-center justify-center w-6 h-6 rounded-full bg-foreground/10 group-hover/button:translate-x-0.5 transition-transform duration-300">
+                <ArrowRight className="h-3 w-3" />
+              </span>
+            </>
           )}
         </Button>
       </form>

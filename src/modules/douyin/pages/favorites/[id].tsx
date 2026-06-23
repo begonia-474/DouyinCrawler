@@ -2,8 +2,8 @@ import { useState, useCallback, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Header } from "@/components/layout/header";
 import { VideoCard } from "@/components/shared/video-card";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Bezel } from "@/components/shared/bezel";
 import { getCollectsVideoList, downloadCollectsVideo } from "@/lib/api";
 import type { VideoItem } from "@/lib/api-types";
 import { Loader2, AlertCircle, Download, ArrowLeft } from "lucide-react";
@@ -64,7 +64,7 @@ export default function CollectsDetailPage() {
     <>
       <Header title="收藏夹详情" description={`共 ${videos.length} 个视频`} parent={{ label: "我的收藏", path: "/douyin/favorites" }}>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => navigate("/douyin/favorites")}>
+          <Button variant="capsule" size="sm" onClick={() => navigate("/douyin/favorites")}>
             <ArrowLeft className="h-4 w-4 mr-1" />
             返回
           </Button>
@@ -79,39 +79,39 @@ export default function CollectsDetailPage() {
 
       <div className="space-y-6">
         {error && (
-          <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
+          <div className="flex items-center gap-2 p-4 rounded-2xl bg-destructive/[0.06] ring-1 ring-destructive/20 text-destructive text-sm">
             <AlertCircle className="h-4 w-4 shrink-0" />
             <span>{error}</span>
           </div>
         )}
 
         {loading && (
-          <div className="flex items-center justify-center py-12">
+          <div className="flex items-center justify-center py-16">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         )}
 
         {downloading && (
-          <Card>
-            <CardContent className="p-4">
+          <Bezel radius="xl">
+            <div className="p-5">
               <div className="space-y-1">
                 <Progress value={downloadProgress} />
                 <p className="text-xs text-muted-foreground text-right">{downloadedCount} / {videos.length}</p>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </Bezel>
         )}
 
         {!loading && videos.length === 0 && !error && (
-          <Card>
-            <CardContent className="p-8 text-center">
+          <Bezel radius="xl">
+            <div className="p-12 text-center">
               <p className="text-muted-foreground">暂无视频</p>
-            </CardContent>
-          </Card>
+            </div>
+          </Bezel>
         )}
 
         {!loading && videos.length > 0 && (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
             {videos.map((video) => (
               <VideoCard
                 key={video.aweme_id}

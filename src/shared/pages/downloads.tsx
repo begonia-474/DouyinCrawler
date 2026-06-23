@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
 import { Header } from "@/components/layout/header";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AnimateEntry } from "@/components/shared/animate-entry";
+import { Bezel } from "@/components/shared/bezel";
 import {
   Download,
   CheckCircle2,
@@ -56,7 +56,7 @@ export default function DownloadsPage() {
     <>
       <AnimateEntry>
         <Header title="下载管理" description="查看下载历史记录">
-          <Button variant="outline" size="sm" className="rounded-lg border-border/60">
+          <Button variant="capsule" size="sm">
             <FolderOpen className="h-4 w-4 mr-1.5" />
             打开文件夹
           </Button>
@@ -83,99 +83,103 @@ export default function DownloadsPage() {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="completed" className="mt-6 space-y-2">
+        <TabsContent value="completed" className="mt-8 space-y-2">
           {loading ? (
             <div className="flex justify-center py-16">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
           ) : completedDownloads.length === 0 ? (
-            <Card className="border-border/40 bg-card/60">
-              <CardContent className="p-12 text-center text-muted-foreground">
+            <Bezel radius="xl">
+              <div className="p-12 text-center text-muted-foreground">
                 <CheckCircle2 className="h-10 w-10 mx-auto mb-4 opacity-30" />
                 <p className="text-sm tracking-wide">没有已完成的下载</p>
-              </CardContent>
-            </Card>
+              </div>
+            </Bezel>
           ) : (
             completedDownloads.map((item, i) => {
               const Icon = typeIcons[item.download_type] || Download;
               return (
                 <AnimateEntry key={item.id} delay={i * 30}>
-                  <div className="flex items-center gap-4 p-4 border border-border/40 rounded-xl bg-card/40 hover:bg-card/80 hover:border-border/60 transition-all duration-300">
-                    <div className="h-9 w-9 rounded-lg bg-foreground/[0.04] flex items-center justify-center shrink-0">
-                      <Icon className="h-4 w-4 text-muted-foreground" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">
-                        {item.title || item.file_path || "未知文件"}
-                      </p>
-                      <div className="flex items-center gap-3 mt-1">
-                        {item.file_size > 0 && (
-                          <span className="text-[11px] text-muted-foreground font-mono tabular-nums">
-                            {formatFileSize(item.file_size)}
-                          </span>
-                        )}
-                        <span className="text-[11px] text-muted-foreground">
-                          {formatTimestamp(item.created_at)}
-                        </span>
-                        {item.author_nickname && (
+                  <Bezel radius="lg" padding="sm">
+                    <div className="flex items-center gap-4 p-4 bg-card hover:bg-foreground/[0.02] transition-all duration-300">
+                      <div className="h-9 w-9 rounded-xl bg-foreground/[0.04] ring-1 ring-foreground/[0.06] flex items-center justify-center shrink-0">
+                        <Icon className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">
+                          {item.title || item.file_path || "未知文件"}
+                        </p>
+                        <div className="flex items-center gap-3 mt-1">
+                          {item.file_size > 0 && (
+                            <span className="text-[11px] text-muted-foreground font-mono tabular-nums">
+                              {formatFileSize(item.file_size)}
+                            </span>
+                          )}
                           <span className="text-[11px] text-muted-foreground">
-                            {item.author_nickname}
+                            {formatTimestamp(item.created_at)}
                           </span>
+                          {item.author_nickname && (
+                            <span className="text-[11px] text-muted-foreground">
+                              {item.author_nickname}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {item.file_path && (
+                          <Button variant="ghost" size="icon-sm" title="打开文件所在文件夹">
+                            <FolderOpen className="h-4 w-4" />
+                          </Button>
                         )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      {item.file_path && (
-                        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg" title="打开文件所在文件夹">
-                          <FolderOpen className="h-4 w-4" />
-                        </Button>
-                      )}
-                    </div>
-                  </div>
+                  </Bezel>
                 </AnimateEntry>
               );
             })
           )}
         </TabsContent>
 
-        <TabsContent value="live" className="mt-6 space-y-2">
+        <TabsContent value="live" className="mt-8 space-y-2">
           {loading ? (
             <div className="flex justify-center py-16">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
           ) : liveRecords.length === 0 ? (
-            <Card className="border-border/40 bg-card/60">
-              <CardContent className="p-12 text-center text-muted-foreground">
+            <Bezel radius="xl">
+              <div className="p-12 text-center text-muted-foreground">
                 <Radio className="h-10 w-10 mx-auto mb-4 opacity-30" />
                 <p className="text-sm tracking-wide">没有直播录制记录</p>
-              </CardContent>
-            </Card>
+              </div>
+            </Bezel>
           ) : (
             liveRecords.map((item, i) => (
               <AnimateEntry key={item.id} delay={i * 30}>
-                <div className="flex items-center gap-4 p-4 border border-border/40 rounded-xl bg-card/40 hover:bg-card/80 hover:border-border/60 transition-all duration-300">
-                  <div className="h-9 w-9 rounded-lg bg-destructive/[0.06] flex items-center justify-center shrink-0">
-                    <Radio className="h-4 w-4 text-destructive/70" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">
-                      {item.title || "直播录制"}
-                    </p>
-                    <div className="flex items-center gap-3 mt-1">
-                      {item.nickname && (
-                        <span className="text-[11px] text-muted-foreground">{item.nickname}</span>
-                      )}
-                      {item.file_size > 0 && (
-                        <span className="text-[11px] text-muted-foreground font-mono tabular-nums">
-                          {formatFileSize(item.file_size)}
-                        </span>
-                      )}
+                <Bezel radius="lg" padding="sm">
+                  <div className="flex items-center gap-4 p-4 bg-card hover:bg-foreground/[0.02] transition-all duration-300">
+                    <div className="h-9 w-9 rounded-xl bg-destructive/[0.06] ring-1 ring-destructive/10 flex items-center justify-center shrink-0">
+                      <Radio className="h-4 w-4 text-destructive/70" />
                     </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">
+                        {item.title || "直播录制"}
+                      </p>
+                      <div className="flex items-center gap-3 mt-1">
+                        {item.nickname && (
+                          <span className="text-[11px] text-muted-foreground">{item.nickname}</span>
+                        )}
+                        {item.file_size > 0 && (
+                          <span className="text-[11px] text-muted-foreground font-mono tabular-nums">
+                            {formatFileSize(item.file_size)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <Badge variant={item.status === "completed" ? "default" : "destructive"} className="text-[11px] rounded-full">
+                      {item.status === "completed" ? "已完成" : item.status}
+                    </Badge>
                   </div>
-                  <Badge variant={item.status === "completed" ? "default" : "destructive"} className="text-[11px]">
-                    {item.status === "completed" ? "已完成" : item.status}
-                  </Badge>
-                </div>
+                </Bezel>
               </AnimateEntry>
             ))
           )}

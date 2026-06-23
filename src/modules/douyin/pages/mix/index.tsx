@@ -2,10 +2,10 @@ import { useState, useCallback } from "react";
 import { Header } from "@/components/layout/header";
 import { AnimateEntry } from "@/components/shared/animate-entry";
 import { UrlInput } from "@/components/shared/url-input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { Bezel } from "@/components/shared/bezel";
 import { getMixInfo, downloadMix } from "@/lib/api";
 import type { VideoItem } from "@/lib/api-types";
 import {
@@ -88,7 +88,7 @@ export default function MixPage() {
         <UrlInput onSubmit={handleParse} loading={loading} placeholder="粘贴合集链接..." allowedTypes={["mix"]} />
 
         {error && (
-          <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
+          <div className="flex items-center gap-2 p-4 rounded-2xl bg-destructive/[0.06] ring-1 ring-destructive/20 text-destructive text-sm">
             <AlertCircle className="h-4 w-4 shrink-0" />
             <span>{error}</span>
           </div>
@@ -96,57 +96,59 @@ export default function MixPage() {
 
         {videos.length > 0 && (
           <>
-            <Card className="border-border/40 bg-card/60">
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                      <Layers className="h-5 w-5 text-primary" />
+            <AnimateEntry>
+              <Bezel radius="xl">
+                <div className="p-6">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="h-11 w-11 rounded-2xl bg-primary/10 ring-1 ring-primary/15 flex items-center justify-center shrink-0">
+                        <Layers className="h-5 w-5 text-primary" />
+                      </div>
+                      <div>
+                        <h3 className="font-heading font-semibold">{mixName}</h3>
+                        <p className="text-sm text-muted-foreground tracking-wide">{videos.length} 个视频</p>
+                      </div>
                     </div>
-                    <div>
-                      <CardTitle>{mixName}</CardTitle>
-                      <p className="text-sm text-muted-foreground tracking-wide">{videos.length} 个视频</p>
-                    </div>
+                    <Badge variant="secondary" className="rounded-full"><ListVideo className="h-3 w-3 mr-1" />合集</Badge>
                   </div>
-                  <Badge variant="secondary"><ListVideo className="h-3 w-3 mr-1" />合集</Badge>
+                  {downloading && (
+                    <div className="mt-5 space-y-1">
+                      <Progress value={downloadProgress} />
+                      <p className="text-xs text-muted-foreground tracking-wide text-right">{downloadedCount} / {videos.length}</p>
+                    </div>
+                  )}
                 </div>
-              </CardHeader>
-              {downloading && (
-                <CardContent className="pt-0">
-                  <div className="space-y-1">
-                    <Progress value={downloadProgress} />
-                    <p className="text-xs text-muted-foreground tracking-wide text-right">{downloadedCount} / {videos.length}</p>
-                  </div>
-                </CardContent>
-              )}
-            </Card>
+              </Bezel>
+            </AnimateEntry>
 
-            <div className="space-y-3">
+            <div className="space-y-2">
               {videos.map((video, i) => (
-                <Card key={video.aweme_id} className={`border-border/40 bg-card/60 hover:-translate-y-1 transition-all duration-500 ${video.downloaded ? "border-success/30" : ""}`}>
-                  <CardContent className="p-4 flex items-center gap-4">
-                    <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center text-sm font-medium shrink-0">
-                      {video.downloaded ? <CheckCircle2 className="h-4 w-4 text-success" /> : i + 1}
+                <AnimateEntry key={video.aweme_id} delay={i * 25}>
+                  <Bezel radius="lg" padding="sm">
+                    <div className={`flex items-center gap-4 p-4 bg-card transition-all duration-300 ${video.downloaded ? "bg-success/[0.02]" : ""}`}>
+                      <div className="h-8 w-8 rounded-full bg-foreground/[0.04] ring-1 ring-foreground/[0.06] flex items-center justify-center text-sm font-medium shrink-0">
+                        {video.downloaded ? <CheckCircle2 className="h-4 w-4 text-success" /> : i + 1}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h4 className="text-sm font-medium truncate">{video.desc}</h4>
+                        <p className="text-xs text-muted-foreground tracking-wide">
+                          {formatDuration(video.duration)} · {formatCount(video.digg_count)} 赞 · {video.comment_count} 评论
+                        </p>
+                      </div>
+                      <Button
+                        variant={video.downloaded ? "capsule" : "default"}
+                        size="sm"
+                        disabled={video.downloaded}
+                      >
+                        {video.downloaded ? (
+                          <><CheckCircle2 className="h-3.5 w-3.5 mr-1" />已下载</>
+                        ) : (
+                          <><Download className="h-3.5 w-3.5 mr-1" />下载</>
+                        )}
+                      </Button>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <h4 className="text-sm font-medium truncate">{video.desc}</h4>
-                      <p className="text-xs text-muted-foreground tracking-wide">
-                        {formatDuration(video.duration)} · {formatCount(video.digg_count)} 赞 · {video.comment_count} 评论
-                      </p>
-                    </div>
-                    <Button
-                      variant={video.downloaded ? "outline" : "default"}
-                      size="sm"
-                      disabled={video.downloaded}
-                    >
-                      {video.downloaded ? (
-                        <><CheckCircle2 className="h-3.5 w-3.5 mr-1" />已下载</>
-                      ) : (
-                        <><Download className="h-3.5 w-3.5 mr-1" />下载</>
-                      )}
-                    </Button>
-                  </CardContent>
-                </Card>
+                  </Bezel>
+                </AnimateEntry>
               ))}
             </div>
           </>

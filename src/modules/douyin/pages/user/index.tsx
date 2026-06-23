@@ -3,11 +3,11 @@ import { Header } from "@/components/layout/header";
 import { AnimateEntry } from "@/components/shared/animate-entry";
 import { UrlInput } from "@/components/shared/url-input";
 import { VideoCard } from "@/components/shared/video-card";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Bezel } from "@/components/shared/bezel";
 import {
   getUserProfile, getUserPosts,
   getUserFollowing, getUserFollowers, downloadUserPosts,
@@ -32,8 +32,8 @@ function formatDuration(seconds: number): string {
 
 function FollowItemCard({ item, type }: { item: FollowItem; type: "following" | "follower" }) {
   return (
-    <Card className="border-border/40 bg-card/60">
-      <CardContent className="p-4 flex items-center gap-4">
+    <Bezel radius="lg" padding="sm">
+      <div className="flex items-center gap-4 p-4 bg-card">
         <Avatar className="h-10 w-10">
           <AvatarImage src={item.avatar} />
           <AvatarFallback>{item.nickname?.[0] || "?"}</AvatarFallback>
@@ -43,11 +43,11 @@ function FollowItemCard({ item, type }: { item: FollowItem; type: "following" | 
           {item.signature && <p className="text-xs text-muted-foreground tracking-wide truncate">{item.signature}</p>}
           <p className="text-xs text-muted-foreground tracking-wide">{formatCount(item.follower_count)} 粉丝</p>
         </div>
-        <Button variant="outline" size="sm">
+        <Button variant="capsule" size="sm">
           {type === "following" ? <><UserCheck className="h-3.5 w-3.5 mr-1" />已关注</> : <><UserPlus className="h-3.5 w-3.5 mr-1" />关注</>}
         </Button>
-      </CardContent>
-    </Card>
+      </div>
+    </Bezel>
   );
 }
 
@@ -79,7 +79,6 @@ export default function UserPage() {
       return;
     }
 
-    // 并行加载其他数据
     const [postsRes, followingRes, followersRes] = await Promise.all([
       getUserPosts(url),
       getUserFollowing(url),
@@ -125,70 +124,70 @@ export default function UserPage() {
         <UrlInput onSubmit={handleParse} loading={loading} placeholder="粘贴用户主页链接..." allowedTypes={["user"]} />
 
         {error && (
-          <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
+          <div className="flex items-center gap-2 p-4 rounded-2xl bg-destructive/[0.06] ring-1 ring-destructive/20 text-destructive text-sm">
             <AlertCircle className="h-4 w-4 shrink-0" />
             <span>{error}</span>
           </div>
         )}
 
         {loading && (
-          <div className="flex items-center justify-center py-12">
+          <div className="flex items-center justify-center py-16">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         )}
 
         {downloading && (
-          <Card className="border-border/40 bg-card/60">
-            <CardContent className="p-4">
+          <Bezel radius="xl">
+            <div className="p-5">
               <div className="space-y-1">
                 <Progress value={downloadProgress} />
                 <p className="text-xs text-muted-foreground tracking-wide text-right">{downloadedCount} / {videos.length}</p>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </Bezel>
         )}
 
         {profile && !loading && (
           <>
-            {/* 用户信息卡片 */}
-            <Card className="border-border/40 bg-card/60">
-              <CardContent className="p-6">
-                <div className="flex items-start gap-4">
-                  <Avatar className="h-16 w-16">
-                    <AvatarImage src={profile.avatar} />
-                    <AvatarFallback>{profile.nickname?.[0] || "?"}</AvatarFallback>
-                  </Avatar>
-                  <div className="flex-1">
-                    <h3 className="text-lg font-semibold">{profile.nickname}</h3>
-                    <p className="text-sm text-muted-foreground tracking-wide mt-1">{profile.signature}</p>
-                    <div className="flex items-center gap-5 mt-3">
-                      <div className="flex items-center gap-1.5 text-sm">
-                        <Video className="h-4 w-4 text-muted-foreground" />
-                        <span className="font-heading font-semibold tabular-nums">{profile.aweme_count}</span>
-                        <span className="text-muted-foreground">作品</span>
-                      </div>
-                      <div className="flex items-center gap-1.5 text-sm">
-                        <Users className="h-4 w-4 text-muted-foreground" />
-                        <span className="font-heading font-semibold tabular-nums">{formatCount(profile.follower_count)}</span>
-                        <span className="text-muted-foreground">粉丝</span>
-                      </div>
-                      <div className="flex items-center gap-1.5 text-sm">
-                        <Heart className="h-4 w-4 text-muted-foreground" />
-                        <span className="font-heading font-semibold tabular-nums">{formatCount(profile.following_count)}</span>
-                        <span className="text-muted-foreground">关注</span>
-                      </div>
-                      <div className="flex items-center gap-1.5 text-sm">
-                        <ThumbsUp className="h-4 w-4 text-muted-foreground" />
-                        <span className="font-heading font-semibold tabular-nums">{formatCount(profile.total_favorited)}</span>
-                        <span className="text-muted-foreground">获赞</span>
+            <AnimateEntry>
+              <Bezel radius="xl">
+                <div className="p-7">
+                  <div className="flex items-start gap-5">
+                    <Avatar className="h-16 w-16">
+                      <AvatarImage src={profile.avatar} />
+                      <AvatarFallback>{profile.nickname?.[0] || "?"}</AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1">
+                      <h3 className="text-lg font-semibold">{profile.nickname}</h3>
+                      <p className="text-sm text-muted-foreground tracking-wide mt-1">{profile.signature}</p>
+                      <div className="flex items-center gap-6 mt-4">
+                        <div className="flex items-center gap-1.5 text-sm">
+                          <Video className="h-4 w-4 text-muted-foreground" />
+                          <span className="font-heading font-semibold tabular-nums">{profile.aweme_count}</span>
+                          <span className="text-muted-foreground">作品</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 text-sm">
+                          <Users className="h-4 w-4 text-muted-foreground" />
+                          <span className="font-heading font-semibold tabular-nums">{formatCount(profile.follower_count)}</span>
+                          <span className="text-muted-foreground">粉丝</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 text-sm">
+                          <Heart className="h-4 w-4 text-muted-foreground" />
+                          <span className="font-heading font-semibold tabular-nums">{formatCount(profile.following_count)}</span>
+                          <span className="text-muted-foreground">关注</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 text-sm">
+                          <ThumbsUp className="h-4 w-4 text-muted-foreground" />
+                          <span className="font-heading font-semibold tabular-nums">{formatCount(profile.total_favorited)}</span>
+                          <span className="text-muted-foreground">获赞</span>
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
-              </CardContent>
-            </Card>
+              </Bezel>
+            </AnimateEntry>
 
-            {/* 功能 Tab */}
             <Tabs defaultValue="posts">
               <TabsList>
                 <TabsTrigger value="posts">作品<Badge variant="secondary" className="ml-1.5">{videos.length}</Badge></TabsTrigger>
@@ -196,8 +195,8 @@ export default function UserPage() {
                 <TabsTrigger value="followers">粉丝<Badge variant="secondary" className="ml-1.5">{followers.length}</Badge></TabsTrigger>
               </TabsList>
 
-              <TabsContent value="posts" className="mt-4">
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              <TabsContent value="posts" className="mt-6">
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
                   {videos.map((video) => (
                     <VideoCard
                       key={video.aweme_id}
@@ -212,13 +211,13 @@ export default function UserPage() {
                 </div>
               </TabsContent>
 
-              <TabsContent value="following" className="mt-4 space-y-1">
+              <TabsContent value="following" className="mt-6 space-y-2">
                 {following.map((item) => (
                   <FollowItemCard key={item.uid} item={item} type="following" />
                 ))}
               </TabsContent>
 
-              <TabsContent value="followers" className="mt-4 space-y-1">
+              <TabsContent value="followers" className="mt-6 space-y-2">
                 {followers.map((item) => (
                   <FollowItemCard key={item.uid} item={item} type="follower" />
                 ))}

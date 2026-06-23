@@ -91,6 +91,7 @@ desktop.ini
 # 文档和项目配置
 docs/
 CLAUDE.md
+AGENTS.md
 
 # 其他
 *.bak

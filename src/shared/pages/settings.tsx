@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { AnimateEntry } from "@/components/shared/animate-entry";
+import { Bezel } from "@/components/shared/bezel";
 import {
   Select,
   SelectContent,
@@ -42,8 +43,8 @@ function SettingItem({
 }) {
   return (
     <div className="flex items-center justify-between py-5">
-      <div className="flex items-center gap-3.5 min-w-0">
-        <div className="h-8 w-8 rounded-lg bg-foreground/[0.04] flex items-center justify-center shrink-0">
+      <div className="flex items-center gap-4 min-w-0">
+        <div className="h-9 w-9 rounded-xl bg-foreground/[0.04] ring-1 ring-foreground/[0.06] flex items-center justify-center shrink-0">
           <Icon className="h-4 w-4 text-muted-foreground" />
         </div>
         <div className="min-w-0">
@@ -111,11 +112,11 @@ export default function SettingsPage() {
             {saveMsg && (
               <span className="text-xs text-muted-foreground tracking-wide">{saveMsg}</span>
             )}
-            <Button variant="outline" size="sm" className="rounded-lg border-border/60" onClick={handleReset}>
+            <Button variant="capsule" size="sm" onClick={handleReset}>
               <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
               重置
             </Button>
-            <Button size="sm" className="rounded-lg" onClick={handleSave} disabled={saving}>
+            <Button size="sm" onClick={handleSave} disabled={saving}>
               <Save className="h-3.5 w-3.5 mr-1.5" />
               {saving ? "保存中..." : "保存"}
             </Button>
@@ -123,161 +124,167 @@ export default function SettingsPage() {
         </Header>
       </AnimateEntry>
 
-      <div className="max-w-2xl space-y-10">
+      <div className="max-w-2xl space-y-12">
         <AnimateEntry delay={50}>
           <div>
-            <h3 className="text-xs uppercase tracking-[0.15em] font-medium text-muted-foreground mb-2 flex items-center gap-2">
-              <User className="h-3.5 w-3.5" />
-              账号设置
-            </h3>
-            <SettingItem
-              icon={Cookie}
-              title="Cookie"
-              description="从浏览器开发者工具中复制"
-            >
-              <div className="w-80">
-                <Textarea
-                  value={cookie}
-                  onChange={(e) => setCookie(e.target.value)}
-                  placeholder="粘贴浏览器 Cookie..."
-                  rows={3}
-                  className="text-xs rounded-xl border-border/60"
-                />
+            <span className="inline-block rounded-full px-3 py-1 text-[10px] uppercase tracking-[0.2em] font-medium bg-foreground/[0.05] text-muted-foreground mb-4">
+              <span className="flex items-center gap-1.5"><User className="h-3 w-3" />账号</span>
+            </span>
+            <Bezel radius="xl">
+              <div className="p-6">
+                <SettingItem
+                  icon={Cookie}
+                  title="Cookie"
+                  description="从浏览器开发者工具中复制"
+                >
+                  <div className="w-80">
+                    <Textarea
+                      value={cookie}
+                      onChange={(e) => setCookie(e.target.value)}
+                      placeholder="粘贴浏览器 Cookie..."
+                      rows={3}
+                      className="text-xs rounded-xl border-foreground/[0.08] bg-foreground/[0.03]"
+                    />
+                  </div>
+                </SettingItem>
               </div>
-            </SettingItem>
+            </Bezel>
           </div>
         </AnimateEntry>
-
-        <Separator className="bg-border/40" />
 
         <AnimateEntry delay={100}>
           <div>
-            <h3 className="text-xs uppercase tracking-[0.15em] font-medium text-muted-foreground mb-2 flex items-center gap-2">
-              <Download className="h-3.5 w-3.5" />
-              下载设置
-            </h3>
-            <SettingItem
-              icon={FolderOpen}
-              title="下载路径"
-              description="视频保存的本地目录"
-            >
-              <div className="flex gap-2 w-80">
-                <Input
-                  value={downloadPath}
-                  onChange={(e) => setDownloadPath(e.target.value)}
-                  className="flex-1 h-9 text-sm rounded-xl border-border/60"
-                />
-                <Button variant="outline" size="icon" className="h-9 w-9 rounded-xl border-border/60 shrink-0" onClick={handleSelectFolder}>
-                  <FolderOpen className="h-3.5 w-3.5" />
-                </Button>
+            <span className="inline-block rounded-full px-3 py-1 text-[10px] uppercase tracking-[0.2em] font-medium bg-foreground/[0.05] text-muted-foreground mb-4">
+              <span className="flex items-center gap-1.5"><Download className="h-3 w-3" />下载</span>
+            </span>
+            <Bezel radius="xl">
+              <div className="p-6">
+                <SettingItem
+                  icon={FolderOpen}
+                  title="下载路径"
+                  description="视频保存的本地目录"
+                >
+                  <div className="flex gap-2 w-80">
+                    <Input
+                      value={downloadPath}
+                      onChange={(e) => setDownloadPath(e.target.value)}
+                      className="flex-1 h-9 text-sm rounded-xl border-foreground/[0.08] bg-foreground/[0.03]"
+                    />
+                    <Button variant="capsule" size="icon" className="h-9 w-9 shrink-0" onClick={handleSelectFolder}>
+                      <FolderOpen className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </SettingItem>
+                <Separator className="bg-foreground/[0.06]" />
+                <SettingItem
+                  icon={FileText}
+                  title="文件命名规则"
+                  description="支持变量: {create} {desc} {nickname} {aweme_id} {uid}"
+                >
+                  <Input
+                    value={naming}
+                    onChange={(e) => setNaming(e.target.value)}
+                    className="w-80 h-9 text-sm rounded-xl border-foreground/[0.08] bg-foreground/[0.03]"
+                  />
+                </SettingItem>
               </div>
-            </SettingItem>
-            <Separator className="bg-border/40" />
-            <SettingItem
-              icon={FileText}
-              title="文件命名规则"
-              description="支持变量: {create} {desc} {nickname} {aweme_id} {uid}"
-            >
-              <Input
-                value={naming}
-                onChange={(e) => setNaming(e.target.value)}
-                className="w-80 h-9 text-sm rounded-xl border-border/60"
-              />
-            </SettingItem>
+            </Bezel>
           </div>
         </AnimateEntry>
-
-        <Separator className="bg-border/40" />
 
         <AnimateEntry delay={150}>
           <div>
-            <h3 className="text-xs uppercase tracking-[0.15em] font-medium text-muted-foreground mb-2 flex items-center gap-2">
-              <Globe className="h-3.5 w-3.5" />
-              网络设置
-            </h3>
-            <SettingItem
-              icon={Shield}
-              title="加密模式"
-              description="请求签名加密算法"
-            >
-              <Select value={encryption} onValueChange={(v) => setEncryption(v ?? "ab")}>
-                <SelectTrigger className="w-80 h-9 text-sm rounded-xl border-border/60">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ab">ABogus</SelectItem>
-                  <SelectItem value="xb">XBogus</SelectItem>
-                </SelectContent>
-              </Select>
-            </SettingItem>
-            <Separator className="bg-border/40" />
-            <SettingItem
-              icon={Globe}
-              title="代理地址"
-              description="HTTP 代理，留空则不使用"
-            >
-              <Input
-                value={proxy}
-                onChange={(e) => setProxy(e.target.value)}
-                placeholder="http://127.0.0.1:7890"
-                className="w-80 h-9 text-sm rounded-xl border-border/60"
-              />
-            </SettingItem>
+            <span className="inline-block rounded-full px-3 py-1 text-[10px] uppercase tracking-[0.2em] font-medium bg-foreground/[0.05] text-muted-foreground mb-4">
+              <span className="flex items-center gap-1.5"><Globe className="h-3 w-3" />网络</span>
+            </span>
+            <Bezel radius="xl">
+              <div className="p-6">
+                <SettingItem
+                  icon={Shield}
+                  title="加密模式"
+                  description="请求签名加密算法"
+                >
+                  <Select value={encryption} onValueChange={(v) => setEncryption(v ?? "ab")}>
+                    <SelectTrigger className="w-80 h-9 text-sm rounded-xl border-foreground/[0.08] bg-foreground/[0.03]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ab">ABogus</SelectItem>
+                      <SelectItem value="xb">XBogus</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </SettingItem>
+                <Separator className="bg-foreground/[0.06]" />
+                <SettingItem
+                  icon={Globe}
+                  title="代理地址"
+                  description="HTTP 代理，留空则不使用"
+                >
+                  <Input
+                    value={proxy}
+                    onChange={(e) => setProxy(e.target.value)}
+                    placeholder="http://127.0.0.1:7890"
+                    className="w-80 h-9 text-sm rounded-xl border-foreground/[0.08] bg-foreground/[0.03]"
+                  />
+                </SettingItem>
+              </div>
+            </Bezel>
           </div>
         </AnimateEntry>
 
-        <Separator className="bg-border/40" />
-
         <AnimateEntry delay={200}>
           <div>
-            <h3 className="text-xs uppercase tracking-[0.15em] font-medium text-muted-foreground mb-2 flex items-center gap-2">
-              <Settings className="h-3.5 w-3.5" />
-              高级设置
-            </h3>
-            <SettingItem
-              icon={Zap}
-              title="最大连接数"
-              description="同时下载的任务数量"
-            >
-              <Input
-                type="number"
-                value={maxConnections}
-                onChange={(e) => setMaxConnections(e.target.value)}
-                min="1"
-                max="20"
-                className="w-28 h-9 text-sm rounded-xl border-border/60 font-mono tabular-nums"
-              />
-            </SettingItem>
-            <Separator className="bg-border/40" />
-            <SettingItem
-              icon={Clock}
-              title="超时 (秒)"
-              description="请求超时时间"
-            >
-              <Input
-                type="number"
-                value={reqTimeout}
-                onChange={(e) => setReqTimeout(e.target.value)}
-                min="1"
-                max="60"
-                className="w-28 h-9 text-sm rounded-xl border-border/60 font-mono tabular-nums"
-              />
-            </SettingItem>
-            <Separator className="bg-border/40" />
-            <SettingItem
-              icon={RefreshCw}
-              title="最大重试"
-              description="失败后自动重试次数"
-            >
-              <Input
-                type="number"
-                value={maxRetries}
-                onChange={(e) => setMaxRetries(e.target.value)}
-                min="0"
-                max="10"
-                className="w-28 h-9 text-sm rounded-xl border-border/60 font-mono tabular-nums"
-              />
-            </SettingItem>
+            <span className="inline-block rounded-full px-3 py-1 text-[10px] uppercase tracking-[0.2em] font-medium bg-foreground/[0.05] text-muted-foreground mb-4">
+              <span className="flex items-center gap-1.5"><Settings className="h-3 w-3" />高级</span>
+            </span>
+            <Bezel radius="xl">
+              <div className="p-6">
+                <SettingItem
+                  icon={Zap}
+                  title="最大连接数"
+                  description="同时下载的任务数量"
+                >
+                  <Input
+                    type="number"
+                    value={maxConnections}
+                    onChange={(e) => setMaxConnections(e.target.value)}
+                    min="1"
+                    max="20"
+                    className="w-28 h-9 text-sm rounded-xl border-foreground/[0.08] bg-foreground/[0.03] font-mono tabular-nums"
+                  />
+                </SettingItem>
+                <Separator className="bg-foreground/[0.06]" />
+                <SettingItem
+                  icon={Clock}
+                  title="超时 (秒)"
+                  description="请求超时时间"
+                >
+                  <Input
+                    type="number"
+                    value={reqTimeout}
+                    onChange={(e) => setReqTimeout(e.target.value)}
+                    min="1"
+                    max="60"
+                    className="w-28 h-9 text-sm rounded-xl border-foreground/[0.08] bg-foreground/[0.03] font-mono tabular-nums"
+                  />
+                </SettingItem>
+                <Separator className="bg-foreground/[0.06]" />
+                <SettingItem
+                  icon={RefreshCw}
+                  title="最大重试"
+                  description="失败后自动重试次数"
+                >
+                  <Input
+                    type="number"
+                    value={maxRetries}
+                    onChange={(e) => setMaxRetries(e.target.value)}
+                    min="0"
+                    max="10"
+                    className="w-28 h-9 text-sm rounded-xl border-foreground/[0.08] bg-foreground/[0.03] font-mono tabular-nums"
+                  />
+                </SettingItem>
+              </div>
+            </Bezel>
           </div>
         </AnimateEntry>
       </div>

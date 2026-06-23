@@ -3,9 +3,9 @@ import { Header } from "@/components/layout/header";
 import { AnimateEntry } from "@/components/shared/animate-entry";
 import { UrlInput } from "@/components/shared/url-input";
 import { VideoCard } from "@/components/shared/video-card";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Bezel } from "@/components/shared/bezel";
 import { getUserProfile, getUserLikes, downloadUserLikes } from "@/lib/api";
 import type { UserProfile as UserProfileType, VideoItem } from "@/lib/api-types";
 import { Loader2, AlertCircle, Download } from "lucide-react";
@@ -69,7 +69,7 @@ export default function LikesPage() {
       <AnimateEntry>
         <Header title="用户点赞" description="查看用户的点赞列表" parent={{ label: "首页", path: "/douyin" }}>
           {likes.length > 0 && (
-            <Button variant="outline" size="sm" onClick={handleDownloadAll} disabled={downloading}>
+            <Button variant="capsule" size="sm" onClick={handleDownloadAll} disabled={downloading}>
               {downloading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Download className="h-4 w-4 mr-1" />}
               {downloading ? `下载中 ${downloadedCount}/${likes.length}` : "全部下载"}
             </Button>
@@ -81,45 +81,47 @@ export default function LikesPage() {
         <UrlInput onSubmit={handleParse} loading={loading} placeholder="粘贴用户主页链接..." allowedTypes={["user"]} />
 
         {error && (
-          <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
+          <div className="flex items-center gap-2 p-4 rounded-2xl bg-destructive/[0.06] ring-1 ring-destructive/20 text-destructive text-sm">
             <AlertCircle className="h-4 w-4 shrink-0" />
             <span>{error}</span>
           </div>
         )}
 
         {loading && (
-          <div className="flex items-center justify-center py-12">
+          <div className="flex items-center justify-center py-16">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         )}
 
         {downloading && (
-          <Card className="border-border/40 bg-card/60">
-            <CardContent className="p-4">
+          <Bezel radius="xl">
+            <div className="p-5">
               <div className="space-y-1">
                 <Progress value={downloadProgress} />
                 <p className="text-xs text-muted-foreground tracking-wide text-right">{downloadedCount} / {likes.length}</p>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </Bezel>
         )}
 
         {profile && !loading && (
           <>
-            <Card className="border-border/40 bg-card/60">
-              <CardContent className="p-4 flex items-center gap-4">
-                <Avatar className="h-12 w-12">
-                  <AvatarImage src={profile.avatar} />
-                  <AvatarFallback>{profile.nickname?.[0] || "?"}</AvatarFallback>
-                </Avatar>
-                <div>
-                  <h3 className="font-semibold">{profile.nickname}</h3>
-                  <p className="text-sm text-muted-foreground tracking-wide">{likes.length} 个点赞</p>
+            <AnimateEntry>
+              <Bezel radius="xl" padding="sm">
+                <div className="flex items-center gap-4 p-5 bg-card">
+                  <Avatar className="h-12 w-12">
+                    <AvatarImage src={profile.avatar} />
+                    <AvatarFallback>{profile.nickname?.[0] || "?"}</AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <h3 className="font-semibold">{profile.nickname}</h3>
+                    <p className="text-sm text-muted-foreground tracking-wide">{likes.length} 个点赞</p>
+                  </div>
                 </div>
-              </CardContent>
-            </Card>
+              </Bezel>
+            </AnimateEntry>
 
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
               {likes.map((video) => (
                 <VideoCard
                   key={video.aweme_id}

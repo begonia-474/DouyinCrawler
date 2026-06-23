@@ -197,7 +197,7 @@
   from {
     opacity: 0;
     transform: translateY(24px);
-    filter: blur(4px);
+    filter: blur(6px);
   }
   to {
     opacity: 1;
@@ -207,7 +207,7 @@
 }
 
 .animate-entry {
-  animation: fade-up-in 0.7s cubic-bezier(0.32, 0.72, 0, 1) both;
+  animation: fade-up-in 0.8s cubic-bezier(0.32, 0.72, 0, 1) both;
 }
 
 /* Stagger delays */
@@ -218,3 +218,34 @@
 .stagger-5 { animation-delay: 0.25s; }
 .stagger-6 { animation-delay: 0.3s; }
 .stagger-7 { animation-delay: 0.35s; }
+
+/* Lucide icon thin stroke override */
+svg[class*="lucide"] {
+  stroke-width: 1.5;
+}
+
+/* Soft ambient shadow — replaces all harsh shadows */
+.shadow-ambient {
+  box-shadow: 0 8px 32px oklch(0 0 0 / 0.04), 0 2px 8px oklch(0 0 0 / 0.02);
+}
+.dark .shadow-ambient {
+  box-shadow: 0 8px 32px oklch(0 0 0 / 0.2), 0 2px 8px oklch(0 0 0 / 0.1);
+}
+
+.shadow-ambient-lg {
+  box-shadow: 0 16px 48px oklch(0 0 0 / 0.06), 0 4px 16px oklch(0 0 0 / 0.03);
+}
+.dark .shadow-ambient-lg {
+  box-shadow: 0 16px 48px oklch(0 0 0 / 0.3), 0 4px 16px oklch(0 0 0 / 0.15);
+}
+
+/* Glass surface */
+.glass {
+  backdrop-filter: blur(24px) saturate(1.2);
+  -webkit-backdrop-filter: blur(24px) saturate(1.2);
+}
+
+.glass-heavy {
+  backdrop-filter: blur(48px) saturate(1.4);
+  -webkit-backdrop-filter: blur(48px) saturate(1.4);
+}

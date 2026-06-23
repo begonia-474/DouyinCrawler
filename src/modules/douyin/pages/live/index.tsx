@@ -3,11 +3,11 @@ import { useLocation } from "react-router-dom";
 import { Header } from "@/components/layout/header";
 import { AnimateEntry } from "@/components/shared/animate-entry";
 import { UrlInput } from "@/components/shared/url-input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Bezel } from "@/components/shared/bezel";
 import { getLiveInfo, startLiveRecord, stopLiveRecord, getLiveStatus, saveLiveRecordAfterStop } from "@/lib/api";
 import type { LiveInfo as LiveInfoType } from "@/lib/api-types";
 import {
@@ -83,7 +83,6 @@ export default function LivePage() {
     setRecordLoading(true);
     const res = await stopLiveRecord(recordTaskId);
     if (res.success) {
-      // 轮询等待录制完成并保存记录
       const taskId = recordTaskId;
       let attempts = 0;
       pollTimerRef.current = setInterval(async () => {
@@ -114,10 +113,9 @@ export default function LivePage() {
             }
           }
         } catch {
-          // 忽略轮询错误
+          // ignore
         }
         if (attempts >= 30) {
-          // 超时 30 秒
           if (pollTimerRef.current) clearInterval(pollTimerRef.current);
           setRecording(false);
           setRecordTaskId(null);
@@ -147,60 +145,58 @@ export default function LivePage() {
         />
 
         {error && (
-          <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
+          <div className="flex items-center gap-2 p-4 rounded-2xl bg-destructive/[0.06] ring-1 ring-destructive/20 text-destructive text-sm">
             <AlertCircle className="h-4 w-4 shrink-0" />
             <span>{error}</span>
           </div>
         )}
 
         {loading && (
-          <div className="flex items-center justify-center py-12">
+          <div className="flex items-center justify-center py-16">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         )}
 
         {liveInfo && (
-          <div className="space-y-4">
-            <Card className="border-border/40 bg-card/60">
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-lg">{liveInfo.title}</CardTitle>
+          <div className="space-y-5">
+            <Bezel radius="xl">
+              <div className="p-6">
+                <div className="flex items-center justify-between mb-5">
+                  <h3 className="font-heading text-lg font-semibold">{liveInfo.title}</h3>
                   <div className="flex items-center gap-2">
                     {recording && (
-                      <Badge variant="destructive" className="animate-pulse">
+                      <Badge variant="destructive" className="animate-pulse rounded-full">
                         <Disc className="h-3 w-3 mr-1" />
                         录制中
                       </Badge>
                     )}
-                    <Badge variant={liveInfo.is_live ? "default" : "secondary"}>
+                    <Badge variant={liveInfo.is_live ? "default" : "secondary"} className="rounded-full">
                       {liveInfo.is_live ? (
                         <><Circle className="h-2 w-2 fill-current mr-1" />直播中</>
                       ) : "未开播"}
                     </Badge>
                   </div>
                 </div>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-3 gap-4 text-sm">
+                <div className="grid grid-cols-3 gap-6 text-sm">
                   <div>
-                    <p className="text-xs uppercase tracking-[0.15em] font-medium text-muted-foreground">主播</p>
+                    <p className="text-xs uppercase tracking-[0.15em] font-medium text-muted-foreground mb-1">主播</p>
                     <p className="font-medium">{liveInfo.nickname}</p>
                   </div>
                   <div>
-                    <p className="text-xs uppercase tracking-[0.15em] font-medium text-muted-foreground">观看人数</p>
+                    <p className="text-xs uppercase tracking-[0.15em] font-medium text-muted-foreground mb-1">观看人数</p>
                     <p className="font-heading font-medium tabular-nums flex items-center gap-1">
                       <Users className="h-4 w-4" />
                       {liveInfo.user_count}
                     </p>
                   </div>
                   <div>
-                    <p className="text-xs uppercase tracking-[0.15em] font-medium text-muted-foreground">房间号</p>
+                    <p className="text-xs uppercase tracking-[0.15em] font-medium text-muted-foreground mb-1">房间号</p>
                     <p className="font-heading font-medium tabular-nums">{liveInfo.room_id}</p>
                   </div>
                 </div>
 
                 {liveInfo.is_live && (
-                  <div className="mt-4 pt-4 border-t">
+                  <div className="mt-5 pt-5 border-t border-foreground/[0.06]">
                     {!recording ? (
                       <Button onClick={handleStartRecord} disabled={recordLoading}>
                         {recordLoading ? (
@@ -222,25 +218,24 @@ export default function LivePage() {
                     )}
                   </div>
                 )}
-              </CardContent>
-            </Card>
+              </div>
+            </Bezel>
 
             {liveInfo.is_live && (
-            <Card className="border-border/40 bg-card/60">
-                <CardHeader>
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <Radio className="h-4 w-4" />
-                    流地址
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
+              <Bezel radius="xl">
+                <div className="p-6 space-y-5">
+                  <div className="flex items-center gap-2">
+                    <Radio className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm font-medium">流地址</span>
+                  </div>
+
                   {liveInfo.flv_urls?.length > 0 && (
                     <div className="space-y-2">
-                      <Label>FLV</Label>
+                      <Label className="text-xs uppercase tracking-[0.1em] text-muted-foreground">FLV</Label>
                       {liveInfo.flv_urls.map((url, i) => (
                         <div key={i} className="flex gap-2">
-                          <Input value={url} readOnly className="flex-1 font-mono text-xs" />
-                          <Button variant="outline" size="icon" onClick={() => handleCopy(url, `flv-${i}`)}>
+                          <Input value={url} readOnly className="flex-1 font-mono text-xs rounded-xl border-foreground/[0.08] bg-foreground/[0.03]" />
+                          <Button variant="capsule" size="icon" onClick={() => handleCopy(url, `flv-${i}`)}>
                             {copied === `flv-${i}` ? <CheckCircle2 className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
                           </Button>
                         </div>
@@ -250,19 +245,19 @@ export default function LivePage() {
 
                   {liveInfo.m3u8_urls?.length > 0 && (
                     <div className="space-y-2">
-                      <Label>M3U8</Label>
+                      <Label className="text-xs uppercase tracking-[0.1em] text-muted-foreground">M3U8</Label>
                       {liveInfo.m3u8_urls.map((url, i) => (
                         <div key={i} className="flex gap-2">
-                          <Input value={url} readOnly className="flex-1 font-mono text-xs" />
-                          <Button variant="outline" size="icon" onClick={() => handleCopy(url, `m3u8-${i}`)}>
+                          <Input value={url} readOnly className="flex-1 font-mono text-xs rounded-xl border-foreground/[0.08] bg-foreground/[0.03]" />
+                          <Button variant="capsule" size="icon" onClick={() => handleCopy(url, `m3u8-${i}`)}>
                             {copied === `m3u8-${i}` ? <CheckCircle2 className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
                           </Button>
                         </div>
                       ))}
                     </div>
                   )}
-                </CardContent>
-              </Card>
+                </div>
+              </Bezel>
             )}
           </div>
         )}

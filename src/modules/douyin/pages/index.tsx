@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { Header } from "@/components/layout/header";
-import { Card, CardContent } from "@/components/ui/card";
 import { AnimateEntry } from "@/components/shared/animate-entry";
+import { Bezel } from "@/components/shared/bezel";
 import {
   Video,
   User,
@@ -17,7 +17,7 @@ const features = [
     description: "下载单个视频或图文内容",
     icon: Video,
     path: "/douyin/video",
-    span: "col-span-2 row-span-1",
+    span: "col-span-8",
   },
   {
     id: "user",
@@ -25,7 +25,7 @@ const features = [
     description: "查看用户作品、喜欢、关注",
     icon: User,
     path: "/douyin/user",
-    span: "col-span-1 row-span-1",
+    span: "col-span-4",
   },
   {
     id: "live",
@@ -33,7 +33,7 @@ const features = [
     description: "获取直播信息和流地址",
     icon: Radio,
     path: "/douyin/live",
-    span: "col-span-1 row-span-1",
+    span: "col-span-4",
   },
   {
     id: "likes",
@@ -41,7 +41,7 @@ const features = [
     description: "查看用户的点赞列表",
     icon: Heart,
     path: "/douyin/likes",
-    span: "col-span-1 row-span-1",
+    span: "col-span-4",
   },
   {
     id: "mix",
@@ -49,7 +49,7 @@ const features = [
     description: "下载整个合集/播放列表",
     icon: Layers,
     path: "/douyin/mix",
-    span: "col-span-2 row-span-1",
+    span: "col-span-4",
   },
 ];
 
@@ -59,33 +59,32 @@ export default function DouyinIndex() {
   return (
     <>
       <AnimateEntry>
-        <Header title="抖音" description="选择功能开始使用" />
+        <Header title="抖音" description="选择功能开始使用" eyebrow="Platform" />
       </AnimateEntry>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-12 gap-5">
         {features.map((feature, i) => (
-          <AnimateEntry key={feature.id} delay={i * 60}>
-            <Card
-              className={`group cursor-pointer border-border/40 bg-card/60 backdrop-blur-sm hover:bg-card hover:border-border/60 hover:-translate-y-1 transition-all duration-500 ${feature.span}`}
-              style={{ transitionTimingFunction: "cubic-bezier(0.32, 0.72, 0, 1)" }}
-              onClick={() => navigate(feature.path)}
-            >
-              <CardContent className="p-6">
+          <AnimateEntry key={feature.id} delay={i * 60} className={feature.span}>
+            <Bezel radius="xl">
+              <button
+                className="w-full text-left p-7 group cursor-pointer transition-all duration-500 hover:bg-foreground/[0.02]"
+                onClick={() => navigate(feature.path)}
+              >
                 <div className="flex items-start gap-5">
-                  <div className="h-12 w-12 rounded-2xl bg-foreground/[0.04] ring-1 ring-foreground/[0.06] flex items-center justify-center shrink-0 group-hover:bg-brand/[0.08] group-hover:ring-brand/20 transition-all duration-500">
+                  <div className="h-12 w-12 rounded-2xl bg-foreground/[0.04] ring-1 ring-foreground/[0.07] flex items-center justify-center shrink-0 group-hover:bg-brand/[0.1] group-hover:ring-brand/25 transition-all duration-500">
                     <feature.icon className="h-5 w-5 text-muted-foreground group-hover:text-brand transition-colors duration-500" />
                   </div>
                   <div className="min-w-0">
                     <h3 className="font-heading text-lg font-semibold tracking-tight">
                       {feature.title}
                     </h3>
-                    <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
+                    <p className="text-sm text-muted-foreground mt-1.5 leading-relaxed">
                       {feature.description}
                     </p>
                   </div>
                 </div>
-              </CardContent>
-            </Card>
+              </button>
+            </Bezel>
           </AnimateEntry>
         ))}
       </div>

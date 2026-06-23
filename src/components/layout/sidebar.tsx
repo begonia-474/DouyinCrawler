@@ -56,9 +56,9 @@ function SidebarLink({
       className={({ isActive }) =>
         cn(
           "flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-all duration-300 relative group",
-          "hover:bg-foreground/[0.04]",
+          "hover:bg-foreground/[0.05]",
           isActive
-            ? "bg-foreground/[0.06] text-foreground font-medium"
+            ? "bg-foreground/[0.07] text-foreground font-medium"
             : "text-muted-foreground"
         )
       }
@@ -91,62 +91,64 @@ export function Sidebar() {
   const { theme, setTheme } = useAppStore();
 
   return (
-    <aside className="w-[220px] border-r border-border/60 bg-card/80 backdrop-blur-sm flex flex-col h-full">
-      <div className="p-5 pb-4">
-        <h1 className="text-lg font-bold tracking-tight text-foreground flex items-center gap-2.5">
-          <span className="inline-flex items-center justify-center h-8 w-8 rounded-[0.6rem] bg-brand text-brand-foreground text-[11px] font-bold tracking-wide shadow-lg shadow-brand/20">
-            DC
-          </span>
-          <span className="font-heading text-[17px] tracking-[-0.01em]">DouyinCrawler</span>
-        </h1>
-      </div>
+    <aside className="w-[232px] shrink-0 p-3">
+      <div className="h-full flex flex-col rounded-[1.5rem] bg-card/70 glass ring-1 ring-foreground/[0.06] shadow-ambient overflow-hidden">
+        <div className="p-5 pb-4">
+          <h1 className="text-lg font-bold tracking-tight text-foreground flex items-center gap-2.5">
+            <span className="inline-flex items-center justify-center h-8 w-8 rounded-xl bg-brand text-brand-foreground text-[11px] font-bold tracking-wide shadow-ambient">
+              DC
+            </span>
+            <span className="font-heading text-[17px] tracking-[-0.01em]">DouyinCrawler</span>
+          </h1>
+        </div>
 
-      <div className="px-3 pb-3">
-        <div className="flex gap-1 p-1 bg-foreground/[0.03] rounded-xl">
-          {platformItems.map((platform) => (
-            <button
-              key={platform.id}
-              className={cn(
-                "flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-medium transition-all duration-200",
-                currentPlatform === platform.id
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <platform.icon className="h-3.5 w-3.5" />
-              {platform.label}
-            </button>
+        <div className="px-3 pb-3">
+          <div className="flex gap-1 p-1 bg-foreground/[0.04] rounded-xl">
+            {platformItems.map((platform) => (
+              <button
+                key={platform.id}
+                className={cn(
+                  "flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-medium transition-all duration-200",
+                  currentPlatform === platform.id
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <platform.icon className="h-3.5 w-3.5" />
+                {platform.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <nav className="flex-1 px-3 py-1 space-y-0.5 overflow-auto">
+          {navItems.map((item) => (
+            <SidebarLink key={item.to} {...item} />
+          ))}
+        </nav>
+
+        <div className="px-3 py-4 border-t border-foreground/[0.06] space-y-2">
+          <div className="flex gap-1 p-1 bg-foreground/[0.04] rounded-xl">
+            {themeOptions.map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => setTheme(opt.value)}
+                className={cn(
+                  "flex-1 flex items-center justify-center p-1.5 rounded-lg transition-all duration-200",
+                  theme === opt.value
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+                title={opt.label}
+              >
+                <opt.icon className="h-3.5 w-3.5" />
+              </button>
+            ))}
+          </div>
+          {bottomItems.map((item) => (
+            <SidebarLink key={item.to} {...item} />
           ))}
         </div>
-      </div>
-
-      <nav className="flex-1 px-3 py-1 space-y-0.5 overflow-auto">
-        {navItems.map((item) => (
-          <SidebarLink key={item.to} {...item} />
-        ))}
-      </nav>
-
-      <div className="px-3 py-4 border-t border-border/60 space-y-2">
-        <div className="flex gap-1 p-1 bg-foreground/[0.03] rounded-xl">
-          {themeOptions.map((opt) => (
-            <button
-              key={opt.value}
-              onClick={() => setTheme(opt.value)}
-              className={cn(
-                "flex-1 flex items-center justify-center p-1.5 rounded-lg transition-all duration-200",
-                theme === opt.value
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-              title={opt.label}
-            >
-              <opt.icon className="h-3.5 w-3.5" />
-            </button>
-          ))}
-        </div>
-        {bottomItems.map((item) => (
-          <SidebarLink key={item.to} {...item} />
-        ))}
       </div>
     </aside>
   );
