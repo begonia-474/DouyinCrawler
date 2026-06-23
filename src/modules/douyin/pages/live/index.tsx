@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useLocation } from "react-router-dom";
 import { Header } from "@/components/layout/header";
+import { AnimateEntry } from "@/components/shared/animate-entry";
 import { UrlInput } from "@/components/shared/url-input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -131,7 +132,9 @@ export default function LivePage() {
 
   return (
     <>
-      <Header title="直播" description="获取直播信息和流地址" parent={{ label: "首页", path: "/douyin" }} />
+      <AnimateEntry>
+        <Header title="直播" description="获取直播信息和流地址" parent={{ label: "首页", path: "/douyin" }} />
+      </AnimateEntry>
 
       <div className="space-y-6">
         <UrlInput
@@ -158,7 +161,7 @@ export default function LivePage() {
 
         {liveInfo && (
           <div className="space-y-4">
-            <Card>
+            <Card className="border-border/40 bg-card/60">
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-lg">{liveInfo.title}</CardTitle>
@@ -180,19 +183,19 @@ export default function LivePage() {
               <CardContent>
                 <div className="grid grid-cols-3 gap-4 text-sm">
                   <div>
-                    <p className="text-muted-foreground">主播</p>
+                    <p className="text-xs uppercase tracking-[0.15em] font-medium text-muted-foreground">主播</p>
                     <p className="font-medium">{liveInfo.nickname}</p>
                   </div>
                   <div>
-                    <p className="text-muted-foreground">观看人数</p>
-                    <p className="font-medium flex items-center gap-1">
+                    <p className="text-xs uppercase tracking-[0.15em] font-medium text-muted-foreground">观看人数</p>
+                    <p className="font-heading font-medium tabular-nums flex items-center gap-1">
                       <Users className="h-4 w-4" />
                       {liveInfo.user_count}
                     </p>
                   </div>
                   <div>
-                    <p className="text-muted-foreground">房间号</p>
-                    <p className="font-medium">{liveInfo.room_id}</p>
+                    <p className="text-xs uppercase tracking-[0.15em] font-medium text-muted-foreground">房间号</p>
+                    <p className="font-heading font-medium tabular-nums">{liveInfo.room_id}</p>
                   </div>
                 </div>
 
@@ -223,7 +226,7 @@ export default function LivePage() {
             </Card>
 
             {liveInfo.is_live && (
-              <Card>
+            <Card className="border-border/40 bg-card/60">
                 <CardHeader>
                   <CardTitle className="text-base flex items-center gap-2">
                     <Radio className="h-4 w-4" />
@@ -238,7 +241,7 @@ export default function LivePage() {
                         <div key={i} className="flex gap-2">
                           <Input value={url} readOnly className="flex-1 font-mono text-xs" />
                           <Button variant="outline" size="icon" onClick={() => handleCopy(url, `flv-${i}`)}>
-                            {copied === `flv-${i}` ? <CheckCircle2 className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
+                            {copied === `flv-${i}` ? <CheckCircle2 className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
                           </Button>
                         </div>
                       ))}
@@ -252,7 +255,7 @@ export default function LivePage() {
                         <div key={i} className="flex gap-2">
                           <Input value={url} readOnly className="flex-1 font-mono text-xs" />
                           <Button variant="outline" size="icon" onClick={() => handleCopy(url, `m3u8-${i}`)}>
-                            {copied === `m3u8-${i}` ? <CheckCircle2 className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
+                            {copied === `m3u8-${i}` ? <CheckCircle2 className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
                           </Button>
                         </div>
                       ))}

@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Header } from "@/components/layout/header";
+import { AnimateEntry } from "@/components/shared/animate-entry";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { getUserCollects } from "@/lib/api";
@@ -33,7 +34,9 @@ export default function FavoritesPage() {
 
   return (
     <>
-      <Header title="我的收藏" description="当前账号的收藏夹" />
+      <AnimateEntry>
+        <Header title="我的收藏" description="当前账号的收藏夹" />
+      </AnimateEntry>
 
       <div className="space-y-6">
         {error && (
@@ -50,11 +53,11 @@ export default function FavoritesPage() {
         )}
 
         {!loading && collects.length === 0 && !error && (
-          <Card>
+          <Card className="border-border/40 bg-card/60">
             <CardContent className="p-8 text-center">
               <Heart className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
               <h3 className="text-lg font-semibold mb-2">暂无收藏夹</h3>
-              <p className="text-muted-foreground">
+              <p className="text-muted-foreground tracking-wide">
                 请先在设置中配置 Cookie
               </p>
             </CardContent>
@@ -66,7 +69,7 @@ export default function FavoritesPage() {
             {collects.map((folder) => (
               <Card
                 key={folder.id}
-                className="hover:bg-accent/50 transition-colors cursor-pointer"
+                className="border-border/40 bg-card/60 hover:-translate-y-1 transition-all duration-500 hover:bg-accent/50 cursor-pointer"
                 onClick={() => navigate(`/douyin/favorites/${folder.id}`)}
               >
                 <CardContent className="p-4 flex items-center gap-4">
@@ -75,7 +78,7 @@ export default function FavoritesPage() {
                   </div>
                   <div className="flex-1">
                     <h4 className="text-sm font-medium">{folder.name}</h4>
-                    <p className="text-xs text-muted-foreground">{folder.count} 个视频</p>
+                    <p className="text-xs text-muted-foreground tracking-wide">{folder.count} 个视频</p>
                   </div>
                   <Badge variant="secondary">{folder.count}</Badge>
                   <ChevronRight className="h-4 w-4 text-muted-foreground" />

@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import { Header } from "@/components/layout/header";
+import { AnimateEntry } from "@/components/shared/animate-entry";
 import { UrlInput } from "@/components/shared/url-input";
 import { VideoCard } from "@/components/shared/video-card";
 import { Card, CardContent } from "@/components/ui/card";
@@ -31,7 +32,7 @@ function formatDuration(seconds: number): string {
 
 function FollowItemCard({ item, type }: { item: FollowItem; type: "following" | "follower" }) {
   return (
-    <Card>
+    <Card className="border-border/40 bg-card/60">
       <CardContent className="p-4 flex items-center gap-4">
         <Avatar className="h-10 w-10">
           <AvatarImage src={item.avatar} />
@@ -39,8 +40,8 @@ function FollowItemCard({ item, type }: { item: FollowItem; type: "following" | 
         </Avatar>
         <div className="flex-1 min-w-0">
           <h4 className="text-sm font-medium">{item.nickname}</h4>
-          {item.signature && <p className="text-xs text-muted-foreground truncate">{item.signature}</p>}
-          <p className="text-xs text-muted-foreground">{formatCount(item.follower_count)} 粉丝</p>
+          {item.signature && <p className="text-xs text-muted-foreground tracking-wide truncate">{item.signature}</p>}
+          <p className="text-xs text-muted-foreground tracking-wide">{formatCount(item.follower_count)} 粉丝</p>
         </div>
         <Button variant="outline" size="sm">
           {type === "following" ? <><UserCheck className="h-3.5 w-3.5 mr-1" />已关注</> : <><UserPlus className="h-3.5 w-3.5 mr-1" />关注</>}
@@ -109,14 +110,16 @@ export default function UserPage() {
 
   return (
     <>
-      <Header title="用户主页" description="查看用户资料和作品" parent={{ label: "首页", path: "/douyin" }}>
-        {profile && (
-          <Button onClick={handleDownloadAll} disabled={downloading}>
-            {downloading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
-            {downloading ? `下载中 ${downloadedCount}/${videos.length}` : "全部下载"}
-          </Button>
-        )}
-      </Header>
+      <AnimateEntry>
+        <Header title="用户主页" description="查看用户资料和作品" parent={{ label: "首页", path: "/douyin" }}>
+          {profile && (
+            <Button onClick={handleDownloadAll} disabled={downloading}>
+              {downloading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
+              {downloading ? `下载中 ${downloadedCount}/${videos.length}` : "全部下载"}
+            </Button>
+          )}
+        </Header>
+      </AnimateEntry>
 
       <div className="space-y-6">
         <UrlInput onSubmit={handleParse} loading={loading} placeholder="粘贴用户主页链接..." allowedTypes={["user"]} />
@@ -135,11 +138,11 @@ export default function UserPage() {
         )}
 
         {downloading && (
-          <Card>
+          <Card className="border-border/40 bg-card/60">
             <CardContent className="p-4">
               <div className="space-y-1">
                 <Progress value={downloadProgress} />
-                <p className="text-xs text-muted-foreground text-right">{downloadedCount} / {videos.length}</p>
+                <p className="text-xs text-muted-foreground tracking-wide text-right">{downloadedCount} / {videos.length}</p>
               </div>
             </CardContent>
           </Card>
@@ -148,7 +151,7 @@ export default function UserPage() {
         {profile && !loading && (
           <>
             {/* 用户信息卡片 */}
-            <Card>
+            <Card className="border-border/40 bg-card/60">
               <CardContent className="p-6">
                 <div className="flex items-start gap-4">
                   <Avatar className="h-16 w-16">
@@ -157,26 +160,26 @@ export default function UserPage() {
                   </Avatar>
                   <div className="flex-1">
                     <h3 className="text-lg font-semibold">{profile.nickname}</h3>
-                    <p className="text-sm text-muted-foreground mt-1">{profile.signature}</p>
+                    <p className="text-sm text-muted-foreground tracking-wide mt-1">{profile.signature}</p>
                     <div className="flex items-center gap-5 mt-3">
                       <div className="flex items-center gap-1.5 text-sm">
                         <Video className="h-4 w-4 text-muted-foreground" />
-                        <span className="font-semibold">{profile.aweme_count}</span>
+                        <span className="font-heading font-semibold tabular-nums">{profile.aweme_count}</span>
                         <span className="text-muted-foreground">作品</span>
                       </div>
                       <div className="flex items-center gap-1.5 text-sm">
                         <Users className="h-4 w-4 text-muted-foreground" />
-                        <span className="font-semibold">{formatCount(profile.follower_count)}</span>
+                        <span className="font-heading font-semibold tabular-nums">{formatCount(profile.follower_count)}</span>
                         <span className="text-muted-foreground">粉丝</span>
                       </div>
                       <div className="flex items-center gap-1.5 text-sm">
                         <Heart className="h-4 w-4 text-muted-foreground" />
-                        <span className="font-semibold">{formatCount(profile.following_count)}</span>
+                        <span className="font-heading font-semibold tabular-nums">{formatCount(profile.following_count)}</span>
                         <span className="text-muted-foreground">关注</span>
                       </div>
                       <div className="flex items-center gap-1.5 text-sm">
                         <ThumbsUp className="h-4 w-4 text-muted-foreground" />
-                        <span className="font-semibold">{formatCount(profile.total_favorited)}</span>
+                        <span className="font-heading font-semibold tabular-nums">{formatCount(profile.total_favorited)}</span>
                         <span className="text-muted-foreground">获赞</span>
                       </div>
                     </div>

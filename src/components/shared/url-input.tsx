@@ -67,28 +67,28 @@ export function UrlInput({ onSubmit, loading, placeholder, allowedTypes, default
   }, []);
 
   return (
-    <div className="space-y-2">
-      <form onSubmit={handleSubmit} className="flex gap-2 items-start">
+    <div className="space-y-3">
+      <form onSubmit={handleSubmit} className="flex gap-3 items-start">
         <div className="flex-1 relative">
           <Input
             value={url}
             onChange={(e) => { setUrl(e.target.value); setTypeError(null); }}
             placeholder={placeholder || "粘贴抖音链接..."}
-            className="pr-20"
+            className="h-11 rounded-xl border-border/60 bg-card/60 backdrop-blur-sm pr-20 text-sm"
           />
           {url && urlType !== "unknown" && (
             <Badge
               variant="secondary"
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-xs"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] tracking-wide bg-foreground/[0.06]"
             >
               {typeLabels[urlType]}
             </Badge>
           )}
         </div>
-        <Button type="button" variant="outline" size="icon" onClick={handlePaste}>
+        <Button type="button" variant="outline" size="icon" className="h-11 w-11 rounded-xl border-border/60" onClick={handlePaste}>
           <Link className="h-4 w-4" />
         </Button>
-        <Button type="submit" disabled={!url.trim() || loading}>
+        <Button type="submit" disabled={!url.trim() || loading} className="h-11 rounded-xl px-6">
           {loading ? (
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
@@ -97,7 +97,7 @@ export function UrlInput({ onSubmit, loading, placeholder, allowedTypes, default
         </Button>
       </form>
       {typeError && (
-        <p className="text-xs text-destructive">{typeError}</p>
+        <p className="text-xs text-destructive tracking-wide">{typeError}</p>
       )}
     </div>
   );

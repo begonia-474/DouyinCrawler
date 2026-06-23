@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import { Header } from "@/components/layout/header";
+import { AnimateEntry } from "@/components/shared/animate-entry";
 import { UrlInput } from "@/components/shared/url-input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -72,14 +73,16 @@ export default function MixPage() {
 
   return (
     <>
-      <Header title="合集" description="下载整个合集/播放列表" parent={{ label: "首页", path: "/douyin" }}>
-        {videos.length > 0 && (
-          <Button onClick={handleDownloadAll} disabled={downloading}>
-            {downloading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
-            {downloading ? `下载中 ${downloadedCount}/${videos.length}` : "全部下载"}
-          </Button>
-        )}
-      </Header>
+      <AnimateEntry>
+        <Header title="合集" description="下载整个合集/播放列表" parent={{ label: "首页", path: "/douyin" }}>
+          {videos.length > 0 && (
+            <Button onClick={handleDownloadAll} disabled={downloading}>
+              {downloading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
+              {downloading ? `下载中 ${downloadedCount}/${videos.length}` : "全部下载"}
+            </Button>
+          )}
+        </Header>
+      </AnimateEntry>
 
       <div className="space-y-6">
         <UrlInput onSubmit={handleParse} loading={loading} placeholder="粘贴合集链接..." allowedTypes={["mix"]} />
@@ -93,7 +96,7 @@ export default function MixPage() {
 
         {videos.length > 0 && (
           <>
-            <Card>
+            <Card className="border-border/40 bg-card/60">
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
@@ -102,7 +105,7 @@ export default function MixPage() {
                     </div>
                     <div>
                       <CardTitle>{mixName}</CardTitle>
-                      <p className="text-sm text-muted-foreground">{videos.length} 个视频</p>
+                      <p className="text-sm text-muted-foreground tracking-wide">{videos.length} 个视频</p>
                     </div>
                   </div>
                   <Badge variant="secondary"><ListVideo className="h-3 w-3 mr-1" />合集</Badge>
@@ -112,7 +115,7 @@ export default function MixPage() {
                 <CardContent className="pt-0">
                   <div className="space-y-1">
                     <Progress value={downloadProgress} />
-                    <p className="text-xs text-muted-foreground text-right">{downloadedCount} / {videos.length}</p>
+                    <p className="text-xs text-muted-foreground tracking-wide text-right">{downloadedCount} / {videos.length}</p>
                   </div>
                 </CardContent>
               )}
@@ -120,14 +123,14 @@ export default function MixPage() {
 
             <div className="space-y-3">
               {videos.map((video, i) => (
-                <Card key={video.aweme_id} className={video.downloaded ? "border-green-200" : ""}>
+                <Card key={video.aweme_id} className={`border-border/40 bg-card/60 hover:-translate-y-1 transition-all duration-500 ${video.downloaded ? "border-success/30" : ""}`}>
                   <CardContent className="p-4 flex items-center gap-4">
                     <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center text-sm font-medium shrink-0">
-                      {video.downloaded ? <CheckCircle2 className="h-4 w-4 text-green-600" /> : i + 1}
+                      {video.downloaded ? <CheckCircle2 className="h-4 w-4 text-success" /> : i + 1}
                     </div>
                     <div className="flex-1 min-w-0">
                       <h4 className="text-sm font-medium truncate">{video.desc}</h4>
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-xs text-muted-foreground tracking-wide">
                         {formatDuration(video.duration)} · {formatCount(video.digg_count)} 赞 · {video.comment_count} 评论
                       </p>
                     </div>

@@ -80,10 +80,10 @@ export default function LibraryLivePage() {
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         ) : filtered.length === 0 ? (
-          <Card>
+          <Card className="border-border/40 bg-card/60">
             <CardContent className="p-8 text-center text-muted-foreground">
               <Radio className="h-10 w-10 mx-auto mb-3" />
-              <p>暂无直播录制记录</p>
+              <p className="tracking-wide">暂无直播录制记录</p>
             </CardContent>
           </Card>
         ) : (
@@ -103,7 +103,7 @@ export default function LibraryLivePage() {
                     }}
                   />
                 ) : (
-                  <Radio className="h-5 w-5 text-red-500 shrink-0" />
+                  <Radio className="h-5 w-5 text-destructive shrink-0" />
                 )}
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{item.title || "直播录制"}</p>

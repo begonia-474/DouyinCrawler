@@ -147,10 +147,10 @@ export default function LibraryUserInfoPage() {
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         ) : items.length === 0 ? (
-          <Card>
+          <Card className="border-border/40 bg-card/60">
             <CardContent className="p-8 text-center text-muted-foreground">
               <Users className="h-10 w-10 mx-auto mb-3" />
-              <p>暂无用户记录</p>
+              <p className="tracking-wide">暂无用户记录</p>
             </CardContent>
           </Card>
         ) : (
@@ -185,7 +185,7 @@ export default function LibraryUserInfoPage() {
                       </span>
                     )}
                     {item.custom_verify && (
-                      <span className="text-xs text-blue-500 bg-blue-500/10 px-1.5 py-0.5 rounded">
+                      <span className="text-xs text-brand bg-brand-muted px-1.5 py-0.5 rounded">
                         {item.custom_verify}
                       </span>
                     )}

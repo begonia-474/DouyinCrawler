@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import { Header } from "@/components/layout/header";
+import { AnimateEntry } from "@/components/shared/animate-entry";
 import { UrlInput } from "@/components/shared/url-input";
 import { VideoCard } from "@/components/shared/video-card";
 import { Card, CardContent } from "@/components/ui/card";
@@ -65,14 +66,16 @@ export default function LikesPage() {
 
   return (
     <>
-      <Header title="用户点赞" description="查看用户的点赞列表" parent={{ label: "首页", path: "/douyin" }}>
-        {likes.length > 0 && (
-          <Button variant="outline" size="sm" onClick={handleDownloadAll} disabled={downloading}>
-            {downloading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Download className="h-4 w-4 mr-1" />}
-            {downloading ? `下载中 ${downloadedCount}/${likes.length}` : "全部下载"}
-          </Button>
-        )}
-      </Header>
+      <AnimateEntry>
+        <Header title="用户点赞" description="查看用户的点赞列表" parent={{ label: "首页", path: "/douyin" }}>
+          {likes.length > 0 && (
+            <Button variant="outline" size="sm" onClick={handleDownloadAll} disabled={downloading}>
+              {downloading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Download className="h-4 w-4 mr-1" />}
+              {downloading ? `下载中 ${downloadedCount}/${likes.length}` : "全部下载"}
+            </Button>
+          )}
+        </Header>
+      </AnimateEntry>
 
       <div className="space-y-6">
         <UrlInput onSubmit={handleParse} loading={loading} placeholder="粘贴用户主页链接..." allowedTypes={["user"]} />
@@ -91,11 +94,11 @@ export default function LikesPage() {
         )}
 
         {downloading && (
-          <Card>
+          <Card className="border-border/40 bg-card/60">
             <CardContent className="p-4">
               <div className="space-y-1">
                 <Progress value={downloadProgress} />
-                <p className="text-xs text-muted-foreground text-right">{downloadedCount} / {likes.length}</p>
+                <p className="text-xs text-muted-foreground tracking-wide text-right">{downloadedCount} / {likes.length}</p>
               </div>
             </CardContent>
           </Card>
@@ -103,7 +106,7 @@ export default function LikesPage() {
 
         {profile && !loading && (
           <>
-            <Card>
+            <Card className="border-border/40 bg-card/60">
               <CardContent className="p-4 flex items-center gap-4">
                 <Avatar className="h-12 w-12">
                   <AvatarImage src={profile.avatar} />
@@ -111,7 +114,7 @@ export default function LikesPage() {
                 </Avatar>
                 <div>
                   <h3 className="font-semibold">{profile.nickname}</h3>
-                  <p className="text-sm text-muted-foreground">{likes.length} 个点赞</p>
+                  <p className="text-sm text-muted-foreground tracking-wide">{likes.length} 个点赞</p>
                 </div>
               </CardContent>
             </Card>

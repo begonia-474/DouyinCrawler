@@ -102,11 +102,11 @@ export default function LibraryMusicPage() {
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         ) : items.length === 0 ? (
-          <Card>
+          <Card className="border-border/40 bg-card/60">
             <CardContent className="p-8 text-center text-muted-foreground">
               <Music className="h-10 w-10 mx-auto mb-3" />
-              <p>暂无音乐收藏</p>
-              <p className="text-sm mt-2">请先在「音乐」页面收藏音乐</p>
+              <p className="tracking-wide">暂无音乐收藏</p>
+              <p className="text-sm mt-2 tracking-wide">请先在「音乐」页面收藏音乐</p>
             </CardContent>
           </Card>
         ) : (
@@ -142,7 +142,7 @@ export default function LibraryMusicPage() {
                       {formatDuration(item.duration)}
                     </span>
                     {item.status === "downloaded" && (
-                      <span className="text-xs text-green-600 flex items-center gap-1">
+                      <span className="text-xs text-success flex items-center gap-1">
                         <CheckCircle2 className="h-3 w-3" />
                         已下载
                       </span>
@@ -157,7 +157,7 @@ export default function LibraryMusicPage() {
                   disabled={!item.play_url || downloadingId === item.music_id || item.status === "downloaded"}
                 >
                   {item.status === "downloaded" ? (
-                    <CheckCircle2 className="h-4 w-4 text-green-600" />
+                    <CheckCircle2 className="h-4 w-4 text-success" />
                   ) : downloadingId === item.music_id ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (

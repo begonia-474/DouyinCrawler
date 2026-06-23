@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { Header } from "@/components/layout/header";
+import { AnimateEntry } from "@/components/shared/animate-entry";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -78,14 +79,16 @@ export default function MusicPage() {
 
   return (
     <>
-      <Header title="我的音乐" description="当前账号的音乐收藏">
-        {musicList.length > 0 && (
-          <Button variant="outline" size="sm" onClick={handleDownloadAll}>
-            <Download className="h-4 w-4 mr-1" />
-            全部下载
-          </Button>
-        )}
-      </Header>
+      <AnimateEntry>
+        <Header title="我的音乐" description="当前账号的音乐收藏">
+          {musicList.length > 0 && (
+            <Button variant="outline" size="sm" onClick={handleDownloadAll}>
+              <Download className="h-4 w-4 mr-1" />
+              全部下载
+            </Button>
+          )}
+        </Header>
+      </AnimateEntry>
 
       <div className="space-y-6">
         {error && (
@@ -102,11 +105,11 @@ export default function MusicPage() {
         )}
 
         {!loading && musicList.length === 0 && !error && (
-          <Card>
+          <Card className="border-border/40 bg-card/60">
             <CardContent className="p-8 text-center">
               <Music className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
               <h3 className="text-lg font-semibold mb-2">暂无音乐收藏</h3>
-              <p className="text-muted-foreground">
+              <p className="text-muted-foreground tracking-wide">
                 请先在设置中配置 Cookie
               </p>
             </CardContent>
@@ -116,7 +119,7 @@ export default function MusicPage() {
         {!loading && musicList.length > 0 && (
           <div className="space-y-2">
             {musicList.map((item) => (
-              <Card key={item.music_id} className="hover:bg-accent/50 transition-colors">
+              <Card key={item.music_id} className="border-border/40 bg-card/60 hover:-translate-y-1 transition-all duration-500">
                 <CardContent className="p-4 flex items-center gap-4">
                   {item.cover ? (
                     <img
@@ -131,7 +134,7 @@ export default function MusicPage() {
                   )}
                   <div className="flex-1 min-w-0">
                     <h4 className="text-sm font-medium truncate">{item.title}</h4>
-                    <p className="text-xs text-muted-foreground truncate">
+                    <p className="text-xs text-muted-foreground tracking-wide truncate">
                       {item.author || item.owner_nickname}
                     </p>
                   </div>
@@ -146,7 +149,7 @@ export default function MusicPage() {
                     disabled={downloadingId === item.music_id || downloadedIds.has(item.music_id)}
                   >
                     {downloadedIds.has(item.music_id) ? (
-                      <CheckCircle2 className="h-4 w-4 text-green-600" />
+                      <CheckCircle2 className="h-4 w-4 text-success" />
                     ) : downloadingId === item.music_id ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (

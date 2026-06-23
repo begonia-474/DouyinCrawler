@@ -4,6 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AnimateEntry } from "@/components/shared/animate-entry";
 import {
   Download,
   CheckCircle2,
@@ -33,13 +34,10 @@ export default function DownloadsPage() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      console.log("[Downloads] 开始加载数据...");
       const [dl, lr] = await Promise.all([
         getDownloads({ limit: 50, status: "completed" }),
         getLiveRecords({ limit: 50 }),
       ]);
-      console.log("[Downloads] 下载记录:", dl);
-      console.log("[Downloads] 直播记录:", lr);
       setDownloads(dl);
       setLiveRecords(lr);
     } catch (err) {
@@ -56,19 +54,21 @@ export default function DownloadsPage() {
 
   return (
     <>
-      <Header title="下载管理" description="查看下载历史记录">
-        <Button variant="outline" size="sm">
-          <FolderOpen className="h-4 w-4 mr-1" />
-          打开文件夹
-        </Button>
-      </Header>
+      <AnimateEntry>
+        <Header title="下载管理" description="查看下载历史记录">
+          <Button variant="outline" size="sm" className="rounded-lg border-border/60">
+            <FolderOpen className="h-4 w-4 mr-1.5" />
+            打开文件夹
+          </Button>
+        </Header>
+      </AnimateEntry>
 
       <Tabs defaultValue="completed">
         <TabsList>
           <TabsTrigger value="completed">
             已完成
             {completedDownloads.length > 0 && (
-              <Badge variant="secondary" className="ml-1.5">
+              <Badge variant="secondary" className="ml-1.5 text-[10px]">
                 {completedDownloads.length}
               </Badge>
             )}
@@ -76,107 +76,107 @@ export default function DownloadsPage() {
           <TabsTrigger value="live">
             直播录制
             {liveRecords.length > 0 && (
-              <Badge variant="secondary" className="ml-1.5">
+              <Badge variant="secondary" className="ml-1.5 text-[10px]">
                 {liveRecords.length}
               </Badge>
             )}
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="completed" className="mt-4 space-y-3">
+        <TabsContent value="completed" className="mt-6 space-y-2">
           {loading ? (
-            <div className="flex justify-center py-12">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            <div className="flex justify-center py-16">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
           ) : completedDownloads.length === 0 ? (
-            <Card>
-              <CardContent className="p-8 text-center text-muted-foreground">
-                <CheckCircle2 className="h-10 w-10 mx-auto mb-3" />
-                <p>没有已完成的下载</p>
+            <Card className="border-border/40 bg-card/60">
+              <CardContent className="p-12 text-center text-muted-foreground">
+                <CheckCircle2 className="h-10 w-10 mx-auto mb-4 opacity-30" />
+                <p className="text-sm tracking-wide">没有已完成的下载</p>
               </CardContent>
             </Card>
           ) : (
-            completedDownloads.map((item) => {
+            completedDownloads.map((item, i) => {
               const Icon = typeIcons[item.download_type] || Download;
               return (
-                <div
-                  key={item.id}
-                  className="flex items-center gap-4 p-4 border rounded-lg"
-                >
-                  <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">
-                      {item.title || item.file_path || "未知文件"}
-                    </p>
-                    <div className="flex items-center gap-2 mt-1">
-                      {item.file_size > 0 && (
-                        <span className="text-xs text-muted-foreground">
-                          {formatFileSize(item.file_size)}
+                <AnimateEntry key={item.id} delay={i * 30}>
+                  <div className="flex items-center gap-4 p-4 border border-border/40 rounded-xl bg-card/40 hover:bg-card/80 hover:border-border/60 transition-all duration-300">
+                    <div className="h-9 w-9 rounded-lg bg-foreground/[0.04] flex items-center justify-center shrink-0">
+                      <Icon className="h-4 w-4 text-muted-foreground" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">
+                        {item.title || item.file_path || "未知文件"}
+                      </p>
+                      <div className="flex items-center gap-3 mt-1">
+                        {item.file_size > 0 && (
+                          <span className="text-[11px] text-muted-foreground font-mono tabular-nums">
+                            {formatFileSize(item.file_size)}
+                          </span>
+                        )}
+                        <span className="text-[11px] text-muted-foreground">
+                          {formatTimestamp(item.created_at)}
                         </span>
-                      )}
-                      <span className="text-xs text-muted-foreground">
-                        {formatTimestamp(item.created_at)}
-                      </span>
-                      {item.author_nickname && (
-                        <span className="text-xs text-muted-foreground">
-                          {item.author_nickname}
-                        </span>
+                        {item.author_nickname && (
+                          <span className="text-[11px] text-muted-foreground">
+                            {item.author_nickname}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {item.file_path && (
+                        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg" title="打开文件所在文件夹">
+                          <FolderOpen className="h-4 w-4" />
+                        </Button>
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    {item.file_path && (
-                      <Button variant="ghost" size="icon" title="打开文件所在文件夹">
-                        <FolderOpen className="h-4 w-4" />
-                      </Button>
-                    )}
-                  </div>
-                </div>
+                </AnimateEntry>
               );
             })
           )}
         </TabsContent>
 
-        <TabsContent value="live" className="mt-4 space-y-3">
+        <TabsContent value="live" className="mt-6 space-y-2">
           {loading ? (
-            <div className="flex justify-center py-12">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            <div className="flex justify-center py-16">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
           ) : liveRecords.length === 0 ? (
-            <Card>
-              <CardContent className="p-8 text-center text-muted-foreground">
-                <Radio className="h-10 w-10 mx-auto mb-3" />
-                <p>没有直播录制记录</p>
+            <Card className="border-border/40 bg-card/60">
+              <CardContent className="p-12 text-center text-muted-foreground">
+                <Radio className="h-10 w-10 mx-auto mb-4 opacity-30" />
+                <p className="text-sm tracking-wide">没有直播录制记录</p>
               </CardContent>
             </Card>
           ) : (
-            liveRecords.map((item) => (
-              <div
-                key={item.id}
-                className="flex items-center gap-4 p-4 border rounded-lg"
-              >
-                <Radio className="h-4 w-4 text-red-500 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">
-                    {item.title || "直播录制"}
-                  </p>
-                  <div className="flex items-center gap-2 mt-1">
-                    {item.nickname && (
-                      <span className="text-xs text-muted-foreground">
-                        {item.nickname}
-                      </span>
-                    )}
-                    {item.file_size > 0 && (
-                      <span className="text-xs text-muted-foreground">
-                        {formatFileSize(item.file_size)}
-                      </span>
-                    )}
+            liveRecords.map((item, i) => (
+              <AnimateEntry key={item.id} delay={i * 30}>
+                <div className="flex items-center gap-4 p-4 border border-border/40 rounded-xl bg-card/40 hover:bg-card/80 hover:border-border/60 transition-all duration-300">
+                  <div className="h-9 w-9 rounded-lg bg-destructive/[0.06] flex items-center justify-center shrink-0">
+                    <Radio className="h-4 w-4 text-destructive/70" />
                   </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">
+                      {item.title || "直播录制"}
+                    </p>
+                    <div className="flex items-center gap-3 mt-1">
+                      {item.nickname && (
+                        <span className="text-[11px] text-muted-foreground">{item.nickname}</span>
+                      )}
+                      {item.file_size > 0 && (
+                        <span className="text-[11px] text-muted-foreground font-mono tabular-nums">
+                          {formatFileSize(item.file_size)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <Badge variant={item.status === "completed" ? "default" : "destructive"} className="text-[11px]">
+                    {item.status === "completed" ? "已完成" : item.status}
+                  </Badge>
                 </div>
-                <Badge variant={item.status === "completed" ? "default" : "destructive"}>
-                  {item.status === "completed" ? "已完成" : item.status}
-                </Badge>
-              </div>
+              </AnimateEntry>
             ))
           )}
         </TabsContent>

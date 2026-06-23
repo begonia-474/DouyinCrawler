@@ -101,10 +101,10 @@ export function VideoList({ postType, title }: VideoListProps) {
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         ) : items.length === 0 ? (
-          <Card>
+          <Card className="border-border/40 bg-card/60">
             <CardContent className="p-8 text-center text-muted-foreground">
               <Icon className="h-10 w-10 mx-auto mb-3" />
-              <p>暂无{title}记录</p>
+              <p className="tracking-wide">暂无{title}记录</p>
             </CardContent>
           </Card>
         ) : (
@@ -158,7 +158,7 @@ export function VideoList({ postType, title }: VideoListProps) {
                       {item.collect_count.toLocaleString()}
                     </span>
                     {item.mix_name && (
-                      <span className="text-xs text-orange-500">
+                      <span className="text-xs text-brand">
                         合集: {item.mix_name}
                       </span>
                     )}
