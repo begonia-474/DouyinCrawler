@@ -18,7 +18,7 @@ export function Header({ title, description, parent, eyebrow, children }: Header
       <div className="flex items-center justify-between">
         <div>
           {parent ? (
-            <div className="flex items-center gap-2 text-sm mb-2">
+            <div className="flex items-center gap-2 text-base mb-2">
               <button
                 className="inline-flex items-center justify-center h-8 w-8 rounded-full text-muted-foreground hover:text-foreground hover:bg-foreground/[0.05] transition-all duration-300"
                 onClick={() => navigate(parent.path)}

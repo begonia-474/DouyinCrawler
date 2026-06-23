@@ -2,14 +2,24 @@ import { create } from "zustand";
 
 type Theme = "light" | "dark" | "system";
 
-function applyTheme(theme: Theme) {
+async function applyTheme(theme: Theme) {
   const root = document.documentElement;
   root.classList.remove("light", "dark");
-  if (theme === "system") {
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    root.classList.add(prefersDark ? "dark" : "light");
-  } else {
-    root.classList.add(theme);
+  const resolved: "light" | "dark" =
+    theme === "system"
+      ? window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
+      : theme;
+  root.classList.add(resolved);
+
+  try {
+    const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+    const win = getCurrentWebviewWindow();
+    await win.setEffects({
+      effects: [resolved === "dark" ? "micaDark" : "micaLight"],
+      state: "active",
+    });
+  } catch {
+    // Win10 or non-Tauri environment
   }
 }
 

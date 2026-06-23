@@ -111,7 +111,7 @@ export default function VideoPage() {
         <Header title="单视频下载" description="粘贴视频或图文链接，解析后下载" parent={{ label: "首页", path: "/douyin" }} />
       </AnimateEntry>
 
-      <div className="space-y-6 max-w-2xl">
+      <div className="space-y-6">
         <AnimateEntry delay={50}>
           <UrlInput onSubmit={handleParse} loading={loading} allowedTypes={["video"]} />
         </AnimateEntry>

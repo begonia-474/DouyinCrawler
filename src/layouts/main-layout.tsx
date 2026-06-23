@@ -8,7 +8,7 @@ import { Loading } from "@/shared/components/loading";
 export function MainLayout() {
   return (
     <TooltipProvider>
-      <div className="flex h-screen overflow-hidden grain-overlay bg-background">
+      <div className="flex h-screen overflow-hidden ">
         <Sidebar />
         <main className="flex-1 flex flex-col overflow-hidden">
           <div className="flex-1 overflow-auto px-10 py-8">

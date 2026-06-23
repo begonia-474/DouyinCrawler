@@ -62,12 +62,12 @@ export default function DouyinIndex() {
         <Header title="抖音" description="选择功能开始使用" eyebrow="Platform" />
       </AnimateEntry>
 
-      <div className="grid grid-cols-12 gap-5">
+      <div className="grid grid-cols-12 auto-rows-fr gap-5">
         {features.map((feature, i) => (
-          <AnimateEntry key={feature.id} delay={i * 60} className={feature.span}>
-            <Bezel radius="xl">
+          <AnimateEntry key={feature.id} delay={i * 60} className={`${feature.span} h-full`}>
+            <Bezel radius="xl" className="h-full">
               <button
-                className="w-full text-left p-7 group cursor-pointer transition-all duration-500 hover:bg-foreground/[0.02]"
+                className="w-full h-full text-left p-7 group cursor-pointer transition-all duration-500 hover:bg-foreground/[0.02]"
                 onClick={() => navigate(feature.path)}
               >
                 <div className="flex items-start gap-5">

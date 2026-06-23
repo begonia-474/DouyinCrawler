@@ -124,7 +124,7 @@ export default function SettingsPage() {
         </Header>
       </AnimateEntry>
 
-      <div className="max-w-2xl space-y-12">
+      <div className="space-y-12">
         <AnimateEntry delay={50}>
           <div>
             <span className="inline-block rounded-full px-3 py-1 text-[10px] uppercase tracking-[0.2em] font-medium bg-foreground/[0.05] text-muted-foreground mb-4">
@@ -137,7 +137,7 @@ export default function SettingsPage() {
                   title="Cookie"
                   description="从浏览器开发者工具中复制"
                 >
-                  <div className="w-80">
+                  <div className="w-full max-w-sm">
                     <Textarea
                       value={cookie}
                       onChange={(e) => setCookie(e.target.value)}
@@ -164,7 +164,7 @@ export default function SettingsPage() {
                   title="下载路径"
                   description="视频保存的本地目录"
                 >
-                  <div className="flex gap-2 w-80">
+                  <div className="flex gap-2 w-full max-w-sm">
                     <Input
                       value={downloadPath}
                       onChange={(e) => setDownloadPath(e.target.value)}
@@ -184,7 +184,7 @@ export default function SettingsPage() {
                   <Input
                     value={naming}
                     onChange={(e) => setNaming(e.target.value)}
-                    className="w-80 h-9 text-sm rounded-xl border-foreground/[0.08] bg-foreground/[0.03]"
+                    className="w-full max-w-sm h-9 text-sm rounded-xl border-foreground/[0.08] bg-foreground/[0.03]"
                   />
                 </SettingItem>
               </div>
@@ -205,7 +205,7 @@ export default function SettingsPage() {
                   description="请求签名加密算法"
                 >
                   <Select value={encryption} onValueChange={(v) => setEncryption(v ?? "ab")}>
-                    <SelectTrigger className="w-80 h-9 text-sm rounded-xl border-foreground/[0.08] bg-foreground/[0.03]">
+                    <SelectTrigger className="w-full max-w-sm h-9 text-sm rounded-xl border-foreground/[0.08] bg-foreground/[0.03]">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -224,7 +224,7 @@ export default function SettingsPage() {
                     value={proxy}
                     onChange={(e) => setProxy(e.target.value)}
                     placeholder="http://127.0.0.1:7890"
-                    className="w-80 h-9 text-sm rounded-xl border-foreground/[0.08] bg-foreground/[0.03]"
+                    className="w-full max-w-sm h-9 text-sm rounded-xl border-foreground/[0.08] bg-foreground/[0.03]"
                   />
                 </SettingItem>
               </div>
