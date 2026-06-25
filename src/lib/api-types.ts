@@ -47,6 +47,7 @@ export interface PostDetailResponse {
   comments?: CommentItem[];
   has_more?: boolean;
   cursor?: number;
+  next_cursor?: number;
   music_list?: MusicItem[];
   followings?: FollowItem[];
   followers?: FollowItem[];
@@ -119,6 +120,7 @@ export interface LiveRecordTask {
   url?: string;
   file?: string;
   room_id?: string;
+  web_rid?: string;
   title?: string;
   nickname?: string;
   file_size?: number;

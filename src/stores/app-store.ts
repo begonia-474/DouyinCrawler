@@ -13,10 +13,11 @@ async function applyTheme(theme: Theme) {
 
   try {
     const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+    const { Effect, EffectState } = await import("@tauri-apps/api/window");
     const win = getCurrentWebviewWindow();
     await win.setEffects({
-      effects: [resolved === "dark" ? "micaDark" : "micaLight"],
-      state: "active",
+      effects: [Effect.Mica],
+      state: EffectState.Active,
     });
   } catch {
     // Win10 or non-Tauri environment
@@ -32,20 +33,16 @@ function getInitialTheme(): Theme {
 const initialTheme = getInitialTheme();
 
 interface AppState {
-  connected: boolean;
   downloadCount: number;
   theme: Theme;
-  setConnected: (connected: boolean) => void;
   incrementDownloadCount: () => void;
   setDownloadCount: (count: number) => void;
   setTheme: (theme: Theme) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
-  connected: false,
   downloadCount: 0,
   theme: initialTheme,
-  setConnected: (connected) => set({ connected }),
   incrementDownloadCount: () =>
     set((state) => ({ downloadCount: state.downloadCount + 1 })),
   setDownloadCount: (count) => set({ downloadCount: count }),

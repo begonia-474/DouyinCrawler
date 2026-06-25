@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Header } from "@/components/layout/header";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { AnimateEntry } from "@/components/shared/animate-entry";
 import { Bezel } from "@/components/shared/bezel";
 import {
@@ -13,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { setConfig } from "@/lib/api";
+import { setConfig, getConfig } from "@/lib/api";
 import {
   Cookie,
   FolderOpen,
@@ -28,6 +29,14 @@ import {
   User,
   Download,
   Settings,
+  Music,
+  Image,
+  FileText as DescIcon,
+  Folder,
+  Calendar,
+  List,
+  Hash,
+  Activity,
 } from "lucide-react";
 
 function SettingItem({
@@ -66,8 +75,40 @@ export default function SettingsPage() {
   const [encryption, setEncryption] = useState("ab");
   const [proxy, setProxy] = useState("");
   const [maxConnections, setMaxConnections] = useState("5");
-  const [reqTimeout, setReqTimeout] = useState("10");
+  const [reqTimeout, setReqTimeout] = useState("5");
   const [maxRetries, setMaxRetries] = useState("5");
+  const [pageCounts, setPageCounts] = useState("20");
+  const [maxCounts, setMaxCounts] = useState("0");
+  const [maxTasks, setMaxTasks] = useState("10");
+  const [appName, setAppName] = useState("douyin");
+  const [folderize, setFolderize] = useState(false);
+  const [music, setMusic] = useState(false);
+  const [cover, setCover] = useState(false);
+  const [desc, setDesc] = useState(false);
+  const [interval, setInterval] = useState("");
+
+  // 加载当前配置
+  useEffect(() => {
+    getConfig().then((cfg) => {
+      setCookie(cfg.cookie || "");
+      setDownloadPath(cfg.download_path || "Download");
+      setNaming(cfg.naming || "{create}_{desc}");
+      setEncryption(cfg.encryption || "ab");
+      setProxy(cfg.proxy || "");
+      setMaxConnections(String(cfg.max_connections ?? 5));
+      setReqTimeout(String(cfg.timeout ?? 5));
+      setMaxRetries(String(cfg.max_retries ?? 5));
+      setPageCounts(String(cfg.page_counts ?? 20));
+      setMaxCounts(String(cfg.max_counts ?? 0));
+      setMaxTasks(String(cfg.max_tasks ?? 10));
+      setAppName(cfg.app_name || "douyin");
+      setFolderize(cfg.folderize ?? false);
+      setMusic(cfg.music ?? false);
+      setCover(cfg.cover ?? false);
+      setDesc(cfg.desc ?? false);
+      setInterval(cfg.interval || "");
+    }).catch(() => {});
+  }, []);
 
   const handleSelectFolder = async () => {};
 
@@ -84,6 +125,18 @@ export default function SettingsPage() {
         naming,
         encryption,
         proxy,
+        app_name: appName,
+        folderize: folderize.toString(),
+        music: music.toString(),
+        cover: cover.toString(),
+        desc: desc.toString(),
+        interval,
+        page_counts: pageCounts,
+        max_counts: maxCounts,
+        timeout: reqTimeout,
+        max_connections: maxConnections,
+        max_retries: maxRetries,
+        max_tasks: maxTasks,
       });
       setSaveMsg("保存成功");
     } catch (e) {
@@ -100,8 +153,17 @@ export default function SettingsPage() {
     setEncryption("ab");
     setProxy("");
     setMaxConnections("5");
-    setReqTimeout("10");
+    setReqTimeout("5");
     setMaxRetries("5");
+    setPageCounts("20");
+    setMaxCounts("0");
+    setMaxTasks("10");
+    setAppName("douyin");
+    setFolderize(false);
+    setMusic(false);
+    setCover(false);
+    setDesc(false);
+    setInterval("");
   };
 
   return (
@@ -179,12 +241,80 @@ export default function SettingsPage() {
                 <SettingItem
                   icon={FileText}
                   title="文件命名规则"
-                  description="支持变量: {create} {desc} {nickname} {aweme_id} {uid}"
+                  description="支持变量: {create} {desc} {caption} {nickname} {aweme_id} {uid}"
                 >
                   <Input
                     value={naming}
                     onChange={(e) => setNaming(e.target.value)}
                     className="w-full max-w-sm h-9 text-sm rounded-xl border-foreground/[0.08] bg-foreground/[0.03]"
+                  />
+                </SettingItem>
+                <Separator className="bg-foreground/[0.06]" />
+                <SettingItem
+                  icon={Folder}
+                  title="作品独立文件夹"
+                  description="为每个作品创建单独的子文件夹"
+                >
+                  <Switch
+                    checked={folderize}
+                    onCheckedChange={setFolderize}
+                  />
+                </SettingItem>
+                <Separator className="bg-foreground/[0.06]" />
+                <SettingItem
+                  icon={Calendar}
+                  title="日期区间过滤"
+                  description="格式: YYYY-MM-DD|YYYY-MM-DD，留空下载全部"
+                >
+                  <Input
+                    value={interval}
+                    onChange={(e) => setInterval(e.target.value)}
+                    placeholder="2024-01-01|2024-12-31"
+                    className="w-full max-w-sm h-9 text-sm rounded-xl border-foreground/[0.08] bg-foreground/[0.03]"
+                  />
+                </SettingItem>
+              </div>
+            </Bezel>
+          </div>
+        </AnimateEntry>
+
+        <AnimateEntry delay={125}>
+          <div>
+            <span className="inline-block rounded-full px-3 py-1 text-[10px] uppercase tracking-[0.2em] font-medium bg-foreground/[0.05] text-muted-foreground mb-4">
+              <span className="flex items-center gap-1.5"><Download className="h-3 w-3" />附属文件</span>
+            </span>
+            <Bezel radius="xl">
+              <div className="p-6">
+                <SettingItem
+                  icon={Music}
+                  title="下载原声"
+                  description="同时保存视频的背景音乐"
+                >
+                  <Switch
+                    checked={music}
+                    onCheckedChange={setMusic}
+                  />
+                </SettingItem>
+                <Separator className="bg-foreground/[0.06]" />
+                <SettingItem
+                  icon={Image}
+                  title="下载封面"
+                  description="同时保存视频封面图片"
+                >
+                  <Switch
+                    checked={cover}
+                    onCheckedChange={setCover}
+                  />
+                </SettingItem>
+                <Separator className="bg-foreground/[0.06]" />
+                <SettingItem
+                  icon={DescIcon}
+                  title="下载文案"
+                  description="同时保存视频描述文案"
+                >
+                  <Switch
+                    checked={desc}
+                    onCheckedChange={setDesc}
                   />
                 </SettingItem>
               </div>
@@ -280,6 +410,50 @@ export default function SettingsPage() {
                     onChange={(e) => setMaxRetries(e.target.value)}
                     min="0"
                     max="10"
+                    className="w-28 h-9 text-sm rounded-xl border-foreground/[0.08] bg-foreground/[0.03] font-mono tabular-nums"
+                  />
+                </SettingItem>
+                <Separator className="bg-foreground/[0.06]" />
+                <SettingItem
+                  icon={List}
+                  title="每页数量"
+                  description="列表预览每次加载的条目数"
+                >
+                  <Input
+                    type="number"
+                    value={pageCounts}
+                    onChange={(e) => setPageCounts(e.target.value)}
+                    min="1"
+                    max="50"
+                    className="w-28 h-9 text-sm rounded-xl border-foreground/[0.08] bg-foreground/[0.03] font-mono tabular-nums"
+                  />
+                </SettingItem>
+                <Separator className="bg-foreground/[0.06]" />
+                <SettingItem
+                  icon={Hash}
+                  title="最大解析数量"
+                  description="0 表示无限制，下载全部作品"
+                >
+                  <Input
+                    type="number"
+                    value={maxCounts}
+                    onChange={(e) => setMaxCounts(e.target.value)}
+                    min="0"
+                    className="w-28 h-9 text-sm rounded-xl border-foreground/[0.08] bg-foreground/[0.03] font-mono tabular-nums"
+                  />
+                </SettingItem>
+                <Separator className="bg-foreground/[0.06]" />
+                <SettingItem
+                  icon={Activity}
+                  title="最大并发任务"
+                  description="批量下载时同时进行的任务数"
+                >
+                  <Input
+                    type="number"
+                    value={maxTasks}
+                    onChange={(e) => setMaxTasks(e.target.value)}
+                    min="1"
+                    max="50"
                     className="w-28 h-9 text-sm rounded-xl border-foreground/[0.08] bg-foreground/[0.03] font-mono tabular-nums"
                   />
                 </SettingItem>

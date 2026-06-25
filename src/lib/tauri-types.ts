@@ -119,6 +119,7 @@ export interface VideoInfo {
   images: string | null;
   region: string | null;
   is_prohibited: number;
+  updated_at: number;
 }
 
 /** 用户信息（对齐 Rust UserInfo 结构体） */
@@ -153,6 +154,7 @@ export interface UserInfo {
   signature_raw: string | null;
   user_age: number;
   custom_verify: string | null;
+  updated_at: number;
 }
 
 /** 视频统计 */

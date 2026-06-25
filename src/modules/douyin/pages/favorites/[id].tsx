@@ -1,9 +1,10 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Header } from "@/components/layout/header";
 import { VideoCard } from "@/components/shared/video-card";
 import { Button } from "@/components/ui/button";
 import { Bezel } from "@/components/shared/bezel";
+import { DownloadStatusCard } from "@/components/shared/download-status-card";
 import { getCollectsVideoList, downloadCollectsVideo } from "@/lib/api";
 import type { VideoItem } from "@/lib/api-types";
 import { Loader2, AlertCircle, Download, ArrowLeft } from "lucide-react";
@@ -25,24 +26,62 @@ export default function CollectsDetailPage() {
   const [downloadedCount, setDownloadedCount] = useState(0);
   const [downloadProgress, setDownloadProgress] = useState(0);
 
-  const fetchVideos = useCallback(async () => {
+  // 分页状态
+  const [cursor, setCursor] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  const fetchVideos = useCallback(async (pageCursor: number = 0, append: boolean = false) => {
     if (!id) return;
-    setLoading(true);
+    if (!append) setLoading(true);
     setError(null);
 
-    const res = await getCollectsVideoList(id);
+    const res = await getCollectsVideoList(id, pageCursor, 20);
     if (res.success && res.data?.videos) {
-      setVideos(res.data.videos);
+      if (append) {
+        setVideos(prev => [...prev, ...res.data!.videos!]);
+      } else {
+        setVideos(res.data.videos);
+      }
+      setCursor(res.data.next_cursor ?? 0);
+      setHasMore(res.data.has_more ?? false);
     } else {
       setError(res.error || "获取收藏夹视频失败");
     }
 
-    setLoading(false);
+    if (!append) setLoading(false);
   }, [id]);
 
   useEffect(() => {
-    fetchVideos();
+    fetchVideos(0, false);
   }, [fetchVideos]);
+
+  // 加载更多
+  const loadMore = useCallback(async () => {
+    if (!hasMore || loadingMore) return;
+    setLoadingMore(true);
+    await fetchVideos(cursor, true);
+    setLoadingMore(false);
+  }, [cursor, hasMore, loadingMore, fetchVideos]);
+
+  // IntersectionObserver 自动加载
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && hasMore && !loadingMore) {
+          loadMore();
+        }
+      },
+      { threshold: 0.1 }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasMore, loadingMore, loadMore]);
 
   const handleDownloadAll = async () => {
     if (!id) return;
@@ -62,7 +101,7 @@ export default function CollectsDetailPage() {
 
   return (
     <>
-      <Header title="收藏夹详情" description={`共 ${videos.length} 个视频`} parent={{ label: "我的收藏", path: "/douyin/favorites" }}>
+      <Header title="收藏夹详情" description={`共 ${videos.length}${hasMore ? "+" : ""} 个视频`} parent={{ label: "我的收藏", path: "/douyin/favorites" }}>
         <div className="flex gap-2">
           <Button variant="capsule" size="sm" onClick={() => navigate("/douyin/favorites")}>
             <ArrowLeft className="h-4 w-4 mr-1" />
@@ -111,21 +150,35 @@ export default function CollectsDetailPage() {
         )}
 
         {!loading && videos.length > 0 && (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
-            {videos.map((video) => (
-              <VideoCard
-                key={video.aweme_id}
-                title={video.desc}
-                author={video.author}
-                duration={formatDuration(video.duration)}
-                diggCount={video.digg_count}
-                commentCount={video.comment_count}
-                shareCount={video.share_count}
-              />
-            ))}
-          </div>
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
+              {videos.map((video) => (
+                <VideoCard
+                  key={video.aweme_id}
+                  title={video.desc}
+                  author={video.author}
+                  duration={formatDuration(video.duration)}
+                  diggCount={video.digg_count}
+                  commentCount={video.comment_count}
+                  shareCount={video.share_count}
+                />
+              ))}
+            </div>
+            {/* 无限滚动 sentinel */}
+            <div ref={sentinelRef} className="h-4" />
+            {loadingMore && (
+              <div className="flex justify-center py-4">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              </div>
+            )}
+            {!hasMore && videos.length > 0 && (
+              <p className="text-center text-xs text-muted-foreground py-4">已加载全部 {videos.length} 个视频</p>
+            )}
+          </>
         )}
       </div>
+
+      <DownloadStatusCard />
     </>
   );
 }

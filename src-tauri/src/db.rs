@@ -1,6 +1,5 @@
 use rusqlite::{Connection, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -21,11 +20,6 @@ const CREATE_TABLES_SQL: &str = "
     CREATE TABLE IF NOT EXISTS _metadata (
         name TEXT PRIMARY KEY,
         value TEXT
-    );
-    CREATE TABLE IF NOT EXISTS config (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL,
-        updated_at INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS user_info (
         sec_user_id TEXT PRIMARY KEY,
@@ -189,12 +183,8 @@ const MIGRATE_V4_LIVE_COVER: &[&str] = &[
     "ALTER TABLE live_records ADD COLUMN cover_url TEXT",
 ];
 
-const DEFAULT_CONFIG: &[(&str, &str)] = &[
-    ("cookie", ""),
-    ("download_path", "Download"),
-    ("naming", "{create}_{desc}"),
-    ("encryption", "ab"),
-    ("proxy", ""),
+const MIGRATE_V5_DOWNLOAD_UNIQUE: &[&str] = &[
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_download_unique ON download_history(aweme_id, file_path)",
 ];
 
 pub struct Database {
@@ -255,27 +245,6 @@ pub struct LiveRecord {
     pub cover_url: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct AppConfig {
-    pub cookie: String,
-    pub download_path: String,
-    pub naming: String,
-    pub encryption: String,
-    pub proxy: String,
-}
-
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            cookie: String::new(),
-            download_path: "Download".to_string(),
-            naming: "{create}_{desc}".to_string(),
-            encryption: "ab".to_string(),
-            proxy: String::new(),
-        }
-    }
-}
-
 #[derive(Serialize, Deserialize, Clone)]
 pub struct NewDownloadRecord {
     pub aweme_id: Option<String>,
@@ -319,7 +288,7 @@ pub struct UserInfo {
     pub following_count: i64,
     pub total_favorited: i64,
     pub ip_location: Option<String>,
-    pub live_status: i32,
+    #[serde(default)] pub live_status: i32,
     pub room_id: Option<String>,
     // f2 对齐字段
     #[serde(default)] pub city: Option<String>,
@@ -338,6 +307,7 @@ pub struct UserInfo {
     #[serde(default)] pub signature_raw: Option<String>,
     #[serde(default)] pub user_age: i32,
     #[serde(default)] pub custom_verify: Option<String>,
+    #[serde(default)] pub updated_at: i64,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -409,6 +379,7 @@ pub struct VideoInfo {
     #[serde(default)] pub images: Option<String>,
     #[serde(default)] pub region: Option<String>,
     #[serde(default)] pub is_prohibited: i32,
+    #[serde(default)] pub updated_at: i64,
 }
 
 #[derive(Serialize, Clone)]
@@ -476,8 +447,6 @@ impl Database {
         conn.execute_batch(CREATE_TABLES_SQL)?;
         // Schema 迁移
         Self::migrate(&conn)?;
-        // 初始化默认配置
-        Self::init_default_config(&conn)?;
         // 验证数据
         let count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM download_history",
@@ -708,6 +677,7 @@ impl Database {
             images: row.get("images")?,
             region: row.get("region")?,
             is_prohibited: row.get::<_, Option<i32>>("is_prohibited")?.unwrap_or(0),
+            updated_at: row.get::<_, Option<i64>>("updated_at")?.unwrap_or(0),
         })
     }
 
@@ -742,6 +712,7 @@ impl Database {
             signature_raw: row.get("signature_raw")?,
             user_age: row.get::<_, Option<i32>>("user_age")?.unwrap_or(0),
             custom_verify: row.get("custom_verify")?,
+            updated_at: row.get::<_, Option<i64>>("updated_at")?.unwrap_or(0),
         })
     }
 
@@ -945,6 +916,7 @@ impl Database {
         params.push(Box::new(limit));
         params.push(Box::new(offset));
 
+        println!("[DB] get_users SQL: {}", sql);
         let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(param_refs.as_slice(), Self::row_to_user)?;
@@ -952,6 +924,7 @@ impl Database {
         for row in rows {
             records.push(row?);
         }
+        println!("[DB] get_users 返回 {} 条记录", records.len());
         Ok(records)
     }
 
@@ -1029,44 +1002,6 @@ impl Database {
         Ok(UserStats { total_count, total_follower, total_aweme })
     }
 
-    // === 配置管理 ===
-
-    pub fn get_config(&self) -> Result<AppConfig> {
-        let conn = self.conn.lock().unwrap();
-        let mut config = AppConfig::default();
-        let mut stmt = conn.prepare("SELECT key, value FROM config")?;
-        let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?;
-        for row in rows {
-            let (key, value) = row?;
-            match key.as_str() {
-                "cookie" => config.cookie = value,
-                "download_path" => config.download_path = value,
-                "naming" => config.naming = value,
-                "encryption" => config.encryption = value,
-                "proxy" => config.proxy = value,
-                _ => {}
-            }
-        }
-        Ok(config)
-    }
-
-    pub fn set_config(&self, updates: &HashMap<String, String>) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-        for (key, value) in updates {
-            conn.execute(
-                "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES (?1, ?2, ?3)",
-                rusqlite::params![key, value, now],
-            )?;
-        }
-        Ok(())
-    }
-
     fn migrate(conn: &Connection) -> Result<()> {
         let version: i64 = conn
             .query_row(
@@ -1100,33 +1035,25 @@ impl Database {
                 let _ = conn.execute(sql, []);
             }
         }
+        if version < 5 {
+            println!("[DB] 迁移 v5: download_history 添加唯一索引");
+            for sql in MIGRATE_V5_DOWNLOAD_UNIQUE {
+                let _ = conn.execute(sql, []);
+            }
+        }
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
         conn.execute(
-            "INSERT OR REPLACE INTO _metadata (name, value) VALUES ('schema_version', '4')",
+            "INSERT OR REPLACE INTO _metadata (name, value) VALUES ('schema_version', '5')",
             [],
         )?;
         conn.execute(
             "INSERT OR REPLACE INTO _metadata (name, value) VALUES ('schema_updated_at', ?1)",
             rusqlite::params![now.to_string()],
         )?;
-        Ok(())
-    }
-
-    fn init_default_config(conn: &Connection) -> Result<()> {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-        for (key, value) in DEFAULT_CONFIG {
-            conn.execute(
-                "INSERT OR IGNORE INTO config (key, value, updated_at) VALUES (?1, ?2, ?3)",
-                rusqlite::params![key, value, now],
-            )?;
-        }
         Ok(())
     }
 
@@ -1138,8 +1065,11 @@ impl Database {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
+        println!("[DB] save_download: aweme_id={:?}, file_path={:?}", record.aweme_id, record.file_path);
+
+        // 使用 INSERT OR IGNORE 避免重复记录（基于 aweme_id + file_path）
         conn.execute(
-            "INSERT INTO download_history \
+            "INSERT OR IGNORE INTO download_history \
              (aweme_id, download_type, title, author_nickname, author_sec_uid, \
               file_path, file_size, cover_url, status, error_msg, created_at) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
@@ -1157,7 +1087,9 @@ impl Database {
                 now,
             ],
         )?;
-        Ok(conn.last_insert_rowid())
+        let id = conn.last_insert_rowid();
+        println!("[DB] save_download 成功, id={}", id);
+        Ok(id)
     }
 
     pub fn get_download_file_path(&self, id: i64) -> Result<Option<String>> {

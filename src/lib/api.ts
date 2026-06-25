@@ -7,23 +7,20 @@ import type {
 import type { DownloadRecord, DownloadStats, LiveRecord, VideoInfo, UserInfo, VideoStats, UserStats } from "./tauri-types";
 
 // ============================================================
-// 通用代理调用
+// 辅助：包装后端返回值到 ApiResponse.data
 // ============================================================
 
-async function proxyPost<T>(path: string, body: unknown): Promise<ApiResponse<T>> {
-  try {
-    return await invoke<ApiResponse<T>>("proxy_post", { path, body });
-  } catch (e) {
-    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
+function wrap<T = unknown>(raw: any): ApiResponse<T> {
+  if (raw && typeof raw === "object" && "success" in raw) {
+    // 如果 Python 返回了 {success, data}，提取 data；否则整个 raw 作为 data
+    const hasDataKey = "data" in raw;
+    return {
+      success: raw.success,
+      data: (hasDataKey ? raw.data : raw) as T,
+      error: raw.error,
+    };
   }
-}
-
-async function proxyGet<T>(path: string): Promise<ApiResponse<T>> {
-  try {
-    return await invoke<ApiResponse<T>>("proxy_get", { path });
-  } catch (e) {
-    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
-  }
+  return { success: false, error: "无效的响应格式" };
 }
 
 // ============================================================
@@ -36,6 +33,18 @@ export interface AppConfig {
   naming: string;
   encryption: string;
   proxy: string;
+  app_name: string;
+  folderize: boolean;
+  music: boolean;
+  cover: boolean;
+  desc: boolean;
+  interval: string | null;
+  page_counts: number;
+  max_counts: number;
+  timeout: number;
+  max_connections: number;
+  max_retries: number;
+  max_tasks: number;
 }
 
 export async function getConfig(): Promise<AppConfig> {
@@ -43,15 +52,7 @@ export async function getConfig(): Promise<AppConfig> {
 }
 
 export async function setConfig(updates: Record<string, string>): Promise<void> {
-  return invoke("set_config", { updates });
-}
-
-// ============================================================
-// 健康检查
-// ============================================================
-
-export async function healthCheck(): Promise<boolean> {
-  return invoke("health_check");
+  await invoke("set_config", { updates });
 }
 
 // ============================================================
@@ -59,16 +60,24 @@ export async function healthCheck(): Promise<boolean> {
 // ============================================================
 
 export async function getPostDetail(url: string): Promise<ApiResponse<PostDetailResponse>> {
-  return proxyPost("/api/post/detail", { url });
+  try {
+    return wrap(await invoke("py_parse_video", { url }));
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
+  }
 }
 
 export async function getPostStats(url: string): Promise<ApiResponse> {
-  return proxyPost("/api/post/stats", { url });
+  try {
+    return wrap(await invoke("py_get_post_stats", { url }));
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
+  }
 }
 
 export async function downloadOne(url: string): Promise<ApiResponse<DownloadResult>> {
   try {
-    return await invoke<ApiResponse<DownloadResult>>("download_one_and_save", { url });
+    return wrap(await invoke("py_download_video", { url }));
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "调用失败" };
   }
@@ -76,10 +85,22 @@ export async function downloadOne(url: string): Promise<ApiResponse<DownloadResu
 
 export async function downloadUserPosts(url: string): Promise<ApiResponse> {
   try {
-    return await invoke<ApiResponse>("download_batch_and_save", {
-      path: "/api/download/user/posts",
-      body: { url },
-    });
+    const raw = await invoke<any>("py_start_batch_download", { url, downloadType: "user_post" });
+    if (raw?.success && raw.task_id) {
+      const { useBatchStore } = await import("@/stores/batch-store");
+      useBatchStore.getState().addTask({
+        task_id: raw.task_id,
+        type: "user_post",
+        url,
+        status: "starting",
+        total: 0,
+        completed: 0,
+        failed: 0,
+        current_item: "",
+        error: "",
+      });
+    }
+    return wrap(raw);
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "调用失败" };
   }
@@ -87,10 +108,22 @@ export async function downloadUserPosts(url: string): Promise<ApiResponse> {
 
 export async function downloadUserLikes(url: string): Promise<ApiResponse> {
   try {
-    return await invoke<ApiResponse>("download_batch_and_save", {
-      path: "/api/download/user/likes",
-      body: { url },
-    });
+    const raw = await invoke<any>("py_start_batch_download", { url, downloadType: "user_like" });
+    if (raw?.success && raw.task_id) {
+      const { useBatchStore } = await import("@/stores/batch-store");
+      useBatchStore.getState().addTask({
+        task_id: raw.task_id,
+        type: "user_like",
+        url,
+        status: "starting",
+        total: 0,
+        completed: 0,
+        failed: 0,
+        current_item: "",
+        error: "",
+      });
+    }
+    return wrap(raw);
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "调用失败" };
   }
@@ -98,10 +131,22 @@ export async function downloadUserLikes(url: string): Promise<ApiResponse> {
 
 export async function downloadMix(url: string): Promise<ApiResponse> {
   try {
-    return await invoke<ApiResponse>("download_batch_and_save", {
-      path: "/api/download/mix",
-      body: { url },
-    });
+    const raw = await invoke<any>("py_start_batch_download", { url, downloadType: "mix" });
+    if (raw?.success && raw.task_id) {
+      const { useBatchStore } = await import("@/stores/batch-store");
+      useBatchStore.getState().addTask({
+        task_id: raw.task_id,
+        type: "mix",
+        url,
+        status: "starting",
+        total: 0,
+        completed: 0,
+        failed: 0,
+        current_item: "",
+        error: "",
+      });
+    }
+    return wrap(raw);
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "调用失败" };
   }
@@ -109,10 +154,22 @@ export async function downloadMix(url: string): Promise<ApiResponse> {
 
 export async function downloadCollectsVideo(collectsId: string): Promise<ApiResponse> {
   try {
-    return await invoke<ApiResponse>("download_batch_and_save", {
-      path: "/api/download/collects/video",
-      body: { collects_id: collectsId },
-    });
+    const raw = await invoke<any>("py_start_batch_download", { url: collectsId, downloadType: "collects" });
+    if (raw?.success && raw.task_id) {
+      const { useBatchStore } = await import("@/stores/batch-store");
+      useBatchStore.getState().addTask({
+        task_id: raw.task_id,
+        type: "collects",
+        url: collectsId,
+        status: "starting",
+        total: 0,
+        completed: 0,
+        failed: 0,
+        current_item: "",
+        error: "",
+      });
+    }
+    return wrap(raw);
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "调用失败" };
   }
@@ -123,11 +180,19 @@ export async function downloadCollectsVideo(collectsId: string): Promise<ApiResp
 // ============================================================
 
 export async function getComments(url: string, cursor = 0, count = 20): Promise<ApiResponse<{ comments: CommentItem[]; has_more: boolean; cursor: number }>> {
-  return proxyPost("/api/comments", { url, cursor, count });
+  try {
+    return wrap(await invoke("py_get_comments", { url, cursor, count }));
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
+  }
 }
 
 export async function getCommentReplies(url: string, commentId: string, cursor = 0, count = 3): Promise<ApiResponse<{ comments: CommentItem[]; has_more: boolean; cursor: number }>> {
-  return proxyPost("/api/comments/reply", { url, comment_id: commentId, cursor, count });
+  try {
+    return wrap(await invoke("py_get_comment_replies", { url, commentId, cursor, count }));
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
+  }
 }
 
 // ============================================================
@@ -135,7 +200,11 @@ export async function getCommentReplies(url: string, commentId: string, cursor =
 // ============================================================
 
 export async function search(keyword: string, offset = 0, count = 10): Promise<ApiResponse<PostDetailResponse>> {
-  return proxyPost("/api/search", { keyword, offset, count });
+  try {
+    return wrap(await invoke("py_search_videos", { keyword, offset, count }));
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
+  }
 }
 
 // ============================================================
@@ -143,15 +212,27 @@ export async function search(keyword: string, offset = 0, count = 10): Promise<A
 // ============================================================
 
 export async function getTabFeed(count = 10): Promise<ApiResponse<PostDetailResponse>> {
-  return proxyPost("/api/feed/tab", { count });
+  try {
+    return wrap(await invoke("py_get_tab_feed", { count }));
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
+  }
 }
 
 export async function getFollowFeed(cursor = 0, count = 10): Promise<ApiResponse<PostDetailResponse>> {
-  return proxyPost("/api/feed/follow", { cursor, count });
+  try {
+    return wrap(await invoke("py_get_follow_feed", { cursor, count }));
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
+  }
 }
 
 export async function getFriendFeed(cursor = 0, count = 10): Promise<ApiResponse<PostDetailResponse>> {
-  return proxyPost("/api/feed/friend", { cursor, count });
+  try {
+    return wrap(await invoke("py_get_friend_feed", { cursor, count }));
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
+  }
 }
 
 // ============================================================
@@ -159,12 +240,16 @@ export async function getFriendFeed(cursor = 0, count = 10): Promise<ApiResponse
 // ============================================================
 
 export async function getMusicCollection(cursor = 0, count = 18): Promise<ApiResponse<{ music_list: MusicItem[]; has_more: boolean }>> {
-  return proxyPost("/api/music/collection", { cursor, count });
+  try {
+    return wrap(await invoke("py_get_music_collection", { cursor, count }));
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
+  }
 }
 
 export async function downloadMusic(play_url: string, title: string, author = ""): Promise<ApiResponse<{ path: string }>> {
   try {
-    return await invoke<ApiResponse<{ path: string }>>("download_music_and_save", { play_url, title, author });
+    return wrap(await invoke("py_download_music", { playUrl: play_url, title, author }));
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "调用失败" };
   }
@@ -175,35 +260,59 @@ export async function downloadMusic(play_url: string, title: string, author = ""
 // ============================================================
 
 export async function getUserProfile(url: string): Promise<ApiResponse<PostDetailResponse>> {
-  return proxyPost("/api/user/profile", { url });
+  try {
+    return wrap(await invoke("py_get_user_profile", { url }));
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
+  }
 }
 
-export async function getUserPosts(url: string): Promise<ApiResponse<PostDetailResponse>> {
-  return proxyPost("/api/user/posts", { url });
+export async function getUserPosts(url: string, cursor: number = 0, count: number = 20): Promise<ApiResponse<PostDetailResponse>> {
+  try {
+    return wrap(await invoke("py_get_user_posts", { url, cursor, count }));
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
+  }
 }
 
-export async function getUserLikes(url: string): Promise<ApiResponse<PostDetailResponse>> {
-  return proxyPost("/api/user/likes", { url });
+export async function getUserLikes(url: string, cursor: number = 0, count: number = 20): Promise<ApiResponse<PostDetailResponse>> {
+  try {
+    return wrap(await invoke("py_get_user_likes", { url, cursor, count }));
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
+  }
 }
 
 export async function getUserCollects(): Promise<ApiResponse<PostDetailResponse>> {
-  return proxyPost("/api/user/collects", {});
+  try {
+    return wrap(await invoke("py_get_collects_list"));
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
+  }
 }
 
-export async function getCollectsVideo(collectsId: string, cursor = 0): Promise<ApiResponse<PostDetailResponse>> {
-  return proxyPost("/api/user/collects/video", { collects_id: collectsId, cursor });
-}
-
-export async function getCollectsVideoList(collectsId: string): Promise<ApiResponse<PostDetailResponse>> {
-  return proxyPost("/api/user/collects/video/list", { collects_id: collectsId });
+export async function getCollectsVideoList(collectsId: string, cursor: number = 0, count: number = 20): Promise<ApiResponse<PostDetailResponse>> {
+  try {
+    return wrap(await invoke("py_get_collects_video_list", { collectsId, cursor, count }));
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
+  }
 }
 
 export async function getUserFollowing(url: string, offset = 0, count = 20): Promise<ApiResponse<{ followings: FollowItem[]; has_more: boolean }>> {
-  return proxyPost("/api/user/following", { url, offset, count });
+  try {
+    return wrap(await invoke("py_get_following_list", { url, offset, count }));
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
+  }
 }
 
 export async function getUserFollowers(url: string, offset = 0, count = 20): Promise<ApiResponse<{ followers: FollowItem[]; has_more: boolean }>> {
-  return proxyPost("/api/user/followers", { url, offset, count });
+  try {
+    return wrap(await invoke("py_get_follower_list", { url, offset, count }));
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
+  }
 }
 
 // ============================================================
@@ -211,15 +320,23 @@ export async function getUserFollowers(url: string, offset = 0, count = 20): Pro
 // ============================================================
 
 export async function getLiveInfo(url: string): Promise<ApiResponse<LiveInfo>> {
-  return proxyPost("/api/live", { url });
+  try {
+    return wrap(await invoke("py_get_live_info", { url }));
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
+  }
 }
 
 // ============================================================
 // 合集
 // ============================================================
 
-export async function getMixInfo(url: string): Promise<ApiResponse<PostDetailResponse>> {
-  return proxyPost("/api/mix", { url });
+export async function getMixInfo(url: string, cursor: number = 0, count: number = 20): Promise<ApiResponse<PostDetailResponse>> {
+  try {
+    return wrap(await invoke("py_get_mix_info", { url, cursor, count }));
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
+  }
 }
 
 // ============================================================
@@ -227,15 +344,27 @@ export async function getMixInfo(url: string): Promise<ApiResponse<PostDetailRes
 // ============================================================
 
 export async function startLiveRecord(url: string): Promise<ApiResponse<{ task_id: string }>> {
-  return proxyPost("/api/live/record", { url });
+  try {
+    return wrap(await invoke("py_start_live_record", { url }));
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
+  }
 }
 
 export async function stopLiveRecord(taskId: string): Promise<ApiResponse<{ task_id: string }>> {
-  return proxyPost("/api/live/stop", { url: taskId });
+  try {
+    return wrap(await invoke("py_stop_live_record", { taskId }));
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
+  }
 }
 
 export async function getLiveStatus(): Promise<ApiResponse<Record<string, LiveRecordTask>>> {
-  return proxyGet("/api/live/status");
+  try {
+    return wrap(await invoke("py_get_live_status"));
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
+  }
 }
 
 export async function saveLiveRecordAfterStop(task: LiveRecordTask): Promise<void> {
@@ -243,7 +372,7 @@ export async function saveLiveRecordAfterStop(task: LiveRecordTask): Promise<voi
   await invoke("save_live_record_record", {
     record: {
       room_id: task.room_id || "",
-      web_rid: null,
+      web_rid: task.web_rid || null,
       title: task.title || "",
       nickname: task.nickname || "",
       sec_user_id: null,
@@ -259,8 +388,13 @@ export async function saveLiveRecordAfterStop(task: LiveRecordTask): Promise<voi
 }
 
 export async function getFollowingLive(): Promise<ApiResponse<{ lives: FollowingLiveItem[] }>> {
-  return proxyGet("/api/live/following");
+  try {
+    return wrap(await invoke("py_get_following_live"));
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
+  }
 }
+
 
 // ============================================================
 // 数据库查询 (Tauri 直接调用)
@@ -321,7 +455,6 @@ export async function getVideoCount(params?: {
   author_sec_uid?: string;
   post_type?: string;
 }): Promise<number> {
-  // 测试: 直接传 postType (camelCase)
   return invoke("get_video_count", {
     keyword: params?.keyword ?? null,
     author_sec_uid: params?.author_sec_uid ?? null,
@@ -363,27 +496,6 @@ export async function getVideoStats(): Promise<VideoStats> {
 
 export async function getUserStats(): Promise<UserStats> {
   return invoke("get_user_stats");
-}
-
-// ============================================================
-// 数据库写入 (Tauri 直接调用)
-// ============================================================
-
-export interface NewDownloadRecord {
-  aweme_id?: string;
-  download_type: string;
-  title?: string;
-  author_nickname?: string;
-  author_sec_uid?: string;
-  file_path?: string;
-  file_size: number;
-  cover_url?: string;
-  status: string;
-  error_msg?: string;
-}
-
-export async function saveDownloadRecord(record: NewDownloadRecord): Promise<number> {
-  return invoke("save_download_record", { record });
 }
 
 export async function isVideoDownloaded(awemeId: string): Promise<boolean> {
@@ -465,4 +577,16 @@ export async function deleteUserInfo(secUserId: string): Promise<void> {
 
 export async function deleteMusicCollection(musicId: string, deleteFile = false): Promise<void> {
   return invoke("delete_music_collection", { musicId, deleteFile });
+}
+
+// ============================================================
+// 测试
+// ============================================================
+
+export async function testEmit(): Promise<ApiResponse> {
+  try {
+    return wrap(await invoke("py_test_emit"));
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
+  }
 }

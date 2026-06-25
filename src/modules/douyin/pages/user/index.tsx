@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { Header } from "@/components/layout/header";
 import { AnimateEntry } from "@/components/shared/animate-entry";
 import { UrlInput } from "@/components/shared/url-input";
@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Bezel } from "@/components/shared/bezel";
+import { DownloadStatusCard } from "@/components/shared/download-status-card";
 import {
   getUserProfile, getUserPosts,
   getUserFollowing, getUserFollowers, downloadUserPosts,
@@ -62,6 +63,13 @@ export default function UserPage() {
   const [downloadedCount, setDownloadedCount] = useState(0);
   const [downloadProgress, setDownloadProgress] = useState(0);
 
+  // 分页状态
+  const [currentUrl, setCurrentUrl] = useState("");
+  const [cursor, setCursor] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
   const handleParse = useCallback(async (url: string) => {
     setLoading(true);
     setProfile(null);
@@ -69,6 +77,8 @@ export default function UserPage() {
     setFollowing([]);
     setFollowers([]);
     setError(null);
+    setCurrentUrl(url);
+    setHasMore(false);
 
     const profileRes = await getUserProfile(url);
     if (profileRes.success && profileRes.data?.profile) {
@@ -80,17 +90,52 @@ export default function UserPage() {
     }
 
     const [postsRes, followingRes, followersRes] = await Promise.all([
-      getUserPosts(url),
+      getUserPosts(url, 0, 20),
       getUserFollowing(url),
       getUserFollowers(url),
     ]);
 
-    if (postsRes.success && postsRes.data?.videos) setVideos(postsRes.data.videos);
+    if (postsRes.success && postsRes.data?.videos) {
+      setVideos(postsRes.data.videos);
+      setCursor(postsRes.data.next_cursor ?? 0);
+      setHasMore(postsRes.data.has_more ?? false);
+    }
     if (followingRes.success && followingRes.data?.followings) setFollowing(followingRes.data.followings);
     if (followersRes.success && followersRes.data?.followers) setFollowers(followersRes.data.followers);
 
     setLoading(false);
   }, []);
+
+  // 加载更多视频
+  const loadMore = useCallback(async () => {
+    if (!hasMore || loadingMore || !currentUrl) return;
+    setLoadingMore(true);
+    const res = await getUserPosts(currentUrl, cursor, 20);
+    if (res.success && res.data?.videos) {
+      setVideos(prev => [...prev, ...res.data!.videos!]);
+      setCursor(res.data.next_cursor ?? 0);
+      setHasMore(res.data.has_more ?? false);
+    }
+    setLoadingMore(false);
+  }, [currentUrl, cursor, hasMore, loadingMore]);
+
+  // IntersectionObserver 自动加载
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && hasMore && !loadingMore) {
+          loadMore();
+        }
+      },
+      { threshold: 0.1 }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasMore, loadingMore, loadMore]);
 
   const handleDownloadAll = async () => {
     setDownloading(true);
@@ -190,7 +235,7 @@ export default function UserPage() {
 
             <Tabs defaultValue="posts">
               <TabsList>
-                <TabsTrigger value="posts">作品<Badge variant="secondary" className="ml-1.5">{videos.length}</Badge></TabsTrigger>
+                <TabsTrigger value="posts">作品<Badge variant="secondary" className="ml-1.5">{videos.length}{hasMore ? "+" : ""}</Badge></TabsTrigger>
                 <TabsTrigger value="following">关注<Badge variant="secondary" className="ml-1.5">{following.length}</Badge></TabsTrigger>
                 <TabsTrigger value="followers">粉丝<Badge variant="secondary" className="ml-1.5">{followers.length}</Badge></TabsTrigger>
               </TabsList>
@@ -209,6 +254,16 @@ export default function UserPage() {
                     />
                   ))}
                 </div>
+                {/* 无限滚动 sentinel */}
+                <div ref={sentinelRef} className="h-4" />
+                {loadingMore && (
+                  <div className="flex justify-center py-4">
+                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                  </div>
+                )}
+                {!hasMore && videos.length > 0 && (
+                  <p className="text-center text-xs text-muted-foreground py-4">已加载全部 {videos.length} 个作品</p>
+                )}
               </TabsContent>
 
               <TabsContent value="following" className="mt-6 space-y-2">
@@ -226,6 +281,8 @@ export default function UserPage() {
           </>
         )}
       </div>
+
+      <DownloadStatusCard />
     </>
   );
 }

@@ -1,7 +1,9 @@
 """业务处理器 — 协调爬虫、过滤器、下载器"""
 
 import asyncio
+import random
 import time
+import logging
 from pathlib import Path
 
 from core.crawler import DouyinCrawler
@@ -12,10 +14,13 @@ from core.filter import (
     UserLiveFilter, UserLive2Filter, UserLiveStatusFilter,
     PostCommentFilter, SuggestWordFilter, FollowingUserLiveFilter,
 )
+from core import db
 from core.utils import (
     AwemeIdFetcher, SecUserIdFetcher, MixIdFetcher, WebCastIdFetcher,
-    sanitize_filename,
+    sanitize_filename, filter_by_date_interval,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class DouyinHandler:
@@ -24,7 +29,11 @@ class DouyinHandler:
     def __init__(self, cookie: str, download_path: str = "Download",
                  naming: str = "{create}_{desc}", max_counts: int = 0,
                  page_counts: int = 20, timeout: int = 5,
-                 encryption: str = "ab", proxies: dict = None):
+                 encryption: str = "ab", proxies: dict = None,
+                 app_name: str = "douyin", folderize: bool = False,
+                 music: bool = False, cover: bool = False, desc: bool = False,
+                 interval: str = None, max_connections: int = 5,
+                 max_retries: int = 5, max_tasks: int = 10):
         self.cookie = cookie
         self.download_path = Path(download_path)
         self.naming = naming
@@ -33,12 +42,22 @@ class DouyinHandler:
         self.timeout = timeout
         self.encryption = encryption
         self.proxies = proxies
+        self.app_name = app_name
+        self.folderize = folderize
+        self.music = music
+        self.cover = cover
+        self.desc = desc
+        self.interval = interval
+        self.max_connections = max_connections
+        self.max_retries = max_retries
+        self.max_tasks = max_tasks
 
     def _make_crawler(self) -> DouyinCrawler:
-        return DouyinCrawler(self.cookie, self.proxies, self.encryption)
+        return DouyinCrawler(self.cookie, self.proxies, self.encryption, self.max_retries)
 
     def _make_downloader(self, progress_callback=None) -> Downloader:
-        return Downloader(self.cookie, progress_callback=progress_callback)
+        return Downloader(self.cookie, max_connections=self.max_connections,
+                         timeout=self.timeout, progress_callback=progress_callback)
 
     # ============================================================
     # 单视频解析 (parse)
@@ -46,20 +65,26 @@ class DouyinHandler:
 
     async def handle_parse_video(self, url: str) -> dict:
         """只解析视频信息，不下载"""
+        logger.info("[handle_parse_video] 开始解析, url=%s", url[:80])
         aweme_id = await AwemeIdFetcher.get_aweme_id(url)
         if not aweme_id:
+            logger.warning("[handle_parse_video] 无法提取 aweme_id")
             return {"success": False, "error": "无法从 URL 提取 aweme_id"}
 
+        logger.info("[handle_parse_video] aweme_id=%s, 开始请求API", aweme_id)
         async with self._make_crawler() as crawler:
             data = await crawler.fetch_post_detail(aweme_id)
 
+        logger.info("[handle_parse_video] API 返回 status_code=%s", data.get("status_code", "N/A"))
         if data.get("status_code", -1) != 0:
+            logger.warning("[handle_parse_video] API 错误: %s", data.get("status_msg", "unknown"))
             return {"success": False, "error": f"API 错误: {data.get('status_msg', 'unknown')}"}
 
         detail = PostDetailFilter(data)
         if detail.is_prohibited:
             return {"success": False, "error": "视频侵权不可用"}
 
+        logger.info("[handle_parse_video] 解析成功")
         return {"success": True, "detail": detail.to_db_dict()}
 
     # ============================================================
@@ -84,13 +109,23 @@ class DouyinHandler:
 
         # 下载视频
         filename = format_filename(self.naming, detail.to_dict())
-        save_dir = self.download_path / "one" / detail.author_nickname
+        user_dir = self.download_path / self.app_name / "one" / detail.author_nickname
+        # folderize: 为每个作品创建独立子文件夹
+        save_dir = user_dir / filename if self.folderize else user_dir
         save_dir.mkdir(parents=True, exist_ok=True)
 
-        if detail.is_image_post and (detail.images or detail.images_video):
-            # 图文下载（动图 + 图片）
-            paths = []
-            async with self._make_downloader(progress_callback) as dl:
+        async with self._make_downloader(progress_callback) as dl:
+            # 下载附属文件（音乐、封面、文案）
+            if self.music and detail.music_url:
+                await dl.download_music(detail.music_url, save_dir, filename)
+            if self.cover and detail.cover_url:
+                await dl.download_cover(detail.cover_url, save_dir, filename)
+            if self.desc and detail.desc:
+                await dl.download_desc(detail.desc, save_dir, filename)
+
+            if detail.is_image_post and (detail.images or detail.images_video):
+                # 图文下载（动图 + 图片）
+                paths = []
                 # 下载动图/实况
                 for i, live_url in enumerate(detail.images_video):
                     if live_url:
@@ -101,49 +136,35 @@ class DouyinHandler:
                     if img_url:
                         path = await dl.download_image(img_url, save_dir, f"{filename}_image_{i + 1}")
                         paths.append(str(path))
-            return {"success": True, "type": "images", "paths": paths, "detail": detail.to_db_dict()}
-        else:
-            # 视频下载
-            if not detail.video_url:
-                return {"success": False, "error": "无法获取视频下载链接"}
-            async with self._make_downloader(progress_callback) as dl:
+                return {"success": True, "type": "images", "paths": paths, "detail": detail.to_db_dict()}
+            else:
+                # 视频下载
+                if not detail.video_url:
+                    return {"success": False, "error": "无法获取视频下载链接"}
                 path = await dl.download_video(detail.video_url, save_dir, f"{filename}_video")
-            return {"success": True, "type": "video", "path": str(path), "detail": detail.to_db_dict()}
+                return {"success": True, "type": "video", "path": str(path), "detail": detail.to_db_dict()}
 
     # ============================================================
     # 用户主页视频 (post)
     # ============================================================
 
-    async def handle_user_post_list(self, url: str) -> dict:
-        """获取用户主页视频列表（不下载）"""
+    async def handle_user_post_list(self, url: str, cursor: int = 0, count: int = 20) -> dict:
+        """获取用户主页视频列表（单页，用于分页预览）"""
         sec_user_id = await SecUserIdFetcher.get_sec_user_id(url)
         if not sec_user_id:
             return {"success": False, "error": "无法从 URL 提取 sec_user_id"}
 
-        downloaded = 0
-        max_cursor = 0
-        all_details = []
-
         async with self._make_crawler() as crawler:
-            while downloaded < self.max_counts:
-                current_request_size = min(self.page_counts, self.max_counts - downloaded)
-                data = await crawler.fetch_user_post(sec_user_id, max_cursor, current_request_size)
-                video_filter = UserPostFilter(data)
+            data = await crawler.fetch_user_post(sec_user_id, cursor, count)
+            video_filter = UserPostFilter(data)
+            videos = [d.to_dict() for d in video_filter.get_video_list() if not d.is_prohibited]
 
-                for detail in video_filter.get_video_list():
-                    if downloaded >= self.max_counts:
-                        break
-                    if detail.is_prohibited:
-                        continue
-                    all_details.append(detail)
-                    downloaded += 1
-
-                if not video_filter.has_more:
-                    break
-                max_cursor = video_filter.max_cursor
-                await asyncio.sleep(self.timeout)
-
-        return {"success": True, "videos": [d.to_dict() for d in all_details]}
+        return {
+            "success": True,
+            "videos": videos,
+            "has_more": bool(video_filter.has_more),
+            "next_cursor": video_filter.max_cursor,
+        }
 
     async def handle_user_post(self, url: str, progress_callback=None) -> dict:
         """下载用户主页视频"""
@@ -159,6 +180,8 @@ class DouyinHandler:
             profile_data = await crawler.fetch_user_profile(sec_user_id)
             profile = UserProfileFilter(profile_data)
             nickname = profile.nickname or "unknown"
+            # 保存完整用户资料（city, gender, is_ban 等 f2 字段）
+            db.save_user_info(profile.to_dict())
 
             while downloaded < self.max_counts:
                 # 动态请求量，和 f2 一致
@@ -179,23 +202,31 @@ class DouyinHandler:
                 max_cursor = video_filter.max_cursor
 
                 # 避免请求过于频繁，和 f2 一致
-                await asyncio.sleep(self.timeout)
+                await asyncio.sleep(self.timeout + random.uniform(-2, 2))
+
+        # 日期区间过滤
+        if self.interval and self.interval != "all":
+            all_details = filter_by_date_interval(all_details, self.interval, "create_time")
 
         # 批量下载
-        save_dir = self.download_path / "post" / nickname
-        save_dir.mkdir(parents=True, exist_ok=True)
+        user_dir = self.download_path / self.app_name / "post" / nickname
+        user_dir.mkdir(parents=True, exist_ok=True)
 
         download_tasks = []
         task_details = {}
         image_tasks = []  # 图文任务单独处理
 
         for detail in all_details:
+            filename = format_filename(self.naming, detail.to_dict())
+            # folderize: 为每个作品创建独立子文件夹
+            save_dir = user_dir / filename if self.folderize else user_dir
+            save_dir.mkdir(parents=True, exist_ok=True)
+
             if detail.is_image_post and (detail.images or detail.images_video):
                 # 图文作品：下载动图和图片
-                image_tasks.append(detail)
+                image_tasks.append((detail, save_dir, filename))
             elif detail.video_url:
                 # 视频作品：下载视频
-                filename = format_filename(self.naming, detail.to_dict())
                 download_tasks.append({
                     "url": detail.video_url,
                     "dir": str(save_dir),
@@ -208,10 +239,20 @@ class DouyinHandler:
         async with self._make_downloader(progress_callback) as dl:
             download_results = await dl.batch_download(download_tasks)
 
-            # 下载图文（动图 + 图片）
-            for detail in image_tasks:
+            # 下载附属文件（音乐、封面、文案）
+            for detail in all_details:
                 filename = format_filename(self.naming, detail.to_dict())
+                # folderize: 为每个作品创建独立子文件夹
+                save_dir = user_dir / filename if self.folderize else user_dir
+                if self.music and detail.music_url:
+                    await dl.download_music(detail.music_url, save_dir, filename)
+                if self.cover and detail.cover_url:
+                    await dl.download_cover(detail.cover_url, save_dir, filename)
+                if self.desc and detail.desc:
+                    await dl.download_desc(detail.desc, save_dir, filename)
 
+            # 下载图文（动图 + 图片）
+            for detail, save_dir, filename in image_tasks:
                 # 下载动图/实况
                 for i, live_url in enumerate(detail.images_video):
                     if live_url:
@@ -253,36 +294,25 @@ class DouyinHandler:
     # 用户点赞 (like)
     # ============================================================
 
-    async def handle_user_like_list(self, url: str) -> dict:
-        """获取用户点赞视频列表（不下载）"""
+    async def handle_user_like_list(self, url: str, cursor: int = 0, count: int = 20) -> dict:
+        """获取用户点赞视频列表（单页，用于分页预览）"""
         sec_user_id = await SecUserIdFetcher.get_sec_user_id(url)
         if not sec_user_id:
             return {"success": False, "error": "无法从 URL 提取 sec_user_id"}
 
-        downloaded = 0
-        max_cursor = 0
-        all_details = []
-
         async with self._make_crawler() as crawler:
-            while downloaded < self.max_counts:
-                current_request_size = min(self.page_counts, self.max_counts - downloaded)
-                data = await crawler.fetch_user_favorite(sec_user_id, max_cursor, current_request_size)
-                if not data or not data.get("aweme_list"):
-                    break
-                video_filter = UserPostFilter(data)
+            data = await crawler.fetch_user_favorite(sec_user_id, cursor, count)
+            if not data or not data.get("aweme_list"):
+                return {"success": True, "videos": [], "has_more": False, "next_cursor": 0}
+            video_filter = UserPostFilter(data)
+            videos = [d.to_dict() for d in video_filter.get_video_list()]
 
-                for detail in video_filter.get_video_list():
-                    if downloaded >= self.max_counts:
-                        break
-                    all_details.append(detail)
-                    downloaded += 1
-
-                if not video_filter.has_more:
-                    break
-                max_cursor = video_filter.max_cursor
-                await asyncio.sleep(self.timeout)
-
-        return {"success": True, "videos": [d.to_dict() for d in all_details]}
+        return {
+            "success": True,
+            "videos": videos,
+            "has_more": bool(video_filter.has_more),
+            "next_cursor": video_filter.max_cursor,
+        }
 
     async def handle_user_like(self, url: str, progress_callback=None) -> dict:
         """下载用户点赞视频"""
@@ -298,6 +328,8 @@ class DouyinHandler:
             profile_data = await crawler.fetch_user_profile(sec_user_id)
             profile = UserProfileFilter(profile_data)
             nickname = profile.nickname or "unknown"
+            # 保存完整用户资料（city, gender, is_ban 等 f2 字段）
+            db.save_user_info(profile.to_dict())
 
             while downloaded < self.max_counts:
                 current_request_size = min(self.page_counts, self.max_counts - downloaded)
@@ -315,9 +347,13 @@ class DouyinHandler:
                 if not video_filter.has_more:
                     break
                 max_cursor = video_filter.max_cursor
-                await asyncio.sleep(self.timeout)
+                await asyncio.sleep(self.timeout + random.uniform(-2, 2))
 
-        save_dir = self.download_path / "like" / nickname
+        # 日期区间过滤
+        if self.interval and self.interval != "all":
+            all_details = filter_by_date_interval(all_details, self.interval, "create_time")
+
+        save_dir = self.download_path / self.app_name / "like" / nickname
         save_dir.mkdir(parents=True, exist_ok=True)
 
         download_tasks = []
@@ -334,6 +370,16 @@ class DouyinHandler:
 
         async with self._make_downloader(progress_callback) as dl:
             download_results = await dl.batch_download(download_tasks)
+
+            # 下载附属文件（音乐、封面、文案）
+            for detail in all_details:
+                filename = format_filename(self.naming, detail.to_dict())
+                if self.music and detail.music_url:
+                    await dl.download_music(detail.music_url, save_dir, filename)
+                if self.cover and detail.cover_url:
+                    await dl.download_cover(detail.cover_url, save_dir, filename)
+                if self.desc and detail.desc:
+                    await dl.download_desc(detail.desc, save_dir, filename)
 
             for detail in image_tasks:
                 filename = format_filename(self.naming, detail.to_dict())
@@ -385,9 +431,11 @@ class DouyinHandler:
                 if not video_filter.has_more:
                     break
                 cursor = video_filter.max_cursor
-                await asyncio.sleep(self.timeout)
+                await asyncio.sleep(self.timeout + random.uniform(-2, 2))
 
-        save_dir = self.download_path / "collection"
+        # 收藏是当前用户的，使用第一个作品的作者昵称或 "me" 作为文件夹名
+        nickname = all_details[0].author_nickname if all_details else "me"
+        save_dir = self.download_path / self.app_name / "collection" / nickname
         save_dir.mkdir(parents=True, exist_ok=True)
 
         download_tasks = []
@@ -412,30 +460,19 @@ class DouyinHandler:
             collects_filter = UserCollectsFilter(data)
             return {"success": True, "collects": collects_filter.to_list()}
 
-    async def handle_collects_video_list(self, collects_id: str) -> dict:
-        """获取收藏夹视频列表（不下载）"""
-        downloaded = 0
-        cursor = 0
-        all_details = []
-
+    async def handle_collects_video_list(self, collects_id: str, cursor: int = 0, count: int = 20) -> dict:
+        """获取收藏夹视频列表（单页，用于分页预览）"""
         async with self._make_crawler() as crawler:
-            while downloaded < self.max_counts:
-                current_request_size = min(self.page_counts, self.max_counts - downloaded)
-                data = await crawler.fetch_user_collects_video(collects_id, cursor, current_request_size)
-                video_filter = UserPostFilter(data)
+            data = await crawler.fetch_user_collects_video(collects_id, cursor, count)
+            video_filter = UserPostFilter(data)
+            videos = [d.to_dict() for d in video_filter.get_video_list()]
 
-                for detail in video_filter.get_video_list():
-                    if downloaded >= self.max_counts:
-                        break
-                    all_details.append(detail)
-                    downloaded += 1
-
-                if not video_filter.has_more:
-                    break
-                cursor = video_filter.max_cursor
-                await asyncio.sleep(self.timeout)
-
-        return {"success": True, "videos": [d.to_dict() for d in all_details]}
+        return {
+            "success": True,
+            "videos": videos,
+            "has_more": bool(video_filter.has_more),
+            "next_cursor": video_filter.max_cursor,
+        }
 
     async def handle_collects_video(self, collects_id: str, progress_callback=None) -> dict:
         """下载收藏夹中的视频"""
@@ -458,9 +495,11 @@ class DouyinHandler:
                 if not video_filter.has_more:
                     break
                 cursor = video_filter.max_cursor
-                await asyncio.sleep(self.timeout)
+                await asyncio.sleep(self.timeout + random.uniform(-2, 2))
 
-        save_dir = self.download_path / "collects" / collects_id
+        # 使用第一个作品的作者昵称或 collects_id 作为文件夹名
+        nickname = all_details[0].author_nickname if all_details else collects_id
+        save_dir = self.download_path / self.app_name / "collects" / nickname
         save_dir.mkdir(parents=True, exist_ok=True)
 
         download_tasks = []
@@ -507,35 +546,25 @@ class DouyinHandler:
     # 合集 (mix)
     # ============================================================
 
-    async def handle_user_mix_list(self, url: str) -> dict:
-        """获取合集视频列表（不下载）"""
+    async def handle_user_mix_list(self, url: str, cursor: int = 0, count: int = 20) -> dict:
+        """获取合集视频列表（单页，用于分页预览）"""
         mix_id = await MixIdFetcher.get_mix_id(url)
         if not mix_id:
             return {"success": False, "error": "无法从 URL 提取 mix_id"}
 
-        downloaded = 0
-        cursor = 0
-        all_details = []
-
         async with self._make_crawler() as crawler:
-            while downloaded < self.max_counts:
-                current_request_size = min(self.page_counts, self.max_counts - downloaded)
-                data = await crawler.fetch_mix_aweme(mix_id, cursor, current_request_size)
-                video_filter = UserPostFilter(data)
+            data = await crawler.fetch_mix_aweme(mix_id, cursor, count)
+            video_filter = UserPostFilter(data)
+            videos = [d.to_dict() for d in video_filter.get_video_list()]
 
-                for detail in video_filter.get_video_list():
-                    if downloaded >= self.max_counts:
-                        break
-                    all_details.append(detail)
-                    downloaded += 1
-
-                if not video_filter.has_more:
-                    break
-                cursor = video_filter.max_cursor
-                await asyncio.sleep(self.timeout)
-
-        mix_name = all_details[0].mix_name if all_details else mix_id
-        return {"success": True, "videos": [d.to_dict() for d in all_details], "detail": {"desc": mix_name}}
+        mix_name = videos[0].get("mix_name", mix_id) if videos else mix_id
+        return {
+            "success": True,
+            "videos": videos,
+            "detail": {"desc": mix_name},
+            "has_more": bool(video_filter.has_more),
+            "next_cursor": video_filter.max_cursor,
+        }
 
     async def handle_user_mix(self, url: str, progress_callback=None) -> dict:
         """下载合集视频"""
@@ -562,10 +591,12 @@ class DouyinHandler:
                 if not video_filter.has_more:
                     break
                 cursor = video_filter.max_cursor
-                await asyncio.sleep(self.timeout)
+                await asyncio.sleep(self.timeout + random.uniform(-2, 2))
 
         mix_name = all_details[0].mix_name if all_details else mix_id
-        save_dir = self.download_path / "mix" / mix_name
+        # 使用第一个作品的作者昵称作为文件夹名
+        nickname = all_details[0].author_nickname if all_details else mix_id
+        save_dir = self.download_path / self.app_name / "mix" / nickname
         save_dir.mkdir(parents=True, exist_ok=True)
 
         download_tasks = []
@@ -665,7 +696,7 @@ class DouyinHandler:
 
         # 构建保存路径（对齐 f2 命名：{create}_{desc}_live.flv）
         nickname = sanitize_filename(live_filter.nickname or "unknown")
-        save_dir = self.download_path / nickname
+        save_dir = self.download_path / self.app_name / "live" / nickname
         create_str = time.strftime("%Y-%m-%d_%H-%M-%S")
         title = sanitize_filename(live_filter.live_title or "live")
         filename = f"{create_str}_{title}_live.flv"
@@ -878,7 +909,9 @@ class DouyinHandler:
             return {"success": False, "error": "音乐播放地址为空"}
 
         filename = sanitize_filename(f"{author} - {title}" if author else title)
-        save_dir = self.download_path / "music"
+        # 使用作者昵称作为文件夹名
+        nickname = sanitize_filename(author) if author else "unknown"
+        save_dir = self.download_path / self.app_name / "music" / nickname
         save_dir.mkdir(parents=True, exist_ok=True)
 
         async with self._make_downloader() as dl:
@@ -922,12 +955,18 @@ class DouyinHandler:
 
     async def handle_user_profile(self, url: str) -> dict:
         """获取用户资料"""
+        logger.info("[handle_user_profile] url=%s", url[:80])
         sec_user_id = await SecUserIdFetcher.get_sec_user_id(url)
         if not sec_user_id:
+            logger.warning("[handle_user_profile] 无法提取 sec_user_id")
             return {"success": False, "error": "无法从 URL 提取 sec_user_id"}
 
+        logger.info("[handle_user_profile] sec_user_id=%s", sec_user_id[:30])
         async with self._make_crawler() as crawler:
             data = await crawler.fetch_user_profile(sec_user_id)
 
+        logger.info("[handle_user_profile] API status_code=%s", data.get("status_code", "N/A"))
         profile = UserProfileFilter(data)
-        return {"success": True, "profile": profile.to_dict()}
+        result = {"success": True, "profile": profile.to_dict()}
+        logger.info("[handle_user_profile] 返回结果 keys=%s", list(result.keys()))
+        return result

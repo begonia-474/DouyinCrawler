@@ -1,6 +1,9 @@
 """HTTP 爬虫引擎"""
 
 import httpx
+import asyncio
+import random
+import logging
 from urllib.parse import urlencode
 
 from core.api import DouyinAPIEndpoints as ep
@@ -9,9 +12,11 @@ from core.signature.xbogus import XBogus
 from core.signature.fingerprint import BrowserFingerprintGenerator
 from core.signature.manager import ABogusManager, XBogusManager
 
+logger = logging.getLogger(__name__)
+
 
 class DouyinCrawler:
-    """抖音异步 HTTP 爬虫，自动注入签名"""
+    """抖音异步 HTTP 爬虫，自动注入签名、重试、限流检测"""
 
     UA = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -19,9 +24,11 @@ class DouyinCrawler:
         "Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0"
     )
 
-    def __init__(self, cookie: str, proxies: dict | None = None, encryption: str = "ab"):
+    def __init__(self, cookie: str, proxies: dict | None = None,
+                 encryption: str = "ab", max_retries: int = 5):
         self.cookie = cookie
         self.encryption = encryption
+        self.max_retries = max_retries
         # 初始化签名管理器
         if encryption == "ab":
             self.bogus_manager = ABogusManager
@@ -33,6 +40,7 @@ class DouyinCrawler:
             "limits": httpx.Limits(max_connections=5, max_keepalive_connections=5),
             "headers": {"User-Agent": self.UA, "Referer": "https://www.douyin.com/"},
             "follow_redirects": True,
+            "transport": httpx.AsyncHTTPTransport(retries=max_retries),
         }
         if proxies:
             client_kwargs["proxy"] = proxies.get("https://") or proxies.get("http://")
@@ -60,25 +68,100 @@ class DouyinCrawler:
         return f"{base_url}{sep}{signed}"
 
     async def _get_json(self, url: str) -> dict:
-        resp = await self._client.get(url, headers={"Cookie": self.cookie})
-        resp.raise_for_status()
-        try:
-            return resp.json()
-        except Exception:
-            return {"status_code": -1, "status_msg": "invalid json response"}
+        """GET 请求，带重试和 429 限流检测"""
+        last_error = None
+        cookie_len = len(self.cookie)
+        cookie_preview = self.cookie[:40] if self.cookie else "(空)"
+        for attempt in range(self.max_retries):
+            try:
+                if attempt == 0:
+                    logger.info("[_get_json] 请求URL: %s", url[:120])
+                    logger.info("[_get_json] cookie 长度=%d, 前40字符: %s", cookie_len, cookie_preview)
+                resp = await self._client.get(url, headers={"Cookie": self.cookie})
+
+                # 429 限流：等待后重试
+                if resp.status_code == 429:
+                    wait = (attempt + 1) * 5 + random.uniform(1, 3)
+                    logger.warning("触发限流 (429)，等待 %.1f 秒后重试 (%d/%d)", wait, attempt + 1, self.max_retries)
+                    await asyncio.sleep(wait)
+                    continue
+
+                resp.raise_for_status()
+
+                if not resp.content:
+                    logger.warning("[_get_json] 空响应, status=%d", resp.status_code)
+                    return {"status_code": -1, "status_msg": "empty response"}
+
+                try:
+                    data = resp.json()
+                    api_status = data.get("status_code", "N/A")
+                    api_msg = data.get("status_msg", "N/A")
+                    logger.info("[_get_json] API 响应: status_code=%s, status_msg=%s", api_status, api_msg)
+                    return data
+                except Exception:
+                    logger.warning("[_get_json] JSON 解析失败, 响应前200字符: %s", resp.text[:200])
+                    return {"status_code": -1, "status_msg": "invalid json response"}
+
+            except (httpx.RemoteProtocolError, httpx.ReadTimeout, httpx.ConnectTimeout) as e:
+                last_error = e
+                wait = (attempt + 1) * 2 + random.uniform(0, 1)
+                logger.warning("请求异常 (%s)，等待 %.1f 秒后重试 (%d/%d)", type(e).__name__, wait, attempt + 1, self.max_retries)
+                await asyncio.sleep(wait)
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code in (500, 502, 503):
+                    last_error = e
+                    wait = (attempt + 1) * 3 + random.uniform(0, 2)
+                    logger.warning("服务端错误 (%d)，等待 %.1f 秒后重试 (%d/%d)", e.response.status_code, wait, attempt + 1, self.max_retries)
+                    await asyncio.sleep(wait)
+                    continue
+                raise
+
+        logger.error("请求失败，已重试 %d 次: %s", self.max_retries, last_error)
+        return {"status_code": -1, "status_msg": f"request failed after {self.max_retries} retries: {last_error}"}
 
     async def _post_json(self, url: str, json_data: dict = None, form_data: dict = None) -> dict:
-        resp = await self._client.post(
-            url, headers={"Cookie": self.cookie},
-            json=json_data, data=form_data,
-        )
-        resp.raise_for_status()
-        if not resp.content:
-            return {"status_code": -1, "status_msg": "empty response"}
-        try:
-            return resp.json()
-        except Exception:
-            return {"status_code": -1, "status_msg": "invalid json"}
+        """POST 请求，带重试和 429 限流检测"""
+        last_error = None
+        for attempt in range(self.max_retries):
+            try:
+                resp = await self._client.post(
+                    url, headers={"Cookie": self.cookie},
+                    json=json_data, data=form_data,
+                )
+
+                # 429 限流：等待后重试
+                if resp.status_code == 429:
+                    wait = (attempt + 1) * 5 + random.uniform(1, 3)
+                    logger.warning("触发限流 (429)，等待 %.1f 秒后重试 (%d/%d)", wait, attempt + 1, self.max_retries)
+                    await asyncio.sleep(wait)
+                    continue
+
+                resp.raise_for_status()
+
+                if not resp.content:
+                    return {"status_code": -1, "status_msg": "empty response"}
+
+                try:
+                    return resp.json()
+                except Exception:
+                    return {"status_code": -1, "status_msg": "invalid json"}
+
+            except (httpx.RemoteProtocolError, httpx.ReadTimeout, httpx.ConnectTimeout) as e:
+                last_error = e
+                wait = (attempt + 1) * 2 + random.uniform(0, 1)
+                logger.warning("请求异常 (%s)，等待 %.1f 秒后重试 (%d/%d)", type(e).__name__, wait, attempt + 1, self.max_retries)
+                await asyncio.sleep(wait)
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code in (500, 502, 503):
+                    last_error = e
+                    wait = (attempt + 1) * 3 + random.uniform(0, 2)
+                    logger.warning("服务端错误 (%d)，等待 %.1f 秒后重试 (%d/%d)", e.response.status_code, wait, attempt + 1, self.max_retries)
+                    await asyncio.sleep(wait)
+                    continue
+                raise
+
+        logger.error("请求失败，已重试 %d 次: %s", self.max_retries, last_error)
+        return {"status_code": -1, "status_msg": f"request failed after {self.max_retries} retries: {last_error}"}
 
     def _get_token(self) -> str:
         from core.tokens.token_manager import TokenManager

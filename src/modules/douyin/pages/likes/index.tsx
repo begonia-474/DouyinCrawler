@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { Header } from "@/components/layout/header";
 import { AnimateEntry } from "@/components/shared/animate-entry";
 import { UrlInput } from "@/components/shared/url-input";
@@ -26,11 +26,20 @@ export default function LikesPage() {
   const [downloadedCount, setDownloadedCount] = useState(0);
   const [downloadProgress, setDownloadProgress] = useState(0);
 
+  // 分页状态
+  const [currentUrl, setCurrentUrl] = useState("");
+  const [cursor, setCursor] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
   const handleParse = useCallback(async (url: string) => {
     setLoading(true);
     setProfile(null);
     setLikes([]);
     setError(null);
+    setCurrentUrl(url);
+    setHasMore(false);
 
     const profileRes = await getUserProfile(url);
     if (profileRes.success && profileRes.data?.profile) {
@@ -41,13 +50,46 @@ export default function LikesPage() {
       return;
     }
 
-    const likesRes = await getUserLikes(url);
+    const likesRes = await getUserLikes(url, 0, 20);
     if (likesRes.success && likesRes.data?.videos) {
       setLikes(likesRes.data.videos);
+      setCursor(likesRes.data.next_cursor ?? 0);
+      setHasMore(likesRes.data.has_more ?? false);
     }
 
     setLoading(false);
   }, []);
+
+  // 加载更多
+  const loadMore = useCallback(async () => {
+    if (!hasMore || loadingMore || !currentUrl) return;
+    setLoadingMore(true);
+    const res = await getUserLikes(currentUrl, cursor, 20);
+    if (res.success && res.data?.videos) {
+      setLikes(prev => [...prev, ...res.data!.videos!]);
+      setCursor(res.data.next_cursor ?? 0);
+      setHasMore(res.data.has_more ?? false);
+    }
+    setLoadingMore(false);
+  }, [currentUrl, cursor, hasMore, loadingMore]);
+
+  // IntersectionObserver 自动加载
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && hasMore && !loadingMore) {
+          loadMore();
+        }
+      },
+      { threshold: 0.1 }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasMore, loadingMore, loadMore]);
 
   const handleDownloadAll = async () => {
     setDownloading(true);
@@ -115,7 +157,7 @@ export default function LikesPage() {
                   </Avatar>
                   <div>
                     <h3 className="font-semibold">{profile.nickname}</h3>
-                    <p className="text-sm text-muted-foreground tracking-wide">{likes.length} 个点赞</p>
+                    <p className="text-sm text-muted-foreground tracking-wide">{likes.length}{hasMore ? "+" : ""} 个点赞</p>
                   </div>
                 </div>
               </Bezel>
@@ -134,6 +176,16 @@ export default function LikesPage() {
                 />
               ))}
             </div>
+            {/* 无限滚动 sentinel */}
+            <div ref={sentinelRef} className="h-4" />
+            {loadingMore && (
+              <div className="flex justify-center py-4">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              </div>
+            )}
+            {!hasMore && likes.length > 0 && (
+              <p className="text-center text-xs text-muted-foreground py-4">已加载全部 {likes.length} 个点赞</p>
+            )}
           </>
         )}
       </div>

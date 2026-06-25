@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Bezel } from "@/components/shared/bezel";
 import { getLiveInfo, startLiveRecord, stopLiveRecord, getLiveStatus, saveLiveRecordAfterStop } from "@/lib/api";
+import { useLiveStore } from "@/stores/live-store";
 import type { LiveInfo as LiveInfoType } from "@/lib/api-types";
 import {
   Radio,
@@ -30,18 +31,86 @@ export default function LivePage() {
   const [liveInfo, setLiveInfo] = useState<LiveInfoType | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [recording, setRecording] = useState(false);
-  const [recordTaskId, setRecordTaskId] = useState<string | null>(null);
   const [recordLoading, setRecordLoading] = useState(false);
 
   const lastParsedUrl = useRef("");
-  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // 使用全局 store
+  const { tasks: liveTasks, connect: connectLive, updateTask, removeTask } = useLiveStore();
+
+  // 查找当前正在进行的录制任务
+  const activeTask = Object.values(liveTasks).find(
+    (t) => t.status === "recording" || t.status === "starting" || t.status === "stopping"
+  );
+  const recording = !!activeTask;
+  const recordTaskId = activeTask?.task_id || null;
+
+  // 查找刚完成/出错的任务（用于保存记录）
+  const doneTasks = Object.values(liveTasks).filter(
+    (t) => t.status === "completed" || t.status === "error"
+  );
+  const savedTaskIds = useRef<Set<string>>(new Set());
+
+  // 连接 Tauri 事件
   useEffect(() => {
-    return () => {
-      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+    connectLive();
+
+    // 页面加载时检查后端是否有正在进行的录制任务
+    const checkExistingTask = async () => {
+      try {
+        const statusRes = await getLiveStatus();
+        if (statusRes.success && statusRes.data) {
+          const tasks = Object.values(statusRes.data);
+          for (const task of tasks) {
+            if (task.status === "recording" || task.status === "starting" || task.status === "stopping") {
+              // 添加到全局 store
+              useLiveStore.getState().addTask({
+                task_id: task.task_id,
+                url: task.url || "",
+                status: task.status as "starting" | "recording" | "completed" | "error" | "stopping",
+                title: task.title,
+                nickname: task.nickname,
+                room_id: task.room_id,
+                file: task.file,
+                file_size: task.file_size,
+                duration_sec: task.duration_sec,
+                started_at: task.started_at,
+                ended_at: task.ended_at,
+                cover_url: task.cover_url,
+                error: task.error,
+              });
+              if (task.url) {
+                lastParsedUrl.current = task.url;
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error("检查录制任务状态失败:", err);
+      }
     };
-  }, []);
+
+    checkExistingTask();
+  }, [connectLive]);
+
+  // 监听任务完成/出错，保存记录
+  useEffect(() => {
+    for (const task of doneTasks) {
+      if (savedTaskIds.current.has(task.task_id)) continue;
+      savedTaskIds.current.add(task.task_id);
+
+      if (task.status === "completed") {
+        saveLiveRecordAfterStop(task).catch((saveErr) => {
+          console.error("保存录制记录失败:", saveErr);
+          setError("录制已完成，但保存记录失败");
+        });
+        setTimeout(() => removeTask(task.task_id), 3000);
+      } else if (task.status === "error") {
+        setError(task.error || "录制出错");
+        setTimeout(() => removeTask(task.task_id), 5000);
+      }
+    }
+  }, [doneTasks, removeTask]);
 
   const handleParse = useCallback(async (url: string) => {
     setLoading(true);
@@ -69,8 +138,12 @@ export default function LivePage() {
     setRecordLoading(true);
     const res = await startLiveRecord(lastParsedUrl.current);
     if (res.success && res.data) {
-      setRecording(true);
-      setRecordTaskId(res.data.task_id);
+      // 添加到全局 store
+      useLiveStore.getState().addTask({
+        task_id: res.data.task_id,
+        url: lastParsedUrl.current,
+        status: "starting",
+      });
       setError(null);
     } else {
       setError(res.error || "启动录制失败");
@@ -83,50 +156,13 @@ export default function LivePage() {
     setRecordLoading(true);
     const res = await stopLiveRecord(recordTaskId);
     if (res.success) {
-      const taskId = recordTaskId;
-      let attempts = 0;
-      pollTimerRef.current = setInterval(async () => {
-        attempts++;
-        try {
-          const statusRes = await getLiveStatus();
-          if (statusRes.success && statusRes.data) {
-            const task = statusRes.data[taskId];
-            if (task?.status === "completed") {
-              if (pollTimerRef.current) clearInterval(pollTimerRef.current);
-              try {
-                await saveLiveRecordAfterStop(task);
-              } catch (saveErr) {
-                console.error("保存录制记录失败:", saveErr);
-                setError("录制已完成，但保存记录失败");
-              }
-              setRecording(false);
-              setRecordTaskId(null);
-              setRecordLoading(false);
-              return;
-            } else if (task?.status === "error") {
-              if (pollTimerRef.current) clearInterval(pollTimerRef.current);
-              setError(task.error || "录制出错");
-              setRecording(false);
-              setRecordTaskId(null);
-              setRecordLoading(false);
-              return;
-            }
-          }
-        } catch {
-          // ignore
-        }
-        if (attempts >= 30) {
-          if (pollTimerRef.current) clearInterval(pollTimerRef.current);
-          setRecording(false);
-          setRecordTaskId(null);
-          setRecordLoading(false);
-        }
-      }, 1000);
+      // 更新任务状态为 stopping
+      updateTask(recordTaskId, { status: "stopping" });
     } else {
       setError(res.error || "停止录制失败");
-      setRecordLoading(false);
     }
-  }, [recordTaskId]);
+    setRecordLoading(false);
+  }, [recordTaskId, updateTask]);
 
   return (
     <>
@@ -167,7 +203,7 @@ export default function LivePage() {
                     {recording && (
                       <Badge variant="destructive" className="animate-pulse rounded-full">
                         <Disc className="h-3 w-3 mr-1" />
-                        录制中
+                        {activeTask?.status === "stopping" ? "停止中" : "录制中"}
                       </Badge>
                     )}
                     <Badge variant={liveInfo.is_live ? "default" : "secondary"} className="rounded-full">
@@ -207,7 +243,7 @@ export default function LivePage() {
                         开始录制
                       </Button>
                     ) : (
-                      <Button variant="destructive" onClick={handleStopRecord} disabled={recordLoading}>
+                      <Button variant="destructive" onClick={handleStopRecord} disabled={recordLoading || activeTask?.status === "stopping"}>
                         {recordLoading ? (
                           <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                         ) : (

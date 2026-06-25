@@ -16,12 +16,22 @@ interface UrlInputProps {
 
 type UrlType = "video" | "user" | "mix" | "live" | "unknown";
 
-function detectUrlType(url: string): UrlType {
+/** 从分享口令或纯文本中提取 URL，去掉尾部粘连标点 */
+function extractUrl(text: string): string {
+  const match = text.match(/https?:\/\/\S+/);
+  if (match) {
+    return match[0].replace(/[,，。.!！?？)）\]】}>」』\s]+$/, "");
+  }
+  return text.trim();
+}
+
+function detectUrlType(input: string): UrlType {
+  const url = extractUrl(input);
   if (!url) return "unknown";
   if (url.includes("/user/") || url.includes("sec_user_id")) return "user";
   if (url.includes("/collection/") || url.includes("mix_id")) return "mix";
-  if (url.includes("live.douyin.com") || url.includes("/live/")) return "live";
-  if (url.includes("/video/") || url.includes("/note/") || url.includes("modal_id"))
+  if (url.includes("live.douyin.com") || url.includes("/live/") || url.includes("webcast.amemv.com")) return "live";
+  if (url.includes("/video/") || url.includes("/note/") || url.includes("modal_id") || url.includes("iesdouyin.com"))
     return "video";
   return "unknown";
 }
@@ -56,14 +66,19 @@ export function UrlInput({ onSubmit, loading, placeholder, allowedTypes, default
         return;
       }
 
-      onSubmit(url.trim());
+      // 提交前提取纯 URL（兼容分享口令）
+      const cleaned = extractUrl(url);
+      onSubmit(cleaned);
     },
     [url, onSubmit, allowedTypes, urlType]
   );
 
   const handlePaste = useCallback(() => {
     navigator.clipboard.readText().then((text) => {
-      if (text) setUrl(text);
+      if (text) {
+        // 粘贴时自动从口令中提取 URL
+        setUrl(extractUrl(text));
+      }
     });
   }, []);
 

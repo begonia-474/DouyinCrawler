@@ -3,8 +3,12 @@
 import httpx
 import asyncio
 import aiofiles
+import random
+import logging
 from pathlib import Path
 from typing import Callable
+
+logger = logging.getLogger(__name__)
 
 # 文件名工具统一在 utils.py 维护；此处重新导出以保持向后兼容
 from core.utils import sanitize_filename, format_filename  # noqa: F401
@@ -96,15 +100,17 @@ class Downloader:
         save_dir: str | Path,
         filename: str,
         task_id: str | None = None,
+        max_retries: int = 3,
     ) -> Path:
         """
-        下载视频文件
+        下载视频文件（带重试）
 
         Args:
             video_url: 视频 URL
             save_dir: 保存目录
             filename: 文件名（不含扩展名）
             task_id: 任务 ID（用于进度回调）
+            max_retries: 最大重试次数
 
         Returns:
             保存的文件路径
@@ -116,48 +122,70 @@ class Downloader:
         tid = task_id or filename
         self._tasks[tid] = task
 
-        headers = self._get_headers(task)
+        last_error = None
+        for attempt in range(max_retries):
+            headers = self._get_headers(task)
 
-        # 检查已下载的部分
-        existing_size = 0
-        if task.temp_path.exists():
-            existing_size = task.temp_path.stat().st_size
-            headers["Range"] = f"bytes={existing_size}-"
+            # 检查已下载的部分
+            existing_size = 0
+            if task.temp_path.exists():
+                existing_size = task.temp_path.stat().st_size
+                headers["Range"] = f"bytes={existing_size}-"
 
-        try:
-            task.status = "downloading"
-            async with self._client.stream("GET", video_url, headers=headers) as resp:
-                resp.raise_for_status()
+            try:
+                task.status = "downloading"
+                async with self._client.stream("GET", video_url, headers=headers) as resp:
+                    resp.raise_for_status()
 
-                # 获取总大小
-                content_length = int(resp.headers.get("content-length", 0))
-                if resp.status_code == 206:
-                    task.total_size = existing_size + content_length
-                    task.downloaded = existing_size
-                else:
-                    task.total_size = content_length
-                    existing_size = 0
+                    # 获取总大小
+                    content_length = int(resp.headers.get("content-length", 0))
+                    if resp.status_code == 206:
+                        task.total_size = existing_size + content_length
+                        task.downloaded = existing_size
+                    else:
+                        task.total_size = content_length
+                        existing_size = 0
 
-                # 写入文件
-                mode = "ab" if existing_size > 0 and resp.status_code == 206 else "wb"
-                async with aiofiles.open(task.temp_path, mode) as f:
-                    async for chunk in resp.aiter_bytes(self.CHUNK_SIZE):
-                        await f.write(chunk)
-                        task.downloaded += len(chunk)
-                        if self.progress_callback:
-                            self.progress_callback(tid, task.downloaded, task.total_size)
+                    # 写入文件
+                    mode = "ab" if existing_size > 0 and resp.status_code == 206 else "wb"
+                    async with aiofiles.open(task.temp_path, mode) as f:
+                        async for chunk in resp.aiter_bytes(self.CHUNK_SIZE):
+                            await f.write(chunk)
+                            task.downloaded += len(chunk)
+                            if self.progress_callback:
+                                self.progress_callback(tid, task.downloaded, task.total_size)
 
-            # 下载完成，重命名
-            if task.full_path.exists():
-                task.full_path.unlink()
-            task.temp_path.rename(task.full_path)
-            task.status = "completed"
-            return task.full_path
+                # 下载完成，重命名
+                if task.full_path.exists():
+                    task.full_path.unlink()
+                task.temp_path.rename(task.full_path)
+                task.status = "completed"
+                return task.full_path
 
-        except Exception as e:
-            task.status = "error"
-            task.error_msg = str(e)
-            raise
+            except (httpx.RemoteProtocolError, httpx.ReadTimeout, httpx.ConnectTimeout) as e:
+                last_error = e
+                wait = (attempt + 1) * 2 + random.uniform(0, 1)
+                logger.warning("下载异常 (%s)，等待 %.1f 秒后重试 (%d/%d)", type(e).__name__, wait, attempt + 1, max_retries)
+                await asyncio.sleep(wait)
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code in (429, 500, 502, 503):
+                    last_error = e
+                    wait = (attempt + 1) * 3 + random.uniform(0, 2)
+                    logger.warning("下载 HTTP 错误 (%d)，等待 %.1f 秒后重试 (%d/%d)", e.response.status_code, wait, attempt + 1, max_retries)
+                    await asyncio.sleep(wait)
+                    continue
+                task.status = "error"
+                task.error_msg = str(e)
+                raise
+            except Exception as e:
+                last_error = e
+                wait = (attempt + 1) * 2 + random.uniform(0, 1)
+                logger.warning("下载未知异常 (%s)，等待 %.1f 秒后重试 (%d/%d)", type(e).__name__, wait, attempt + 1, max_retries)
+                await asyncio.sleep(wait)
+
+        task.status = "error"
+        task.error_msg = f"下载失败，已重试 {max_retries} 次: {last_error}"
+        raise last_error
 
     async def download_image(self, image_url: str, save_dir: str | Path, filename: str) -> Path:
         """下载图片"""
@@ -243,7 +271,7 @@ class Downloader:
         max_concurrent: int = 3,
     ) -> list[dict]:
         """
-        批量下载
+        批量下载（单个失败不影响其他任务）
 
         Args:
             tasks: [{"url": ..., "dir": ..., "filename": ..., "task_id": ...}, ...]
@@ -257,19 +285,70 @@ class Downloader:
 
         async def _download_one(t: dict):
             async with semaphore:
-                path = await self.download_video(
-                    video_url=t["url"],
-                    save_dir=t["dir"],
-                    filename=t["filename"],
-                    task_id=t.get("task_id", t["filename"]),
-                )
-                results.append({
-                    "task_id": t.get("task_id", t["filename"]),
-                    "path": path,
-                })
+                try:
+                    path = await self.download_video(
+                        video_url=t["url"],
+                        save_dir=t["dir"],
+                        filename=t["filename"],
+                        task_id=t.get("task_id", t["filename"]),
+                    )
+                    results.append({
+                        "task_id": t.get("task_id", t["filename"]),
+                        "path": path,
+                    })
+                except Exception as e:
+                    logger.error("批量下载中单个任务失败: %s - %s", t.get("task_id"), e)
 
         await asyncio.gather(*[_download_one(t) for t in tasks])
         return results
+
+    async def download_cover(self, cover_url: str, save_dir: str | Path, filename: str) -> Path:
+        """下载封面图片"""
+        save_path = Path(save_dir)
+        save_path.mkdir(parents=True, exist_ok=True)
+
+        # 判断封面类型：动态封面 .webp，静态封面 .jpeg
+        if cover_url and "animated_cover" in cover_url:
+            suffix = ".webp"
+        else:
+            suffix = ".jpeg"
+
+        full_path = save_path / f"{filename}_cover{suffix}"
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            "Referer": "https://www.douyin.com/",
+            "Cookie": self.cookie,
+        }
+
+        try:
+            async with self._client.stream("GET", cover_url, headers=headers) as resp:
+                resp.raise_for_status()
+                async with aiofiles.open(full_path, "wb") as f:
+                    async for chunk in resp.aiter_bytes(self.CHUNK_SIZE):
+                        await f.write(chunk)
+        except Exception as e:
+            # 封面下载失败不影响主流程
+            print(f"[Downloader] 封面下载失败: {e}")
+            return None
+
+        return full_path
+
+    async def download_desc(self, desc_text: str, save_dir: str | Path, filename: str) -> Path:
+        """保存文案到文本文件"""
+        save_path = Path(save_dir)
+        save_path.mkdir(parents=True, exist_ok=True)
+        full_path = save_path / f"{filename}_desc.txt"
+
+        try:
+            async with aiofiles.open(full_path, "w", encoding="utf-8") as f:
+                await f.write(desc_text)
+        except Exception as e:
+            # 文案保存失败不影响主流程
+            print(f"[Downloader] 文案保存失败: {e}")
+            return None
+
+        return full_path
 
     # ============================================================
     # M3U8 直播流录制

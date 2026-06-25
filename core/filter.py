@@ -109,20 +109,12 @@ class UserProfileFilter:
         return self._user.get("mplatform_followers_count", 0)
 
     @property
-    def nickname_raw(self) -> str:
-        return self._user.get("nickname", "")
-
-    @property
     def school_name(self) -> str:
         return self._user.get("school_name", "")
 
     @property
     def short_id(self) -> str:
         return self._user.get("short_id", "")
-
-    @property
-    def signature_raw(self) -> str:
-        return self._user.get("signature", "")
 
     @property
     def user_age(self) -> int:
@@ -138,7 +130,8 @@ class UserProfileFilter:
 
     @property
     def live_status(self) -> int:
-        return self._user.get("live_status", 0)
+        val = self._user.get("live_status", 0)
+        return int(val) if val else 0
 
     @property
     def room_id(self) -> str:
@@ -156,8 +149,8 @@ class UserProfileFilter:
             "is_ban": self.is_ban, "is_block": self.is_block,
             "is_blocked": self.is_blocked, "is_star": self.is_star,
             "mix_count": self.mix_count, "mplatform_followers_count": self.mplatform_followers_count,
-            "nickname_raw": self.nickname_raw, "school_name": self.school_name,
-            "short_id": self.short_id, "signature_raw": self.signature_raw,
+            "nickname_raw": self.nickname, "school_name": self.school_name,
+            "short_id": self.short_id, "signature_raw": self.signature,
             "user_age": self.user_age, "custom_verify": self.custom_verify,
             "unique_id": self.unique_id, "live_status": self.live_status,
             "room_id": self.room_id,
@@ -214,9 +207,9 @@ class UserCollectsFilter:
         result = []
         for c in self.collects_list:
             result.append({
-                "id": str(c.get("id", "")),
-                "name": c.get("name", ""),
-                "count": c.get("collects_count", 0),
+                "id": str(c.get("collects_id", "")),
+                "name": c.get("collects_name", ""),
+                "count": c.get("total_number", 0),
             })
         return result
 
@@ -315,7 +308,8 @@ class PostDetailFilter:
 
     @property
     def aweme_type(self) -> int:
-        return self._aweme.get("aweme_type", 0)
+        val = self._aweme.get("aweme_type", 0)
+        return int(val) if val else 0
 
     @property
     def desc(self) -> str:
@@ -339,7 +333,8 @@ class PostDetailFilter:
 
     @property
     def duration(self) -> int:
-        return get_nested(self._aweme, "video", "duration", default=0)
+        val = get_nested(self._aweme, "video", "duration", default=0)
+        return int(val) if val else 0
 
     @property
     def bit_rate_list(self) -> list[dict]:
@@ -401,19 +396,23 @@ class PostDetailFilter:
 
     @property
     def digg_count(self) -> int:
-        return self.statistics.get("digg_count", 0)
+        val = self.statistics.get("digg_count", 0)
+        return int(val) if val else 0
 
     @property
     def comment_count(self) -> int:
-        return self.statistics.get("comment_count", 0)
+        val = self.statistics.get("comment_count", 0)
+        return int(val) if val else 0
 
     @property
     def share_count(self) -> int:
-        return self.statistics.get("share_count", 0)
+        val = self.statistics.get("share_count", 0)
+        return int(val) if val else 0
 
     @property
     def collect_count(self) -> int:
-        return self.statistics.get("collect_count", 0)
+        val = self.statistics.get("collect_count", 0)
+        return int(val) if val else 0
 
     @property
     def mix_id(self) -> str:
@@ -428,10 +427,6 @@ class PostDetailFilter:
         return bool(get_nested(self._aweme, "status", "is_prohibited", default=0))
 
     # === f2 对齐字段 - 作者 ===
-
-    @property
-    def author_nickname_raw(self) -> str:
-        return get_nested(self._aweme, "author", "nickname", default="")
 
     @property
     def author_short_id(self) -> str:
@@ -477,7 +472,8 @@ class PostDetailFilter:
 
     @property
     def is_ads(self) -> int:
-        return self._aweme.get("is_ads", 0)
+        val = self._aweme.get("is_ads", 0)
+        return int(val) if val else 0
 
     @property
     def is_story(self) -> int:
@@ -485,11 +481,13 @@ class PostDetailFilter:
 
     @property
     def is_top(self) -> int:
-        return self._aweme.get("is_top", 0)
+        val = self._aweme.get("is_top", 0)
+        return int(val) if val else 0
 
     @property
     def is_long_video(self) -> int:
-        return self._aweme.get("is_long_video", 0)
+        val = self._aweme.get("is_long_video", 0)
+        return int(val) if val else 0
 
     # === f2 对齐字段 - 视频 ===
 
@@ -672,7 +670,7 @@ class PostDetailFilter:
             "share_count": self.share_count, "collect_count": self.collect_count,
             "mix_id": self.mix_id, "mix_name": self.mix_name,
             "is_prohibited": int(self.is_prohibited),
-            "author_nickname_raw": self.author_nickname_raw,
+            "author_nickname_raw": self.author_nickname,
             "author_short_id": self.author_short_id,
             "author_unique_id": self.author_unique_id,
             "author_avatar_url": self.author_avatar_url,

@@ -46,6 +46,7 @@ pip-delete-this-directory.txt
 config.yaml
 config.yml
 config.json
+config/
 token.json
 cookies.json
 
