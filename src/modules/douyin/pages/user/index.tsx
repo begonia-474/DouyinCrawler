@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback } from "react";
 import { Header } from "@/components/layout/header";
 import { AnimateEntry } from "@/components/shared/animate-entry";
 import { UrlInput } from "@/components/shared/url-input";
@@ -13,23 +13,15 @@ import {
   getUserProfile, getUserPosts,
   getUserFollowing, getUserFollowers, downloadUserPosts,
 } from "@/lib/api";
+import { useBatchStore } from "@/stores/batch-store";
+import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import type { UserProfile as UserProfileType, VideoItem, FollowItem } from "@/lib/api-types";
 import {
   Download, Users, Heart, Video, Loader2,
   UserPlus, UserCheck, ThumbsUp, AlertCircle,
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
-
-function formatCount(n: number): string {
-  if (n >= 10000) return `${(n / 10000).toFixed(1)}w`;
-  return n.toLocaleString();
-}
-
-function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-}
+import { formatCount, formatDurationSec } from "@/lib/utils";
 
 function FollowItemCard({ item, type }: { item: FollowItem; type: "following" | "follower" }) {
   return (
@@ -55,20 +47,31 @@ function FollowItemCard({ item, type }: { item: FollowItem; type: "following" | 
 export default function UserPage() {
   const [loading, setLoading] = useState(false);
   const [profile, setProfile] = useState<UserProfileType | null>(null);
-  const [videos, setVideos] = useState<VideoItem[]>([]);
   const [following, setFollowing] = useState<FollowItem[]>([]);
   const [followers, setFollowers] = useState<FollowItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [downloadedCount, setDownloadedCount] = useState(0);
-  const [downloadProgress, setDownloadProgress] = useState(0);
-
-  // 分页状态
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [currentUrl, setCurrentUrl] = useState("");
-  const [cursor, setCursor] = useState(0);
-  const [hasMore, setHasMore] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const sentinelRef = useRef<HTMLDivElement>(null);
+  const batchTask = useBatchStore((s) => activeTaskId ? s.tasks[activeTaskId] : null);
+  const downloadProgress = batchTask ? (batchTask.total > 0 ? Math.round((batchTask.completed / batchTask.total) * 100) : 0) : 0;
+
+  const { items: videos, setItems: setVideos, hasMore, loadingMore, sentinelRef, reset } = useInfiniteScroll<VideoItem>({
+    fetchPage: useCallback(async (cursor: number) => {
+      if (!currentUrl) return null;
+      const res = await getUserPosts(currentUrl, cursor, 20);
+      if (res.success && res.data?.videos) {
+        return {
+          items: res.data.videos,
+          nextCursor: res.data.next_cursor ?? 0,
+          hasMore: res.data.has_more ?? false,
+        };
+      }
+      return null;
+    }, [currentUrl]),
+    enabled: !!currentUrl,
+  });
 
   const handleParse = useCallback(async (url: string) => {
     setLoading(true);
@@ -78,7 +81,6 @@ export default function UserPage() {
     setFollowers([]);
     setError(null);
     setCurrentUrl(url);
-    setHasMore(false);
 
     const profileRes = await getUserProfile(url);
     if (profileRes.success && profileRes.data?.profile) {
@@ -96,56 +98,28 @@ export default function UserPage() {
     ]);
 
     if (postsRes.success && postsRes.data?.videos) {
-      setVideos(postsRes.data.videos);
-      setCursor(postsRes.data.next_cursor ?? 0);
-      setHasMore(postsRes.data.has_more ?? false);
+      reset(async () => ({
+        items: postsRes.data!.videos!,
+        nextCursor: postsRes.data!.next_cursor ?? 0,
+        hasMore: postsRes.data!.has_more ?? false,
+      }));
     }
     if (followingRes.success && followingRes.data?.followings) setFollowing(followingRes.data.followings);
     if (followersRes.success && followersRes.data?.followers) setFollowers(followersRes.data.followers);
 
     setLoading(false);
-  }, []);
-
-  // 加载更多视频
-  const loadMore = useCallback(async () => {
-    if (!hasMore || loadingMore || !currentUrl) return;
-    setLoadingMore(true);
-    const res = await getUserPosts(currentUrl, cursor, 20);
-    if (res.success && res.data?.videos) {
-      setVideos(prev => [...prev, ...res.data!.videos!]);
-      setCursor(res.data.next_cursor ?? 0);
-      setHasMore(res.data.has_more ?? false);
-    }
-    setLoadingMore(false);
-  }, [currentUrl, cursor, hasMore, loadingMore]);
-
-  // IntersectionObserver 自动加载
-  useEffect(() => {
-    const el = sentinelRef.current;
-    if (!el) return;
-
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting && hasMore && !loadingMore) {
-          loadMore();
-        }
-      },
-      { threshold: 0.1 }
-    );
-
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [hasMore, loadingMore, loadMore]);
+  }, [reset, setVideos]);
 
   const handleDownloadAll = async () => {
     setDownloading(true);
-    setDownloadProgress(0);
     setDownloadedCount(0);
+    setActiveTaskId(null);
 
     const res = await downloadUserPosts(profile?.sec_user_id ? `https://www.douyin.com/user/${profile.sec_user_id}` : "");
-    if (res.success) {
+    if (res.success && res.task_id) {
+      setActiveTaskId(res.task_id);
+    } else if (res.success) {
       setDownloadedCount(videos.length);
-      setDownloadProgress(100);
     } else {
       setError(res.error || "下载失败");
     }
@@ -247,7 +221,7 @@ export default function UserPage() {
                       key={video.aweme_id}
                       title={video.desc}
                       author={profile.nickname}
-                      duration={formatDuration(video.duration)}
+                      duration={formatDurationSec(video.duration)}
                       diggCount={video.digg_count}
                       commentCount={video.comment_count}
                       shareCount={video.share_count}

@@ -1,51 +1,34 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Header } from "@/components/layout/header";
 import { AnimateEntry } from "@/components/shared/animate-entry";
 import { Bezel } from "@/components/shared/bezel";
+import { Pagination } from "@/components/shared/pagination";
 import { Music, Loader2, Search, Clock, Download, CheckCircle2, Trash2 } from "lucide-react";
-import { deleteMusicCollection, getMusicCollectionFromDB, getMusicCollectionCountFromDB, downloadMusic } from "@/lib/api";
+import { deleteMusicCollection, downloadMusic } from "@/lib/api";
+import { queryKeys } from "@/lib/query-keys";
+import { useMusicCollectionQuery, useMusicCountQuery } from "@/lib/queries";
+import { usePagination } from "@/hooks/use-pagination";
 import type { MusicCollectionItem } from "@/lib/api";
-
-function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-}
+import { formatDurationSec } from "@/lib/utils";
 
 export default function LibraryMusicPage() {
-  const [items, setItems] = useState<MusicCollectionItem[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(0);
+  const { page, pageSize, setPage, offset, resetPage } = usePagination();
   const [search, setSearch] = useState("");
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
-  const pageSize = 20;
-
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [data, count] = await Promise.all([
-        getMusicCollectionFromDB({
-          limit: pageSize,
-          offset: page * pageSize,
-          keyword: search || undefined,
-          status: "downloaded",
-        }),
-        getMusicCollectionCountFromDB(search || undefined, "downloaded"),
-      ]);
-      setItems(data);
-      setTotal(count);
-    } catch (err) {
-      console.error("加载失败:", err);
-    }
-    setLoading(false);
-  }, [page, search]);
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  const queryClient = useQueryClient();
+  const itemsQuery = useMusicCollectionQuery({
+    limit: pageSize,
+    offset,
+    keyword: search || undefined,
+    status: "downloaded",
+  });
+  const countQuery = useMusicCountQuery({ status: "downloaded" });
+  const items = itemsQuery.data ?? [];
+  const total = countQuery.data ?? 0;
+  const loading = itemsQuery.isLoading || countQuery.isLoading;
 
   const handleDownload = async (item: MusicCollectionItem) => {
     if (!item.play_url) return;
@@ -53,7 +36,10 @@ export default function LibraryMusicPage() {
 
     const res = await downloadMusic(item.play_url, item.title || "", item.author || "");
     if (res.success) {
-      loadData();
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.musicCollection() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.musicCount() }),
+      ]);
     }
 
     setDownloadingId(null);
@@ -66,7 +52,10 @@ export default function LibraryMusicPage() {
       : false;
     try {
       await deleteMusicCollection(item.music_id, deleteFile);
-      await loadData();
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.musicCollection() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.musicCount() }),
+      ]);
     } catch (err) {
       window.alert(err instanceof Error ? err.message : "删除失败");
     }
@@ -86,7 +75,7 @@ export default function LibraryMusicPage() {
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               value={search}
-              onChange={(e) => { setSearch(e.target.value); setPage(0); }}
+              onChange={(e) => { setSearch(e.target.value); resetPage(); }}
               placeholder="搜索音乐..."
               className="h-11 rounded-xl pl-10 border-foreground/[0.08] bg-foreground/[0.03]"
             />
@@ -136,7 +125,7 @@ export default function LibraryMusicPage() {
                         )}
                         <span className="text-xs text-muted-foreground flex items-center gap-1">
                           <Clock className="h-3 w-3" />
-                          {formatDuration(item.duration)}
+                          {formatDurationSec(item.duration)}
                         </span>
                         {item.status === "downloaded" && (
                           <span className="text-xs text-success flex items-center gap-1">
@@ -175,27 +164,7 @@ export default function LibraryMusicPage() {
               </AnimateEntry>
             ))}
 
-            <div className="flex justify-between items-center pt-4">
-              <Button
-                variant="capsule"
-                size="sm"
-                disabled={page === 0}
-                onClick={() => setPage((p) => p - 1)}
-              >
-                上一页
-              </Button>
-              <span className="text-sm text-muted-foreground">
-                第 {page + 1} / {totalPages || 1} 页
-              </span>
-              <Button
-                variant="capsule"
-                size="sm"
-                disabled={page + 1 >= totalPages}
-                onClick={() => setPage((p) => p + 1)}
-              >
-                下一页
-              </Button>
-            </div>
+            <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
           </div>
         )}
       </div>

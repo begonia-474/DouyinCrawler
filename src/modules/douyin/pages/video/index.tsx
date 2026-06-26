@@ -18,6 +18,7 @@ import {
   BarChart3,
   ArrowRight,
 } from "lucide-react";
+import { formatCount } from "@/lib/utils";
 
 interface ParsedInfo {
   type: string;
@@ -25,11 +26,6 @@ interface ParsedInfo {
   author?: string;
   duration?: string;
   awemeId?: string;
-}
-
-function formatCount(n: number): string {
-  if (n >= 10000) return `${(n / 10000).toFixed(1)}w`;
-  return n.toLocaleString();
 }
 
 export default function VideoPage() {

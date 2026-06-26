@@ -1,9 +1,12 @@
-"""
-数据库桥接模块
-供 Python 通过 Rust 的 PyO3 方法写入数据库
+"""数据库桥接模块 — Python→Rust DB 写入的 stubs
 
-_save_download_record, _save_video_info, _save_user_info
-由 Rust 端在初始化时注入
+此模块的 `_save_*` 和 `_has_user` 函数在应用启动时由 Rust 侧的
+`src-tauri/src/python/db_bridge.rs::register_db_bridge()` 通过 PyO3 `setattr` 注入。
+
+调用链：
+    Python 业务代码 → core.db（facade）→ 本模块（stubs）→ Rust PyO3 closure → core::db::Database
+
+Python 侧**不直接执行任何 SQL**。所有数据库操作最终由 Rust 的 rusqlite 执行。
 """
 
 import logging

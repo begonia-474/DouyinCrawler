@@ -3,6 +3,8 @@ pydantic>=2.0
 gmssl>=3.2
 aiofiles>=24.0
 pyyaml>=6.0
-fastapi>=0.115
-uvicorn>=0.34
 m3u8>=4.0
+
+# 测试依赖
+pytest>=8.0
+pytest-asyncio>=0.24

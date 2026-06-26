@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Bezel } from "@/components/shared/bezel";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ export function DownloadStatusCard() {
   const navigate = useNavigate();
   const { tasks, connect } = useBatchStore();
   const { connect: connectLive } = useLiveStore();
+  const [dismissed, setDismissed] = useState(false);
 
   // 全局注册事件监听（确保任何页面都能收到事件）
   useEffect(() => {
@@ -28,16 +29,24 @@ export function DownloadStatusCard() {
       return b.task_id.localeCompare(a.task_id);
     })[0];
 
-  // 没有任务时不显示
-  if (!activeTask && !recentCompletedTask) return null;
+  // 新任务开始时重置 dismissed 状态
+  useEffect(() => {
+    if (activeTask) setDismissed(false);
+  }, [activeTask?.task_id]);
+
+  // 已完成/失败的任务 5 秒后自动隐藏
+  useEffect(() => {
+    if (!activeTask && recentCompletedTask) {
+      const timer = setTimeout(() => setDismissed(true), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [activeTask, recentCompletedTask?.task_id]);
+
+  // 没有任务或已隐藏时不显示
+  if ((!activeTask && !recentCompletedTask) || dismissed) return null;
 
   const task = activeTask || recentCompletedTask;
   if (!task) return null;
-
-  // 如果是已完成的任务，5 秒后自动隐藏
-  if (task.status === "completed" || task.status === "error") {
-    // 这里可以用 useEffect 来实现自动隐藏，但为了简化，先不实现
-  }
 
   return (
     <div className="fixed bottom-4 right-4 z-50 animate-in slide-in-from-bottom-4">

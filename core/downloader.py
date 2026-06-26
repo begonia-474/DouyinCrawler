@@ -15,7 +15,7 @@ from core.utils import sanitize_filename, format_filename  # noqa: F401
 from core.utils import get_segments_from_m3u8, get_content_length, get_chunk_size
 
 
-# 已下载 TS 分片记录上限，超过后清空以释放内存（允许少量重复下载）
+# 已下载 TS 分片记录上限，超过后淘汰最早记录以释放内存
 MAX_SEGMENT_COUNT = 1000
 
 
@@ -329,7 +329,7 @@ class Downloader:
                         await f.write(chunk)
         except Exception as e:
             # 封面下载失败不影响主流程
-            print(f"[Downloader] 封面下载失败: {e}")
+            logger.warning("封面下载失败: %s", e)
             return None
 
         return full_path
@@ -345,7 +345,7 @@ class Downloader:
                 await f.write(desc_text)
         except Exception as e:
             # 文案保存失败不影响主流程
-            print(f"[Downloader] 文案保存失败: {e}")
+            logger.warning("文案保存失败: %s", e)
             return None
 
         return full_path
@@ -390,7 +390,8 @@ class Downloader:
 
         total_downloaded = 0
         default_chunks = 409600
-        downloaded_segments: set = set()
+        from collections import OrderedDict
+        downloaded_segments: OrderedDict[str, None] = OrderedDict()
 
         task = DownloadTask(url=url, save_path=full_path.parent, filename=full_path.stem, suffix="")
         task.full_path = full_path
@@ -413,7 +414,7 @@ class Downloader:
                             continue
 
                         ts_url = segment.absolute_uri
-                        ts_content_length = await get_content_length(ts_url, headers)
+                        ts_content_length = await get_content_length(ts_url, headers, client=self._client)
                         if ts_content_length == 0:
                             ts_content_length = default_chunks
 
@@ -430,7 +431,7 @@ class Downloader:
                                 if self.progress_callback:
                                     self.progress_callback(task_id, total_downloaded, 0)
 
-                            downloaded_segments.add(segment.absolute_uri)
+                            downloaded_segments[segment.absolute_uri] = None
 
                         except httpx.ReadTimeout:
                             continue
@@ -443,7 +444,10 @@ class Downloader:
                                 pass
 
                     if len(downloaded_segments) > MAX_SEGMENT_COUNT:
-                        downloaded_segments = set()
+                        # 淘汰最早的一半记录，保留最近的分片避免重复下载
+                        keep = MAX_SEGMENT_COUNT // 2
+                        while len(downloaded_segments) > keep:
+                            downloaded_segments.popitem(last=False)
 
                 # 等待最后一个分片的时长，避免过快请求
                 if segments:

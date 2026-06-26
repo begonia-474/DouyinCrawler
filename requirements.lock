@@ -1,0 +1,10 @@
+# Python dependency lock file (pip constraints)
+# Generated 2026-06-26 from installed environment
+# Usage: pip install -r requirements.txt -c requirements.lock
+
+httpx==0.28.1
+pydantic==2.12.4
+gmssl==3.2.2
+aiofiles==25.1.0
+pyyaml==6.0.3
+m3u8==6.0.0

@@ -1,6 +1,16 @@
-"""数据库操作模块
+"""数据库操作模块（Python 侧 facade）
 
-通过 Rust 桥接写入数据库，确保数据格式一致。
+架构边界：
+- **Rust 拥有 SQLite 连接和所有 SQL 执行**。Python 不直接打开数据库。
+- 本模块是纯透传层：接收 Python 数据 → 原样通过 db_bridge 触发 Rust 写入。
+- 所有数据清洗（bool→int、author_* 字段映射）由 Rust 侧统一处理：
+  - `db_bridge.rs`: bool_to_int() 递归转换 JSON bool 为 int
+  - `db.rs` UserInfo: #[serde(alias = "author_*")] 接受两种字段命名
+- db_bridge 中的 `_save_*` 函数是 Rust 在启动时通过 PyO3 注入的闭包。
+- 前端也有两条直接写入路径（不经 Python）：live_records（Tauri command）、music_collection（Tauri command）。
+
+数据流：
+    Python 业务逻辑 → db.py（透传）→ db_bridge.py（转发）→ Rust PyO3 closure（清洗+写入）→ db.rs（SQL）
 """
 
 import logging
@@ -37,81 +47,21 @@ def save_download_record(
 
 
 def save_video_info(video_data: dict) -> bool:
-    """保存视频信息（通过 Rust 桥接）
-
-    直接透传 to_db_dict() 的全部字段，只做类型修正。
-    Rust 端 VideoInfo 所有 f2 字段都有 #[serde(default)]，缺失字段自动填 0/NULL。
-    """
-    # 需要转 int 的字段（Python bool → Rust i32 会报错）
-    INT_FIELDS = {
-        "aweme_type", "duration", "digg_count", "comment_count", "share_count",
-        "collect_count", "is_ads", "is_story", "is_top", "is_long_video",
-        "private_status", "is_delete", "music_duration", "pgc_music_type",
-        "music_status", "is_commerce_music", "mix_pic_type", "mix_type",
-        "mix_create_time", "can_comment", "can_forward", "can_share",
-        "download_setting", "allow_douplus", "allow_share", "admire_count",
-        "is_prohibited", "create_time",
-    }
-    clean_data = {}
-    for k, v in video_data.items():
-        if k in INT_FIELDS:
-            clean_data[k] = int(v) if v else 0
-        else:
-            clean_data[k] = v
-    return db_bridge.save_video_info(clean_data)
+    """保存视频信息（纯透传，Rust 侧处理 bool→int 转换）"""
+    return db_bridge.save_video_info(video_data)
 
 
 def save_user_info(user_data: dict) -> bool:
-    """保存用户信息（通过 Rust 桥接）
+    """保存用户信息（通过 Rust 桥接，支持 author_* 别名）
 
-    支持两种数据源：
+    支持两种数据源（Rust serde alias 自动兼容）：
     1. PostDetailFilter.to_db_dict() 的 author_* 前缀字段
     2. UserProfileFilter.to_dict() 的直接字段
-    Rust 端 UserInfo 所有 f2 字段都有 #[serde(default)]，缺失字段自动填 0/NULL。
     """
-    # author_* → 直接字段名映射
-    AUTHOR_MAP = {
-        "author_sec_uid": "sec_user_id",
-        "author_nickname": "nickname",
-        "author_uid": "uid",
-        "author_avatar_url": "avatar_url",
-        "author_unique_id": "unique_id",
-        "author_signature": "signature",
-        "author_ip_location": "ip_location",
-        "author_aweme_count": "aweme_count",
-        "author_follower_count": "follower_count",
-        "author_following_count": "following_count",
-        "author_total_favorited": "total_favorited",
-    }
-    INT_FIELDS = {
-        "aweme_count", "follower_count", "following_count", "total_favorited",
-        "live_status", "favoriting_count", "gender", "is_ban", "is_block",
-        "is_blocked", "is_star", "mix_count", "mplatform_followers_count",
-        "user_age",
-    }
-
-    clean_data = {}
-    seen = set()
-    for k, v in user_data.items():
-        # author_* 前缀映射
-        if k in AUTHOR_MAP:
-            mapped = AUTHOR_MAP[k]
-            clean_data[mapped] = v
-            seen.add(mapped)
-        else:
-            clean_data[k] = v
-            seen.add(k)
-
-    # 确保 sec_user_id 存在
-    if not clean_data.get("sec_user_id"):
+    sec_uid = user_data.get("sec_user_id") or user_data.get("author_sec_uid")
+    if not sec_uid:
         return False
-
-    # 数值字段转 int
-    for k in INT_FIELDS:
-        if k in clean_data:
-            clean_data[k] = int(clean_data[k]) if clean_data[k] else 0
-
-    return db_bridge.save_user_info(clean_data)
+    return db_bridge.save_user_info(user_data)
 
 
 def save_batch_results(results: list, download_type: str = "batch") -> dict:

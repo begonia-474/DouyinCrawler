@@ -1,4 +1,9 @@
-"""HTTP 爬虫引擎"""
+"""HTTP 爬虫引擎
+
+能力分级：
+- 未标注的方法均为 [active]（被 service 层调用）
+- [reserved] 标注的方法已实现但暂无 service 调用方，属于预留核心能力
+"""
 
 import httpx
 import asyncio
@@ -70,13 +75,10 @@ class DouyinCrawler:
     async def _get_json(self, url: str) -> dict:
         """GET 请求，带重试和 429 限流检测"""
         last_error = None
-        cookie_len = len(self.cookie)
-        cookie_preview = self.cookie[:40] if self.cookie else "(空)"
         for attempt in range(self.max_retries):
             try:
                 if attempt == 0:
                     logger.info("[_get_json] 请求URL: %s", url[:120])
-                    logger.info("[_get_json] cookie 长度=%d, 前40字符: %s", cookie_len, cookie_preview)
                 resp = await self._client.get(url, headers={"Cookie": self.cookie})
 
                 # 429 限流：等待后重试
@@ -216,7 +218,7 @@ class DouyinCrawler:
         params = UserFollower(sec_user_id=sec_user_id, offset=offset, count=count, msToken=self._get_token()).model_dump()
         return await self._post_json(self._sign_url(ep.USER_FOLLOWER, params), json_data=params)
 
-    async def fetch_query_user(self) -> dict:
+    async def fetch_query_user(self) -> dict:  # [reserved] 无 service/py_bridge 调用
         from core.models import QueryUser
         params = QueryUser(msToken=self._get_token()).model_dump()
         return await self._get_json(self._sign_url(ep.QUERY_USER, params))
@@ -269,12 +271,12 @@ class DouyinCrawler:
         params = PostSearch(keyword=keyword, offset=offset, count=count, msToken=self._get_token()).model_dump()
         return await self._get_json(self._sign_url(ep.POST_SEARCH, params))
 
-    async def fetch_home_post_search(self, keyword: str, offset: int = 0, count: int = 10) -> dict:
+    async def fetch_home_post_search(self, keyword: str, offset: int = 0, count: int = 10) -> dict:  # [reserved] 无 service 调用
         from core.models import HomePostSearch
         params = HomePostSearch(keyword=keyword, offset=offset, count=count, msToken=self._get_token()).model_dump()
         return await self._get_json(self._sign_url(ep.HOME_POST_SEARCH, params))
 
-    async def fetch_suggest_word(self, query: str, count: int = 10) -> dict:
+    async def fetch_suggest_word(self, query: str, count: int = 10) -> dict:  # [reserved] 无 service 调用
         from core.models import SuggestWord
         params = SuggestWord(query=query, count=count, msToken=self._get_token()).model_dump()
         return await self._get_json(self._sign_url(ep.SUGGEST_WORDS, params))
@@ -307,12 +309,12 @@ class DouyinCrawler:
         params = UserLive(web_rid=web_rid, room_id_str=room_id_str).model_dump()
         return await self._get_json(self._sign_url(ep.LIVE_INFO, params))
 
-    async def fetch_live_info_by_room_id(self, room_id: str) -> dict:
+    async def fetch_live_info_by_room_id(self, room_id: str) -> dict:  # [reserved] 无 service 调用
         from core.models import UserLive2
         params = UserLive2(room_id=room_id).model_dump()
         return await self._get_json(self._sign_url(ep.LIVE_INFO_ROOM_ID, params))
 
-    async def fetch_user_live_status(self, user_ids: str) -> dict:
+    async def fetch_user_live_status(self, user_ids: str) -> dict:  # [reserved] 无 service 调用
         from core.models import UserLiveStatus
         params = UserLiveStatus(user_ids=user_ids, msToken=self._get_token()).model_dump()
         return await self._get_json(self._sign_url(ep.USER_LIVE_STATUS, params))
@@ -322,7 +324,7 @@ class DouyinCrawler:
         params = FollowingUserLive(msToken=self._get_token()).model_dump()
         return await self._get_json(self._sign_url(ep.FOLLOW_USER_LIVE, params))
 
-    async def fetch_live_im(self, room_id: str, user_unique_id: str) -> dict:
+    async def fetch_live_im(self, room_id: str, user_unique_id: str) -> dict:  # [reserved] 无 service 调用
         from core.models import LiveImFetch
         params = LiveImFetch(room_id=room_id, user_unique_id=user_unique_id).model_dump()
         return await self._get_json(self._sign_url(ep.LIVE_IM_FETCH, params))

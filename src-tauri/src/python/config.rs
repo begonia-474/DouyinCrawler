@@ -10,8 +10,7 @@ use log::info;
 /// 初始化 Python 配置
 pub fn init_config(config: &AppConfig) -> PyResult<()> {
     let cookie_len = config.cookie.len();
-    let cookie_preview: String = config.cookie.chars().take(60).collect();
-    info!("[python/config] init_config 被调用, cookie 长度={}, 前60字符: {:?}", cookie_len, cookie_preview);
+    info!("[python/config] init_config 被调用, cookie 长度={}", cookie_len);
 
     Python::with_gil(|py| {
         let module = py.import_bound("backend.task_manager")?;

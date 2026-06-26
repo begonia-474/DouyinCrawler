@@ -32,12 +32,8 @@ pub fn register_app_handle() {
                 let app_handle = crate::APP_HANDLE.get()
                     .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("AppHandle 未初始化"))?;
 
-                // 将 Python dict 转为 JSON
-                let py = data.py();
-                let json = py.import_bound("json")?;
-                let json_str: String = json.call_method1("dumps", (data,))?.extract()?;
-                let json_value: serde_json::Value = serde_json::from_str(&json_str)
-                    .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("JSON 序列化失败: {}", e)))?;
+                // 将 Python dict 转为 JSON（使用统一桥接辅助函数）
+                let json_value = super::bridge::py_to_json_value(&data)?;
 
                 let payload = serde_json::json!({
                     "task_id": task_id,

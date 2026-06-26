@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Header } from "@/components/layout/header";
 import { VideoCard } from "@/components/shared/video-card";
@@ -6,93 +6,59 @@ import { Button } from "@/components/ui/button";
 import { Bezel } from "@/components/shared/bezel";
 import { DownloadStatusCard } from "@/components/shared/download-status-card";
 import { getCollectsVideoList, downloadCollectsVideo } from "@/lib/api";
+import { useBatchStore } from "@/stores/batch-store";
+import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import type { VideoItem } from "@/lib/api-types";
 import { Loader2, AlertCircle, Download, ArrowLeft } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
-
-function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-}
+import { formatDurationSec } from "@/lib/utils";
 
 export default function CollectsDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
-  const [videos, setVideos] = useState<VideoItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [downloadedCount, setDownloadedCount] = useState(0);
-  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const batchTask = useBatchStore((s) => activeTaskId ? s.tasks[activeTaskId] : null);
+  const downloadProgress = batchTask ? (batchTask.total > 0 ? Math.round((batchTask.completed / batchTask.total) * 100) : 0) : 0;
 
-  // 分页状态
-  const [cursor, setCursor] = useState(0);
-  const [hasMore, setHasMore] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const sentinelRef = useRef<HTMLDivElement>(null);
-
-  const fetchVideos = useCallback(async (pageCursor: number = 0, append: boolean = false) => {
-    if (!id) return;
-    if (!append) setLoading(true);
-    setError(null);
-
-    const res = await getCollectsVideoList(id, pageCursor, 20);
-    if (res.success && res.data?.videos) {
-      if (append) {
-        setVideos(prev => [...prev, ...res.data!.videos!]);
-      } else {
-        setVideos(res.data.videos);
+  const { items: videos, hasMore, loadingMore, sentinelRef, reset } = useInfiniteScroll<VideoItem>({
+    fetchPage: useCallback(async (cursor: number) => {
+      if (!id) return null;
+      const res = await getCollectsVideoList(id, cursor, 20);
+      if (res.success && res.data?.videos) {
+        return {
+          items: res.data.videos,
+          nextCursor: res.data.next_cursor ?? 0,
+          hasMore: res.data.has_more ?? false,
+        };
       }
-      setCursor(res.data.next_cursor ?? 0);
-      setHasMore(res.data.has_more ?? false);
-    } else {
-      setError(res.error || "获取收藏夹视频失败");
-    }
-
-    if (!append) setLoading(false);
-  }, [id]);
+      return null;
+    }, [id]),
+    enabled: !!id,
+  });
 
   useEffect(() => {
-    fetchVideos(0, false);
-  }, [fetchVideos]);
-
-  // 加载更多
-  const loadMore = useCallback(async () => {
-    if (!hasMore || loadingMore) return;
-    setLoadingMore(true);
-    await fetchVideos(cursor, true);
-    setLoadingMore(false);
-  }, [cursor, hasMore, loadingMore, fetchVideos]);
-
-  // IntersectionObserver 自动加载
-  useEffect(() => {
-    const el = sentinelRef.current;
-    if (!el) return;
-
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting && hasMore && !loadingMore) {
-          loadMore();
-        }
-      },
-      { threshold: 0.1 }
-    );
-
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [hasMore, loadingMore, loadMore]);
+    if (!id) return;
+    setLoading(true);
+    setError(null);
+    reset();
+    setLoading(false);
+  }, [id, reset]);
 
   const handleDownloadAll = async () => {
     if (!id) return;
     setDownloading(true);
-    setDownloadProgress(0);
     setDownloadedCount(0);
+    setActiveTaskId(null);
 
     const res = await downloadCollectsVideo(id);
-    if (res.success) {
+    if (res.success && res.task_id) {
+      setActiveTaskId(res.task_id);
+    } else if (res.success) {
       setDownloadedCount(videos.length);
-      setDownloadProgress(100);
     } else {
       setError(res.error || "下载失败");
     }
@@ -157,7 +123,7 @@ export default function CollectsDetailPage() {
                   key={video.aweme_id}
                   title={video.desc}
                   author={video.author}
-                  duration={formatDuration(video.duration)}
+                  duration={formatDurationSec(video.duration)}
                   diggCount={video.digg_count}
                   commentCount={video.comment_count}
                   shareCount={video.share_count}

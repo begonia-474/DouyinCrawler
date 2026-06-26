@@ -140,7 +140,9 @@ class UserProfileFilter:
     def to_dict(self) -> dict:
         return {
             "nickname": self.nickname, "uid": self.uid,
-            "sec_user_id": self.sec_user_id, "avatar_url": self.avatar_url,
+            "sec_user_id": self.sec_user_id,
+            "avatar": self.avatar_url,        # 前端 UserProfile.avatar
+            "avatar_url": self.avatar_url,     # Rust UserInfo.avatar_url
             "aweme_count": self.aweme_count, "follower_count": self.follower_count,
             "following_count": self.following_count, "total_favorited": self.total_favorited,
             "signature": self.signature, "ip_location": self.ip_location,

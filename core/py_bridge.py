@@ -12,6 +12,20 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+
+def _safe_call(func):
+    """装饰器：统一捕获异常，返回 {success: False, error: ...}"""
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            logger.error("[py_bridge] %s 异常: %s", func.__name__, e, exc_info=True)
+            return {"success": False, "error": str(e)}
+    wrapper.__name__ = func.__name__
+    wrapper.__doc__ = func.__doc__
+    return wrapper
+
+
 # 延迟导入，避免循环导入
 _task_manager = None
 
@@ -51,19 +65,17 @@ def _run_async(coro):
         raise
 
 
+@_safe_call
 def parse_video(url: str) -> dict:
     """解析视频信息"""
     logger.info("[py_bridge] parse_video 调用, url=%s", url[:80])
-    try:
-        handler = _get_task_manager().handler
-        result = _run_async(handler.handle_parse_video(url))
-        logger.info("[py_bridge] parse_video 返回: success=%s", result.get("success"))
-        return result
-    except Exception as e:
-        logger.error("[py_bridge] parse_video 异常: %s", e, exc_info=True)
-        return {"success": False, "error": str(e)}
+    handler = _get_task_manager().handler
+    result = _run_async(handler.handle_parse_video(url))
+    logger.info("[py_bridge] parse_video 返回: success=%s", result.get("success"))
+    return result
 
 
+@_safe_call
 def download_video(url: str) -> dict:
     """下载单个视频"""
     handler = _get_task_manager().handler
@@ -105,93 +117,92 @@ def download_video(url: str) -> dict:
     return result
 
 
+@_safe_call
 def get_live_info(url: str) -> dict:
     """获取直播信息"""
     logger.info("[py_bridge] get_live_info 调用, url=%s", url[:80])
-    try:
-        handler = _get_task_manager().handler
-        result = _run_async(handler.handle_user_live(url))
-        logger.info("[py_bridge] get_live_info 返回: success=%s", result.get("success"))
-        return result
-    except Exception as e:
-        logger.error("[py_bridge] get_live_info 异常: %s", e, exc_info=True)
-        return {"success": False, "error": str(e)}
+    handler = _get_task_manager().handler
+    result = _run_async(handler.handle_user_live(url))
+    logger.info("[py_bridge] get_live_info 返回: success=%s", result.get("success"))
+    return result
 
 
+@_safe_call
 def start_batch_download(url: str, download_type: str) -> dict:
     """开始批量下载（通过 task_manager 管理，支持状态追踪）"""
     logger.info("[py_bridge] start_batch_download 调用, type=%s, url=%s", download_type, url[:80])
-    try:
-        # start_batch_download 现在是同步方法，使用线程后台执行
-        task_id = _get_task_manager().start_batch_download(url, download_type)
-        logger.info("[py_bridge] 批量下载已启动, task_id=%s", task_id)
-        return {"success": True, "task_id": task_id, "message": "批量下载已启动"}
-    except Exception as e:
-        logger.error("[py_bridge] start_batch_download 异常: %s", e, exc_info=True)
-        return {"success": False, "error": str(e)}
+    task_id = _get_task_manager().start_batch_download(url, download_type)
+    logger.info("[py_bridge] 批量下载已启动, task_id=%s", task_id)
+    return {"success": True, "task_id": task_id, "message": "批量下载已启动"}
 
 
+@_safe_call
 def get_user_profile(url: str) -> dict:
     """获取用户信息"""
     logger.info("[py_bridge] get_user_profile 调用, url=%s", url[:80])
-    try:
-        handler = _get_task_manager().handler
-        result = _run_async(handler.handle_user_profile(url))
-        logger.info("[py_bridge] get_user_profile 返回: success=%s", result.get("success"))
-        return result
-    except Exception as e:
-        logger.error("[py_bridge] get_user_profile 异常: %s", e, exc_info=True)
-        return {"success": False, "error": str(e)}
+    handler = _get_task_manager().handler
+    result = _run_async(handler.handle_user_profile(url))
+    logger.info("[py_bridge] get_user_profile 返回: success=%s", result.get("success"))
+    return result
 
 
+@_safe_call
 def get_user_posts(url: str, cursor: int = 0, count: int = 20) -> dict:
     """获取用户作品列表（单页）"""
     handler = _get_task_manager().handler
     return _run_async(handler.handle_user_post_list(url, cursor, count))
 
 
+@_safe_call
 def search_videos(keyword: str, offset: int = 0, count: int = 10) -> dict:
     """搜索视频"""
     handler = _get_task_manager().handler
     return _run_async(handler.handle_search(keyword, offset, count))
 
 
+@_safe_call
 def get_mix_info(url: str, cursor: int = 0, count: int = 20) -> dict:
     """获取合集信息（单页）"""
     handler = _get_task_manager().handler
     return _run_async(handler.handle_user_mix_list(url, cursor, count))
 
 
+@_safe_call
 def get_collects_list() -> dict:
     """获取收藏夹列表"""
     handler = _get_task_manager().handler
     return _run_async(handler.handle_user_collects())
 
 
+@_safe_call
 def get_collects_video_list(collects_id: str, cursor: int = 0, count: int = 20) -> dict:
     """获取收藏夹视频列表（单页）"""
     handler = _get_task_manager().handler
     return _run_async(handler.handle_collects_video_list(collects_id, cursor, count))
 
 
+@_safe_call
 def get_following_list(url: str, offset: int = 0, count: int = 20) -> dict:
     """获取关注列表"""
     handler = _get_task_manager().handler
     return _run_async(handler.handle_user_following(url, offset, count))
 
 
+@_safe_call
 def get_follower_list(url: str, offset: int = 0, count: int = 20) -> dict:
     """获取粉丝列表"""
     handler = _get_task_manager().handler
     return _run_async(handler.handle_user_follower(url, offset, count))
 
 
+@_safe_call
 def get_music_collection(cursor: int = 0, count: int = 18) -> dict:
     """获取音乐收藏"""
     handler = _get_task_manager().handler
     return _run_async(handler.handle_user_music_collection(cursor, count))
 
 
+@_safe_call
 def download_music(play_url: str, title: str, author: str = "") -> dict:
     """下载音乐"""
     handler = _get_task_manager().handler
@@ -209,105 +220,100 @@ def download_music(play_url: str, title: str, author: str = "") -> dict:
     return result
 
 
+@_safe_call
 def get_following_live() -> dict:
     """获取关注直播列表"""
     handler = _get_task_manager().handler
     return _run_async(handler.handle_following_live())
 
 
+@_safe_call
 def get_comments(url: str, cursor: int = 0, count: int = 20) -> dict:
     """获取评论"""
     handler = _get_task_manager().handler
     return _run_async(handler.handle_post_comment(url, cursor, count))
 
 
+@_safe_call
 def get_comment_replies(url: str, comment_id: str, cursor: int = 0, count: int = 3) -> dict:
     """获取评论回复"""
     handler = _get_task_manager().handler
     return _run_async(handler.handle_post_comment_reply(url, comment_id, cursor, count))
 
 
+@_safe_call
 def get_tab_feed(count: int = 10) -> dict:
     """获取推荐 Feed"""
     handler = _get_task_manager().handler
     return _run_async(handler.handle_tab_feed(count))
 
 
+@_safe_call
 def get_follow_feed(cursor: int = 0, count: int = 10) -> dict:
     """获取关注 Feed"""
     handler = _get_task_manager().handler
     return _run_async(handler.handle_follow_feed(cursor, count))
 
 
+@_safe_call
 def get_friend_feed(cursor: int = 0, count: int = 10) -> dict:
     """获取好友 Feed"""
     handler = _get_task_manager().handler
     return _run_async(handler.handle_friend_feed(cursor, count))
 
 
+@_safe_call
 def get_user_likes(url: str, cursor: int = 0, count: int = 20) -> dict:
     """获取用户点赞列表（单页）"""
     handler = _get_task_manager().handler
     return _run_async(handler.handle_user_like_list(url, cursor, count))
 
 
+@_safe_call
 def get_post_stats(url: str) -> dict:
     """获取作品统计"""
     handler = _get_task_manager().handler
     return _run_async(handler.handle_post_stats(url))
 
 
+@_safe_call
 def start_live_record(url: str) -> dict:
     """开始直播录制"""
-    try:
-        # start_live_record 现在是同步方法，使用线程后台执行
-        task_id = _get_task_manager().start_live_record(url)
-        return {"success": True, "task_id": task_id, "message": "直播录制已启动"}
-    except Exception as e:
-        logger.error("[py_bridge] start_live_record 异常: %s", e, exc_info=True)
-        return {"success": False, "error": str(e)}
+    task_id = _get_task_manager().start_live_record(url)
+    return {"success": True, "task_id": task_id, "message": "直播录制已启动"}
 
 
+@_safe_call
 def stop_live_record(task_id: str) -> dict:
     """停止直播录制"""
-    try:
-        result = _get_task_manager().stop_live_record(task_id)
-        if not result:
-            return {"success": False, "error": "录制任务不存在"}
-        return {"success": True, "task_id": task_id}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    result = _get_task_manager().stop_live_record(task_id)
+    if not result:
+        return {"success": False, "error": "录制任务不存在"}
+    return {"success": True, "task_id": task_id}
 
 
+@_safe_call
 def get_live_status() -> dict:
     """获取直播录制状态"""
-    try:
-        status = _get_task_manager().get_live_status()
-        return {"success": True, "data": status}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    status = _get_task_manager().get_live_status()
+    return {"success": True, "data": status}
 
 
+@_safe_call
 def get_batch_status() -> dict:
     """获取批量下载状态"""
-    try:
-        status = _get_task_manager().get_batch_status()
-        return {"success": True, "data": status}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    status = _get_task_manager().get_batch_status()
+    return {"success": True, "data": status}
 
 
+@_safe_call
 def test_emit() -> dict:
     """测试 Tauri 事件发射"""
-    try:
-        from core.tauri_bridge import emit, _emit_func
-        logger.info("[test_emit] _emit_func 状态: %s", "已注册" if _emit_func is not None else "未注册")
-        if _emit_func is None:
-            return {"success": False, "error": "_emit_func 未注册"}
-        test_data = {"status": "test", "message": "测试事件"}
-        emit("test-001", "test", test_data)
-        logger.info("[test_emit] 测试事件已发送")
-        return {"success": True, "message": "测试事件已发送"}
-    except Exception as e:
-        logger.error("[test_emit] 异常: %s", e, exc_info=True)
-        return {"success": False, "error": str(e)}
+    from core.tauri_bridge import emit, _emit_func
+    logger.info("[test_emit] _emit_func 状态: %s", "已注册" if _emit_func is not None else "未注册")
+    if _emit_func is None:
+        return {"success": False, "error": "_emit_func 未注册"}
+    test_data = {"status": "test", "message": "测试事件"}
+    emit("test-001", "test", test_data)
+    logger.info("[test_emit] 测试事件已发送")
+    return {"success": True, "message": "测试事件已发送"}

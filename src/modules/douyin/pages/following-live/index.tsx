@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { AnimateEntry } from "@/components/shared/animate-entry";
 import { Bezel } from "@/components/shared/bezel";
 import { getFollowingLive } from "@/lib/api";
+import { formatCount } from "@/lib/utils";
 import type { FollowingLiveItem } from "@/lib/api-types";
 import {
   Users,
@@ -46,11 +47,6 @@ export default function FollowingLivePage() {
   useEffect(() => {
     fetchLives();
   }, [fetchLives]);
-
-  const formatCount = (count: number) => {
-    if (count >= 10000) return `${(count / 10000).toFixed(1)}万`;
-    return count.toString();
-  };
 
   return (
     <>

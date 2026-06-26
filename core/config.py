@@ -81,7 +81,7 @@ def _load_app_json(path: Path) -> dict:
             data = json.load(f)
         # 提取 douyin 配置段
         douyin = data.get("douyin", {})
-        logger.info("[config] 已加载配置: %s, cookie长度=%d", path, len(douyin.get("cookie", "")))
+        logger.info("[config] 已加载配置: %s", path)
         return douyin
     except Exception as e:
         logger.error("[config] 加载配置失败: %s", e)

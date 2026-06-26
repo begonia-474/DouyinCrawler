@@ -1,11 +1,11 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Header } from "@/components/layout/header";
 import { AnimateEntry } from "@/components/shared/animate-entry";
 import { Bezel } from "@/components/shared/bezel";
 import { Image, Music, Loader2, Search, Clock, Heart, MessageCircle, Share2, Bookmark } from "lucide-react";
-import { getVideos, getVideoCount } from "@/lib/api";
+import { useVideosQuery, useVideoCountQuery } from "@/lib/queries";
 import type { VideoInfo } from "@/lib/tauri-types";
 import { formatTimestamp } from "@/lib/utils";
 
@@ -20,43 +20,26 @@ interface VideoListProps {
 }
 
 export function VideoList({ postType, title }: VideoListProps) {
-  const [items, setItems] = useState<VideoInfo[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState("");
   const pageSize = 20;
 
   const Icon = typeIcons[postType] || Image;
-
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [data, count] = await Promise.all([
-        getVideos({
-          limit: pageSize,
-          offset: page * pageSize,
-          keyword: search || undefined,
-          post_type: postType,
-          sort_by: "create_time",
-          sort_order: "desc",
-        }),
-        getVideoCount({
-          keyword: search || undefined,
-          post_type: postType,
-        }),
-      ]);
-      setItems(data);
-      setTotal(count);
-    } catch (err) {
-      console.error("加载失败:", err);
-    }
-    setLoading(false);
-  }, [postType, page, search]);
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  const itemsQuery = useVideosQuery({
+    limit: pageSize,
+    offset: page * pageSize,
+    keyword: search || undefined,
+    post_type: postType,
+    sort_by: "create_time",
+    sort_order: "desc",
+  });
+  const countQuery = useVideoCountQuery({
+    keyword: search || undefined,
+    post_type: postType,
+  });
+  const items: VideoInfo[] = itemsQuery.data ?? [];
+  const total = countQuery.data ?? 0;
+  const loading = itemsQuery.isLoading || countQuery.isLoading;
 
   const totalPages = Math.ceil(total / pageSize);
 

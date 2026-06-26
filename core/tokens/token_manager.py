@@ -1,4 +1,11 @@
-"""Token 管理 — msToken / ttwid / webid 生成"""
+"""Token 管理 — msToken / ttwid / webid 生成
+
+能力分级：
+- gen_false_ms_token() — [active] 被 crawler._get_token() 调用，每次请求生成
+- gen_real_ms_token()  — [reserved] 真实 token 获取，暂未接入
+- gen_ttwid()          — [reserved] ttwid 获取，暂未接入
+- gen_web_id()         — [reserved] web_id 获取，暂未接入
+"""
 
 import random
 import string

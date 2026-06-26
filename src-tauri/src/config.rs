@@ -135,12 +135,9 @@ impl ConfigManager {
                 Ok(content) => {
                     match serde_json::from_str::<ConfigFile>(&content) {
                         Ok(config) => {
-                            // 调试: 打印 cookie 状态
                             if let Some(ref dc) = config.douyin {
-                                let cookie_len = dc.cookie.len();
-                                let cookie_preview: String = dc.cookie.chars().take(80).collect();
                                 info!("[config] 已加载配置: {:?}", config_path);
-                                info!("[config] douyin.cookie 长度={}, 前80字符: {:?}", cookie_len, cookie_preview);
+                                info!("[config] douyin.cookie loaded (len={})", dc.cookie.len());
                                 info!("[config] page_counts={}, max_counts={}, timeout={}, max_connections={}, max_retries={}, max_tasks={}",
                                     dc.page_counts, dc.max_counts, dc.timeout, dc.max_connections, dc.max_retries, dc.max_tasks);
                             } else {
@@ -182,8 +179,7 @@ impl ConfigManager {
         for (key, value) in updates {
             match key.as_str() {
                 "cookie" => {
-                    let preview: String = value.chars().take(60).collect();
-                    info!("[config] 更新 cookie, 长度={}, 前60字符: {:?}", value.len(), preview);
+                    info!("[config] 更新 cookie (len={})", value.len());
                     config.cookie = value.clone();
                 }
                 "download_path" => config.download_path = value.clone(),

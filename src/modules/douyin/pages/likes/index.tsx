@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback } from "react";
 import { Header } from "@/components/layout/header";
 import { AnimateEntry } from "@/components/shared/animate-entry";
 import { UrlInput } from "@/components/shared/url-input";
@@ -7,31 +7,39 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Bezel } from "@/components/shared/bezel";
 import { getUserProfile, getUserLikes, downloadUserLikes } from "@/lib/api";
+import { useBatchStore } from "@/stores/batch-store";
+import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import type { UserProfile as UserProfileType, VideoItem } from "@/lib/api-types";
 import { Loader2, AlertCircle, Download } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
-
-function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-}
+import { formatDurationSec } from "@/lib/utils";
 
 export default function LikesPage() {
   const [loading, setLoading] = useState(false);
   const [profile, setProfile] = useState<UserProfileType | null>(null);
-  const [likes, setLikes] = useState<VideoItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [downloadedCount, setDownloadedCount] = useState(0);
-  const [downloadProgress, setDownloadProgress] = useState(0);
-
-  // 分页状态
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [currentUrl, setCurrentUrl] = useState("");
-  const [cursor, setCursor] = useState(0);
-  const [hasMore, setHasMore] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const sentinelRef = useRef<HTMLDivElement>(null);
+  const batchTask = useBatchStore((s) => activeTaskId ? s.tasks[activeTaskId] : null);
+  const downloadProgress = batchTask ? (batchTask.total > 0 ? Math.round((batchTask.completed / batchTask.total) * 100) : 0) : 0;
+
+  const { items: likes, setItems: setLikes, hasMore, loadingMore, sentinelRef, reset } = useInfiniteScroll<VideoItem>({
+    fetchPage: useCallback(async (cursor: number) => {
+      if (!currentUrl) return null;
+      const res = await getUserLikes(currentUrl, cursor, 20);
+      if (res.success && res.data?.videos) {
+        return {
+          items: res.data.videos,
+          nextCursor: res.data.next_cursor ?? 0,
+          hasMore: res.data.has_more ?? false,
+        };
+      }
+      return null;
+    }, [currentUrl]),
+    enabled: !!currentUrl,
+  });
 
   const handleParse = useCallback(async (url: string) => {
     setLoading(true);
@@ -39,7 +47,6 @@ export default function LikesPage() {
     setLikes([]);
     setError(null);
     setCurrentUrl(url);
-    setHasMore(false);
 
     const profileRes = await getUserProfile(url);
     if (profileRes.success && profileRes.data?.profile) {
@@ -50,56 +57,29 @@ export default function LikesPage() {
       return;
     }
 
+    // 首次加载点赞列表
     const likesRes = await getUserLikes(url, 0, 20);
     if (likesRes.success && likesRes.data?.videos) {
-      setLikes(likesRes.data.videos);
-      setCursor(likesRes.data.next_cursor ?? 0);
-      setHasMore(likesRes.data.has_more ?? false);
+      reset(async () => ({
+        items: likesRes.data!.videos!,
+        nextCursor: likesRes.data!.next_cursor ?? 0,
+        hasMore: likesRes.data!.has_more ?? false,
+      }));
     }
 
     setLoading(false);
-  }, []);
-
-  // 加载更多
-  const loadMore = useCallback(async () => {
-    if (!hasMore || loadingMore || !currentUrl) return;
-    setLoadingMore(true);
-    const res = await getUserLikes(currentUrl, cursor, 20);
-    if (res.success && res.data?.videos) {
-      setLikes(prev => [...prev, ...res.data!.videos!]);
-      setCursor(res.data.next_cursor ?? 0);
-      setHasMore(res.data.has_more ?? false);
-    }
-    setLoadingMore(false);
-  }, [currentUrl, cursor, hasMore, loadingMore]);
-
-  // IntersectionObserver 自动加载
-  useEffect(() => {
-    const el = sentinelRef.current;
-    if (!el) return;
-
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting && hasMore && !loadingMore) {
-          loadMore();
-        }
-      },
-      { threshold: 0.1 }
-    );
-
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [hasMore, loadingMore, loadMore]);
+  }, [reset, setLikes]);
 
   const handleDownloadAll = async () => {
     setDownloading(true);
-    setDownloadProgress(0);
     setDownloadedCount(0);
+    setActiveTaskId(null);
 
     const res = await downloadUserLikes(profile?.sec_user_id ? `https://www.douyin.com/user/${profile.sec_user_id}` : "");
-    if (res.success) {
+    if (res.success && res.task_id) {
+      setActiveTaskId(res.task_id);
+    } else if (res.success) {
       setDownloadedCount(likes.length);
-      setDownloadProgress(100);
     } else {
       setError(res.error || "下载失败");
     }
@@ -169,7 +149,7 @@ export default function LikesPage() {
                   key={video.aweme_id}
                   title={video.desc}
                   author={profile.nickname}
-                  duration={formatDuration(video.duration)}
+                  duration={formatDurationSec(video.duration)}
                   diggCount={video.digg_count}
                   commentCount={video.comment_count}
                   shareCount={video.share_count}

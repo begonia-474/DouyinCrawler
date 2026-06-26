@@ -1,44 +1,39 @@
 mod db;
 mod python;
 mod config;
+mod commands;
 
-use db::{
-    Database, DownloadRecord, DownloadStats, LiveRecord,
-    MusicCollection, NewDownloadRecord, NewLiveRecord, NewMusicCollection,
-    UserInfo, VideoInfo, VideoStats, UserStats,
-};
 use config::{AppConfig, ConfigManager};
 use python::PythonBridge;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
-use tauri::{Emitter, Manager, State};
-use serde_json::Value;
+use tauri::Manager;
 use log::{info, warn, error};
 
 /// 全局 AppHandle，供 Python 通过 PyO3 发送 Tauri 事件
 static APP_HANDLE: OnceLock<tauri::AppHandle> = OnceLock::new();
 
 // ============================================================
-// Tauri Commands - 配置
+// Tauri Commands - 配置（跨模块依赖，保留在 lib.rs）
 // ============================================================
 
-#[tauri::command]
-fn get_config(config_manager: State<'_, Arc<Mutex<ConfigManager>>>) -> Result<AppConfig, String> {
+#[tauri::command(rename_all = "snake_case")]
+fn get_config(config_manager: tauri::State<'_, Arc<Mutex<ConfigManager>>>) -> Result<AppConfig, String> {
     let manager = config_manager.lock().map_err(|e| e.to_string())?;
     Ok(manager.get_douyin_config())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 fn set_config(
-    config_manager: State<'_, Arc<Mutex<ConfigManager>>>,
-    _python_bridge: State<'_, Arc<PythonBridge>>,
+    config_manager: tauri::State<'_, Arc<Mutex<ConfigManager>>>,
+    _python_bridge: tauri::State<'_, Arc<PythonBridge>>,
     updates: HashMap<String, String>,
 ) -> Result<(), String> {
     info!("[set_config] 收到 {} 个配置更新", updates.len());
     for (k, v) in &updates {
         if k == "cookie" {
-            info!("[set_config] cookie 长度={}, 前60字符: {:?}", v.len(), &v[..v.len().min(60)]);
+            info!("[set_config] cookie (len={})", v.len());
         } else {
             info!("[set_config] {} = {:?}", k, v);
         }
@@ -50,409 +45,50 @@ fn set_config(
 
     // 2. 同步到 Python
     let config = manager.get_douyin_config();
-    info!("[set_config] 同步到 Python, cookie 长度={}", config.cookie.len());
+    info!("[set_config] 同步配置到 Python");
     python::init_config(&config).map_err(|e| e.to_string())?;
 
     Ok(())
 }
 
 // ============================================================
-// Tauri Commands - 数据库读取
+// 共享工具函数
 // ============================================================
 
-#[tauri::command]
-fn get_downloads(
-    db: State<'_, Database>,
-    limit: i64,
-    offset: i64,
-    status: Option<String>,
-    download_type: Option<String>,
-) -> Result<Vec<DownloadRecord>, String> {
-    db.get_downloads(limit, offset, status, download_type)
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn get_download_stats(db: State<'_, Database>) -> Result<DownloadStats, String> {
-    db.get_download_stats().map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn get_live_records(
-    db: State<'_, Database>,
-    limit: i64,
-    offset: i64,
-) -> Result<Vec<LiveRecord>, String> {
-    db.get_live_records(limit, offset)
-        .map_err(|e| e.to_string())
-}
-
-// === 数据库读取 - video_info / user_info ===
-
-#[tauri::command]
-fn get_videos(
-    db: State<'_, Database>,
-    limit: i64,
-    offset: i64,
-    keyword: Option<String>,
-    author_sec_uid: Option<String>,
-    sort_by: Option<String>,
-    sort_order: Option<String>,
-    post_type: Option<String>,
-) -> Result<Vec<VideoInfo>, String> {
-    db.get_videos(limit, offset, keyword, author_sec_uid, sort_by, sort_order, post_type)
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn get_video_count(
-    db: State<'_, Database>,
-    keyword: Option<String>,
-    author_sec_uid: Option<String>,
-    post_type: Option<String>,
-) -> Result<i64, String> {
-    db.get_video_count(keyword, author_sec_uid, post_type)
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn get_users(
-    db: State<'_, Database>,
-    limit: i64,
-    offset: i64,
-    keyword: Option<String>,
-    sort_by: Option<String>,
-    sort_order: Option<String>,
-) -> Result<Vec<UserInfo>, String> {
-    db.get_users(limit, offset, keyword, sort_by, sort_order)
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn get_user_count(
-    db: State<'_, Database>,
-    keyword: Option<String>,
-) -> Result<i64, String> {
-    db.get_user_count(keyword)
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn get_user_by_sec_uid(
-    db: State<'_, Database>,
-    sec_user_id: String,
-) -> Result<Option<UserInfo>, String> {
-    db.get_user_by_sec_uid(&sec_user_id)
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn get_video_stats(db: State<'_, Database>) -> Result<VideoStats, String> {
-    db.get_video_stats().map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn get_user_stats(db: State<'_, Database>) -> Result<UserStats, String> {
-    db.get_user_stats().map_err(|e| e.to_string())
-}
-
-fn delete_local_path(path: Option<String>) -> Result<(), String> {
+/// 删除本地文件/目录（白名单校验：仅允许项目根目录下的路径，防止 ../ 穿越）
+pub(crate) fn delete_local_path(path: Option<String>) -> Result<(), String> {
     let Some(path) = path.filter(|value| !value.trim().is_empty()) else {
         return Ok(());
     };
     let local_path = Path::new(&path);
+
+    // 先检查是否存在（canonicalize 对不存在的路径会返回 Err）
     if !local_path.exists() {
         return Ok(());
     }
-    if local_path.is_dir() {
-        std::fs::remove_dir_all(local_path).map_err(|e| format!("删除本地文件夹失败: {}", e))
+
+    // 规范化路径，防止 ../ 穿越
+    let canonical = local_path
+        .canonicalize()
+        .map_err(|e| format!("路径规范化失败: {}", e))?;
+
+    // 白名单：只允许删除项目根目录下的文件（覆盖 Download/、data/ 及用户自定义下载路径）
+    let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let project_root = current_dir
+        .parent()
+        .unwrap_or(&current_dir)
+        .canonicalize()
+        .unwrap_or_else(|_| current_dir.clone());
+
+    if !canonical.starts_with(&project_root) {
+        return Err(format!("安全拒绝: 路径不在项目目录内: {:?}", canonical));
+    }
+
+    if canonical.is_dir() {
+        std::fs::remove_dir_all(&canonical).map_err(|e| format!("删除本地文件夹失败: {}", e))
     } else {
-        std::fs::remove_file(local_path).map_err(|e| format!("删除本地文件失败: {}", e))
+        std::fs::remove_file(&canonical).map_err(|e| format!("删除本地文件失败: {}", e))
     }
-}
-
-// ============================================================
-// Tauri Commands - PyO3 直接调用
-// ============================================================
-
-#[tauri::command]
-fn py_parse_video(url: String) -> Result<Value, String> {
-    python::parse_video(&url).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn py_download_video(url: String) -> Result<Value, String> {
-    python::download_video(&url).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn py_get_live_info(url: String) -> Result<Value, String> {
-    python::get_live_info(&url).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn py_start_batch_download(url: String, download_type: String) -> Result<Value, String> {
-    python::start_batch_download(&url, &download_type).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn py_get_user_profile(url: String) -> Result<Value, String> {
-    python::get_user_profile(&url).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn py_get_user_posts(url: String, cursor: Option<i64>, count: Option<i64>) -> Result<Value, String> {
-    python::get_user_posts(&url, cursor.unwrap_or(0), count.unwrap_or(20)).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn py_search_videos(keyword: String, offset: i64, count: i64) -> Result<Value, String> {
-    python::search_videos(&keyword, offset, count).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn py_get_mix_info(url: String, cursor: Option<i64>, count: Option<i64>) -> Result<Value, String> {
-    python::get_mix_info(&url, cursor.unwrap_or(0), count.unwrap_or(20)).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn py_get_collects_list() -> Result<Value, String> {
-    python::get_collects_list().map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn py_get_collects_video_list(collects_id: String, cursor: Option<i64>, count: Option<i64>) -> Result<Value, String> {
-    python::get_collects_video_list(&collects_id, cursor.unwrap_or(0), count.unwrap_or(20)).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn py_get_following_list(url: String, offset: i64, count: i64) -> Result<Value, String> {
-    python::get_following_list(&url, offset, count).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn py_get_follower_list(url: String, offset: i64, count: i64) -> Result<Value, String> {
-    python::get_follower_list(&url, offset, count).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn py_get_music_collection(cursor: i64, count: i64) -> Result<Value, String> {
-    python::get_music_collection(cursor, count).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn py_download_music(play_url: String, title: String, author: String) -> Result<Value, String> {
-    python::download_music(&play_url, &title, &author).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn py_get_following_live() -> Result<Value, String> {
-    python::get_following_live().map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn py_get_comments(url: String, cursor: i64, count: i64) -> Result<Value, String> {
-    python::get_comments(&url, cursor, count).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn py_get_comment_replies(url: String, comment_id: String, cursor: i64, count: i64) -> Result<Value, String> {
-    python::get_comment_replies(&url, &comment_id, cursor, count).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn py_get_tab_feed(count: i64) -> Result<Value, String> {
-    python::get_tab_feed(count).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn py_get_follow_feed(cursor: i64, count: i64) -> Result<Value, String> {
-    python::get_follow_feed(cursor, count).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn py_get_friend_feed(cursor: i64, count: i64) -> Result<Value, String> {
-    python::get_friend_feed(cursor, count).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn py_get_user_likes(url: String, cursor: Option<i64>, count: Option<i64>) -> Result<Value, String> {
-    python::get_user_likes(&url, cursor.unwrap_or(0), count.unwrap_or(20)).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn py_get_post_stats(url: String) -> Result<Value, String> {
-    python::get_post_stats(&url).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn py_start_live_record(url: String) -> Result<Value, String> {
-    python::start_live_record(&url).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn py_stop_live_record(task_id: String) -> Result<Value, String> {
-    python::stop_live_record(&task_id).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn py_get_live_status() -> Result<Value, String> {
-    python::get_live_status().map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn py_test_emit() -> Result<Value, String> {
-    python::test_emit().map_err(|e| e.to_string())
-}
-
-// ============================================================
-// Tauri Commands - 数据库写入
-// ============================================================
-
-#[tauri::command]
-fn save_download_record(
-    db: State<'_, Database>,
-    record: NewDownloadRecord,
-) -> Result<i64, String> {
-    info!("[save_download_record] 收到请求: aweme_id={:?}, file_path={:?}", record.aweme_id, record.file_path);
-    db.save_download(&record).map_err(|e| {
-        error!("[save_download_record] 保存失败: {}", e);
-        e.to_string()
-    })
-}
-
-#[tauri::command]
-fn save_live_record_record(
-    db: State<'_, Database>,
-    record: NewLiveRecord,
-) -> Result<i64, String> {
-    db.save_live_record(&record).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn save_user_info(
-    db: State<'_, Database>,
-    user: UserInfo,
-) -> Result<(), String> {
-    db.save_user(&user).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn save_video_info(
-    db: State<'_, Database>,
-    video: VideoInfo,
-) -> Result<(), String> {
-    db.save_video(&video).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn is_video_downloaded(
-    db: State<'_, Database>,
-    aweme_id: String,
-) -> Result<bool, String> {
-    db.is_video_downloaded(&aweme_id).map_err(|e| e.to_string())
-}
-
-// === 音乐收藏 ===
-
-#[tauri::command]
-fn save_music_collection(
-    db: State<'_, Database>,
-    music: NewMusicCollection,
-) -> Result<(), String> {
-    db.save_music_collection(&music).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn save_music_collection_batch(
-    db: State<'_, Database>,
-    musics: Vec<NewMusicCollection>,
-) -> Result<(), String> {
-    db.save_music_collection_batch(&musics).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn get_music_collection(
-    db: State<'_, Database>,
-    limit: i64,
-    offset: i64,
-    keyword: Option<String>,
-    status: Option<String>,
-) -> Result<Vec<MusicCollection>, String> {
-    db.get_music_collection(limit, offset, keyword, status).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn get_music_collection_count(
-    db: State<'_, Database>,
-    keyword: Option<String>,
-    status: Option<String>,
-) -> Result<i64, String> {
-    db.get_music_collection_count(keyword, status).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn update_music_file_path(
-    db: State<'_, Database>,
-    music_id: String,
-    file_path: String,
-) -> Result<(), String> {
-    db.update_music_file_path(&music_id, &file_path).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn delete_download_record(
-    db: State<'_, Database>,
-    id: i64,
-    delete_file: bool,
-) -> Result<(), String> {
-    if delete_file {
-        let file_path = db.get_download_file_path(id).map_err(|e| e.to_string())?;
-        delete_local_path(file_path)?;
-    }
-    db.delete_download(id).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn delete_live_record(
-    db: State<'_, Database>,
-    id: i64,
-    delete_file: bool,
-) -> Result<(), String> {
-    if delete_file {
-        let file_path = db.get_live_record_file_path(id).map_err(|e| e.to_string())?;
-        delete_local_path(file_path)?;
-    }
-    db.delete_live_record(id).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn delete_video_info(
-    db: State<'_, Database>,
-    aweme_id: String,
-) -> Result<(), String> {
-    db.delete_video(&aweme_id).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn delete_user_info(
-    db: State<'_, Database>,
-    sec_user_id: String,
-) -> Result<(), String> {
-    db.delete_user(&sec_user_id).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn delete_music_collection(
-    db: State<'_, Database>,
-    music_id: String,
-    delete_file: bool,
-) -> Result<(), String> {
-    if delete_file {
-        let file_path = db.get_music_file_path(&music_id).map_err(|e| e.to_string())?;
-        delete_local_path(file_path)?;
-    }
-    db.delete_music_collection(&music_id).map_err(|e| e.to_string())
 }
 
 // ============================================================
@@ -474,7 +110,7 @@ pub fn run() {
             let db_path = resolve_db_path(app);
             info!("数据库路径: {:?}", db_path);
 
-            let database = Database::open(&db_path)
+            let database = db::Database::open(&db_path)
                 .expect("Failed to open database");
             app.manage(database);
 
@@ -519,84 +155,105 @@ pub fn run() {
             // 配置
             get_config,
             set_config,
-            // PyO3 直接调用
-            py_parse_video,
-            py_download_video,
-            py_get_live_info,
-            py_start_batch_download,
-            py_get_user_profile,
-            py_get_user_posts,
-            py_search_videos,
-            py_get_mix_info,
-            py_get_collects_list,
-            py_get_collects_video_list,
-            py_get_following_list,
-            py_get_follower_list,
-            py_get_music_collection,
-            py_download_music,
-            py_get_following_live,
-            py_get_comments,
-            py_get_comment_replies,
-            py_get_tab_feed,
-            py_get_follow_feed,
-            py_get_friend_feed,
-            py_get_user_likes,
-            py_get_post_stats,
-            py_start_live_record,
-            py_stop_live_record,
-            py_get_live_status,
-            py_test_emit,
-            // 数据库读取
-            get_downloads,
-            get_download_stats,
-            get_live_records,
-            get_videos,
-            get_video_count,
-            get_users,
-            get_user_count,
-            get_user_by_sec_uid,
-            get_video_stats,
-            get_user_stats,
-            get_music_collection,
-            get_music_collection_count,
-            // 数据库写入
-            save_download_record,
-            save_live_record_record,
-            save_user_info,
-            save_video_info,
-            save_music_collection,
-            save_music_collection_batch,
-            update_music_file_path,
-            delete_download_record,
-            delete_live_record,
-            delete_video_info,
-            delete_user_info,
-            delete_music_collection,
-            is_video_downloaded,
+            // Python 桥接调用（commands/python.rs）
+            commands::python::py_parse_video,
+            commands::python::py_download_video,
+            commands::python::py_get_live_info,
+            commands::python::py_start_batch_download,
+            commands::python::py_get_user_profile,
+            commands::python::py_get_user_posts,
+            commands::python::py_search_videos,
+            commands::python::py_get_mix_info,
+            commands::python::py_get_collects_list,
+            commands::python::py_get_collects_video_list,
+            commands::python::py_get_following_list,
+            commands::python::py_get_follower_list,
+            commands::python::py_get_music_collection,
+            commands::python::py_download_music,
+            commands::python::py_get_following_live,
+            commands::python::py_get_comments,
+            commands::python::py_get_comment_replies,
+            commands::python::py_get_tab_feed,
+            commands::python::py_get_follow_feed,
+            commands::python::py_get_friend_feed,
+            commands::python::py_get_user_likes,
+            commands::python::py_get_post_stats,
+            commands::python::py_start_live_record,
+            commands::python::py_stop_live_record,
+            commands::python::py_get_live_status,
+            commands::python::py_test_emit,
+            // 数据库读取（commands/db.rs）
+            commands::db::get_downloads,
+            commands::db::get_download_stats,
+            commands::db::get_live_records,
+            commands::db::get_videos,
+            commands::db::get_video_count,
+            commands::db::get_users,
+            commands::db::get_user_count,
+            commands::db::get_user_by_sec_uid,
+            commands::db::get_video_stats,
+            commands::db::get_user_stats,
+            commands::db::get_music_collection,
+            commands::db::get_music_collection_count,
+            // 数据库写入/删除（commands/db.rs）
+            commands::db::save_download_record,
+            commands::db::save_live_record_record,
+            commands::db::save_user_info,
+            commands::db::save_video_info,
+            commands::db::save_music_collection,
+            commands::db::save_music_collection_batch,
+            commands::db::update_music_file_path,
+            commands::db::delete_download_record,
+            commands::db::delete_live_record,
+            commands::db::delete_video_info,
+            commands::db::delete_user_info,
+            commands::db::delete_music_collection,
+            commands::db::is_video_downloaded,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
 
 fn resolve_db_path(app: &tauri::App) -> PathBuf {
+    // 生产模式优先使用 app_data_dir，开发模式使用项目相对路径
+    #[cfg(not(debug_assertions))]
+    {
+        if let Ok(data_dir) = app.path().app_data_dir() {
+            let prod_path = data_dir.join("douyin.db");
+            // 如果 AppData 中已有数据库，直接使用
+            if prod_path.exists() {
+                info!("使用 AppData 数据库: {:?}", prod_path);
+                return prod_path;
+            }
+            // 兼容旧版：检查项目相对路径是否有已有数据库
+            let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            let legacy_path = current_dir.parent().unwrap_or(&current_dir).join("data").join("douyin.db");
+            if legacy_path.exists() {
+                info!("迁移旧数据库: {:?} → {:?}", legacy_path, prod_path);
+                let _ = std::fs::create_dir_all(&data_dir);
+                let _ = std::fs::copy(&legacy_path, &prod_path);
+                return prod_path;
+            }
+            // 新建到 AppData
+            let _ = std::fs::create_dir_all(&data_dir);
+            info!("新建 AppData 数据库: {:?}", prod_path);
+            return prod_path;
+        }
+        warn!("获取 AppData 路径失败，回退到项目目录");
+    }
+
+    // 开发模式：使用项目根目录下的 data/
     let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let project_root = current_dir.parent().unwrap_or(&current_dir);
-
-    // 优先使用项目根目录下的 data/ （开发模式和生产模式统一）
-    let project_data = project_root.join("data");
-    let dev_path = project_data.join("douyin.db");
+    let dev_path = project_root.join("data").join("douyin.db");
 
     if dev_path.exists() {
         info!("使用项目数据库: {:?}", dev_path);
         return dev_path;
     }
 
-    // 不存在时创建目录并使用项目路径（不回退到 AppData）
-    if let Err(e) = std::fs::create_dir_all(&project_data) {
-        warn!("创建 data 目录失败: {}, 回退到 AppData", e);
-        if let Ok(data_dir) = app.path().app_data_dir() {
-            return data_dir.join("douyin.db");
-        }
+    if let Err(e) = std::fs::create_dir_all(dev_path.parent().unwrap_or(&project_root.join("data"))) {
+        warn!("创建 data 目录失败: {}", e);
     }
 
     info!("新建项目数据库: {:?}", dev_path);

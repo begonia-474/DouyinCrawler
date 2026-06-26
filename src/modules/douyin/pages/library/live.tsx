@@ -1,36 +1,27 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Header } from "@/components/layout/header";
 import { AnimateEntry } from "@/components/shared/animate-entry";
 import { Bezel } from "@/components/shared/bezel";
+import { Pagination } from "@/components/shared/pagination";
 import { Radio, Loader2, FolderOpen, Clock, Search, Trash2 } from "lucide-react";
-import { deleteLiveRecord, getLiveRecords } from "@/lib/api";
+import { deleteLiveRecord } from "@/lib/api";
+import { queryKeys } from "@/lib/query-keys";
+import { useLiveRecordsQuery } from "@/lib/queries";
+import { usePagination } from "@/hooks/use-pagination";
 import type { LiveRecord } from "@/lib/tauri-types";
 import { formatFileSize, formatTimestamp, formatDuration } from "@/lib/utils";
 
 export default function LibraryLivePage() {
-  const [items, setItems] = useState<LiveRecord[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(0);
+  const queryClient = useQueryClient();
+  const { page, pageSize, setPage, offset } = usePagination();
   const [search, setSearch] = useState("");
-  const pageSize = 20;
-
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await getLiveRecords({ limit: pageSize, offset: page * pageSize });
-      setItems(data);
-    } catch (err) {
-      console.error("加载失败:", err);
-    }
-    setLoading(false);
-  }, [page]);
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  const liveRecordsQuery = useLiveRecordsQuery({ limit: pageSize, offset });
+  const items = liveRecordsQuery.data ?? [];
+  const loading = liveRecordsQuery.isLoading;
 
   const filtered = search
     ? items.filter(
@@ -47,7 +38,7 @@ export default function LibraryLivePage() {
       : false;
     try {
       await deleteLiveRecord(item.id, deleteFile);
-      await loadData();
+      await queryClient.invalidateQueries({ queryKey: queryKeys.liveRecords() });
     } catch (err) {
       window.alert(err instanceof Error ? err.message : "删除失败");
     }
@@ -147,15 +138,7 @@ export default function LibraryLivePage() {
               </AnimateEntry>
             ))}
 
-            <div className="flex justify-between items-center pt-4">
-              <Button variant="capsule" size="sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
-                上一页
-              </Button>
-              <span className="text-sm text-muted-foreground">第 {page + 1} 页</span>
-              <Button variant="capsule" size="sm" disabled={items.length < pageSize} onClick={() => setPage((p) => p + 1)}>
-                下一页
-              </Button>
-            </div>
+            <Pagination page={page} totalPages={items.length < pageSize ? page + 1 : page + 2} onPageChange={setPage} />
           </div>
         )}
       </div>

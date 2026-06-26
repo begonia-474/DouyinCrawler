@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { listen } from "@tauri-apps/api/event";
+import { queryClient } from "@/lib/query-client";
 
 export interface LiveTask {
   task_id: string;
@@ -70,6 +71,10 @@ export const useLiveStore = create<LiveState>((set) => ({
         tasks: { ...state.tasks, [msg.data.task_id]: msg.data },
         connected: true,
       }));
+
+      if (msg.data.status === "completed" || msg.data.status === "error") {
+        void queryClient.invalidateQueries({ queryKey: ["live-records"] });
+      }
     }).then((fn) => {
       unlisten = fn;
     });

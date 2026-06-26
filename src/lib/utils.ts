@@ -26,3 +26,21 @@ export function formatDuration(seconds: number): string {
   const m = Math.floor((seconds % 3600) / 60);
   return `${h}时${m}分`;
 }
+
+/** 格式化时长为 MM:SS（输入单位：秒） */
+export function formatDurationSec(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+}
+
+/** 格式化时长为 MM:SS（输入单位：毫秒） */
+export function formatDurationMs(ms: number): string {
+  return formatDurationSec(Math.floor(ms / 1000));
+}
+
+/** 格式化数字：>=1万显示为 X.Xw，否则用千分位 */
+export function formatCount(n: number): string {
+  if (n >= 10000) return `${(n / 10000).toFixed(1)}w`;
+  return n.toLocaleString();
+}

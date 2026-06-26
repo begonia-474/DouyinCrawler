@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { listen } from "@tauri-apps/api/event";
+import { queryClient } from "@/lib/query-client";
 
 export interface BatchTask {
   task_id: string;
@@ -63,39 +64,32 @@ export const useBatchStore = create<BatchState>((set) => ({
     }),
 
   connect: () => {
-    if (unlisten) {
-      console.log("[BatchStore] 已经连接，跳过重复注册");
-      return;
-    }
+    if (unlisten) return;
 
-    console.log("[BatchStore] 开始监听 task-update 事件");
     listen("task-update", async (event) => {
-      console.log("[BatchStore] 收到原始事件:", event.payload);
       const msg = event.payload as {
         task_id: string;
         task_type: string;
         data: BatchTask;
       };
-      if (msg.task_type !== "batch") {
-        console.log("[BatchStore] 忽略非 batch 类型事件:", msg.task_type);
-        return;
-      }
+      if (msg.task_type !== "batch") return;
 
       const task = msg.data;
-      console.log("[BatchStore] 收到任务更新:", task.task_id, "status:", task.status, "full data:", task);
       set((state) => ({
         tasks: { ...state.tasks, [task.task_id]: task },
         connected: true,
       }));
 
-      // 任务完成时通知页面刷新数据（数据库已由 Python 直接写入）
+      // 任务完成时刷新数据库查询缓存（数据库已由 Python 直接写入）
       if (task.status === "completed" || task.status === "error") {
-        console.log("[BatchStore] 任务完成，通知页面刷新");
-        window.dispatchEvent(new CustomEvent("download-records-updated"));
+        void queryClient.invalidateQueries({ queryKey: ["downloads"] });
+        void queryClient.invalidateQueries({ queryKey: ["download-stats"] });
+        void queryClient.invalidateQueries({ queryKey: ["video-count"] });
+        void queryClient.invalidateQueries({ queryKey: ["video-stats"] });
+        void queryClient.invalidateQueries({ queryKey: ["user-stats"] });
       }
     }).then((fn) => {
       unlisten = fn;
-      console.log("[BatchStore] 事件监听已注册");
     });
   },
 

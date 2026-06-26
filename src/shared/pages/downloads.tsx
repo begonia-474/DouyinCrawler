@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
+import { useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Header } from "@/components/layout/header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -19,7 +20,9 @@ import {
   XCircle,
   Disc,
 } from "lucide-react";
-import { deleteDownloadRecord, deleteLiveRecord, getDownloads, getLiveRecords } from "@/lib/api";
+import { deleteDownloadRecord, deleteLiveRecord } from "@/lib/api";
+import { queryKeys } from "@/lib/query-keys";
+import { useDownloadsQuery, useLiveRecordsQuery } from "@/lib/queries";
 import { useBatchStore } from "@/stores/batch-store";
 import { useLiveStore } from "@/stores/live-store";
 import type { DownloadRecord, LiveRecord } from "@/lib/tauri-types";
@@ -33,36 +36,18 @@ const typeIcons: Record<string, typeof Video> = {
 };
 
 export default function DownloadsPage() {
-  const [downloads, setDownloads] = useState<DownloadRecord[]>([]);
-  const [liveRecords, setLiveRecords] = useState<LiveRecord[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const downloadsQuery = useDownloadsQuery({ limit: 50, status: "completed" });
+  const liveRecordsQuery = useLiveRecordsQuery({ limit: 50 });
+  const downloads = downloadsQuery.data ?? [];
+  const liveRecords = liveRecordsQuery.data ?? [];
+  const loading = downloadsQuery.isLoading || liveRecordsQuery.isLoading;
   const { tasks: batchTasks, connect: connectBatch, clearCompleted, removeTask: removeBatchTask } = useBatchStore();
   const { tasks: liveTasks, removeTask: removeLiveTask } = useLiveStore();
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [dl, lr] = await Promise.all([
-        getDownloads({ limit: 50, status: "completed" }),
-        getLiveRecords({ limit: 50 }),
-      ]);
-      setDownloads(dl);
-      setLiveRecords(lr);
-    } catch (err) {
-      console.error("[Downloads] 加载下载记录失败:", err);
-    }
-    setLoading(false);
-  }, []);
-
   useEffect(() => {
-    loadData();
     connectBatch();
-
-    // 监听下载记录更新事件
-    const handleUpdate = () => loadData();
-    window.addEventListener("download-records-updated", handleUpdate);
-    return () => window.removeEventListener("download-records-updated", handleUpdate);
-  }, [loadData, connectBatch]);
+  }, [connectBatch]);
 
   const askDeleteFile = (filePath: string | null) => {
     if (!filePath) return false;
@@ -73,7 +58,10 @@ export default function DownloadsPage() {
     if (!window.confirm("确定删除这条下载记录？")) return;
     try {
       await deleteDownloadRecord(item.id, askDeleteFile(item.file_path));
-      await loadData();
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.downloads() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.downloadStats() }),
+      ]);
     } catch (err) {
       window.alert(err instanceof Error ? err.message : "删除失败");
     }
@@ -83,7 +71,7 @@ export default function DownloadsPage() {
     if (!window.confirm("确定删除这条直播录制记录？")) return;
     try {
       await deleteLiveRecord(item.id, askDeleteFile(item.file_path));
-      await loadData();
+      await queryClient.invalidateQueries({ queryKey: queryKeys.liveRecords() });
     } catch (err) {
       window.alert(err instanceof Error ? err.message : "删除失败");
     }

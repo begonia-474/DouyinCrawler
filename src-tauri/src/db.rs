@@ -4,6 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
+use log::{info, debug};
 
 // === Upsert 列类型 ===
 
@@ -105,6 +106,29 @@ const CREATE_TABLES_SQL: &str = "
     CREATE INDEX IF NOT EXISTS idx_live_started ON live_records(started_at);
     CREATE INDEX IF NOT EXISTS idx_music_created ON music_collection(created_at);
 ";
+
+// === 显式列名（与 row_to_video / row_to_user mapper 的位置索引一一对应）===
+// 顺序 = 基表列 + 迁移追加列，mapper 按 index 读取，不可调换
+const VIDEO_COLUMNS: &str = "aweme_id, desc, aweme_type, \
+    author_nickname, author_sec_uid, author_uid, create_time, duration, \
+    video_url, cover_url, music_title, digg_count, comment_count, share_count, \
+    collect_count, mix_id, mix_name, updated_at, \
+    author_nickname_raw, author_short_id, author_unique_id, desc_raw, \
+    is_ads, is_story, is_top, is_long_video, video_bit_rate, animated_cover, \
+    private_status, is_delete, music_author, music_author_raw, music_duration, \
+    music_id, music_mid, pgc_author, pgc_author_title, pgc_music_type, \
+    music_status, music_owner_handle, music_owner_id, music_owner_nickname, \
+    music_play_url, is_commerce_music, mix_desc, mix_create_time, mix_pic_type, \
+    mix_type, mix_share_url, can_comment, can_forward, can_share, download_setting, \
+    allow_douplus, allow_share, admire_count, hashtag_ids, hashtag_names, images, \
+    region, is_prohibited";
+
+const USER_COLUMNS: &str = "sec_user_id, nickname, uid, avatar_url, unique_id, \
+    signature, aweme_count, follower_count, following_count, total_favorited, \
+    ip_location, live_status, room_id, updated_at, \
+    city, country, favoriting_count, gender, is_ban, is_block, is_blocked, \
+    is_star, mix_count, mplatform_followers_count, nickname_raw, school_name, \
+    short_id, signature_raw, user_age, custom_verify";
 
 // === Schema 迁移 ===
 
@@ -277,16 +301,27 @@ pub struct NewLiveRecord {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct UserInfo {
+    #[serde(alias = "author_sec_uid")]
     pub sec_user_id: String,
+    #[serde(alias = "author_nickname")]
     pub nickname: Option<String>,
+    #[serde(alias = "author_uid")]
     pub uid: Option<String>,
+    #[serde(alias = "author_avatar_url")]
     pub avatar_url: Option<String>,
+    #[serde(alias = "author_unique_id")]
     pub unique_id: Option<String>,
+    #[serde(alias = "author_signature")]
     pub signature: Option<String>,
+    #[serde(alias = "author_aweme_count", default)]
     pub aweme_count: i64,
+    #[serde(alias = "author_follower_count", default)]
     pub follower_count: i64,
+    #[serde(alias = "author_following_count", default)]
     pub following_count: i64,
+    #[serde(alias = "author_total_favorited", default)]
     pub total_favorited: i64,
+    #[serde(alias = "author_ip_location")]
     pub ip_location: Option<String>,
     #[serde(default)] pub live_status: i32,
     pub room_id: Option<String>,
@@ -314,18 +349,24 @@ pub struct UserInfo {
 pub struct VideoInfo {
     pub aweme_id: String,
     pub desc: Option<String>,
+    #[serde(default)]
     pub aweme_type: i32,
     pub author_nickname: Option<String>,
     pub author_sec_uid: Option<String>,
     pub author_uid: Option<String>,
     pub create_time: Option<i64>,
+    #[serde(default)]
     pub duration: i32,
     pub video_url: Option<String>,
     pub cover_url: Option<String>,
     pub music_title: Option<String>,
+    #[serde(default)]
     pub digg_count: i64,
+    #[serde(default)]
     pub comment_count: i64,
+    #[serde(default)]
     pub share_count: i64,
+    #[serde(default)]
     pub collect_count: i64,
     pub mix_id: Option<String>,
     pub mix_name: Option<String>,
@@ -432,6 +473,15 @@ pub struct NewMusicCollection {
     pub play_url: Option<String>,
 }
 
+/// Mutex poisoning 时返回错误而非 panic
+macro_rules! lock_conn {
+    ($self:expr) => {
+        $self.conn.lock().map_err(|_| {
+            rusqlite::Error::InvalidParameterName("数据库连接锁已中毒".to_string())
+        })?
+    };
+}
+
 impl Database {
     pub fn open(path: &PathBuf) -> Result<Self> {
         // 确保父目录存在（失败时 Connection::open 也会失败，无需包装错误）
@@ -453,7 +503,7 @@ impl Database {
             [],
             |row| row.get(0),
         ).unwrap_or(0);
-        println!("[DB] 数据库打开成功，download_history 表有 {} 条记录", count);
+        info!("[DB] 数据库打开成功，download_history 表有 {} 条记录", count);
         Ok(Database {
             conn: Mutex::new(conn),
         })
@@ -466,10 +516,7 @@ impl Database {
         status: Option<String>,
         download_type: Option<String>,
     ) -> Result<Vec<DownloadRecord>> {
-        let conn = self.conn.lock().unwrap();
-
-        // 每次查询前执行 WAL checkpoint，确保读取到最新数据
-        conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);")?;
+        let conn = lock_conn!(self);
 
         let mut sql = String::from(
             "SELECT id, aweme_id, download_type, title, author_nickname, author_sec_uid, \
@@ -498,22 +545,21 @@ impl Database {
 
         let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
 
-        println!("[DB] get_downloads SQL: {}", sql);
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(param_refs.as_slice(), |row| {
             Ok(DownloadRecord {
-                id: row.get(0)?,
-                aweme_id: row.get(1)?,
-                download_type: row.get(2)?,
-                title: row.get(3)?,
-                author_nickname: row.get(4)?,
-                author_sec_uid: row.get(5)?,
-                file_path: row.get(6)?,
-                file_size: row.get(7)?,
-                cover_url: row.get(8)?,
-                status: row.get(9)?,
-                error_msg: row.get(10)?,
-                created_at: row.get(11)?,
+                id: row.get("id")?,
+                aweme_id: row.get("aweme_id")?,
+                download_type: row.get("download_type")?,
+                title: row.get("title")?,
+                author_nickname: row.get("author_nickname")?,
+                author_sec_uid: row.get("author_sec_uid")?,
+                file_path: row.get("file_path")?,
+                file_size: row.get("file_size")?,
+                cover_url: row.get("cover_url")?,
+                status: row.get("status")?,
+                error_msg: row.get("error_msg")?,
+                created_at: row.get("created_at")?,
             })
         })?;
 
@@ -521,12 +567,12 @@ impl Database {
         for row in rows {
             records.push(row?);
         }
-        println!("[DB] get_downloads 返回 {} 条记录", records.len());
+        debug!("[DB] get_downloads 返回 {} 条记录", records.len());
         Ok(records)
     }
 
     pub fn get_download_stats(&self) -> Result<DownloadStats> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self);
 
         // 总计
         let (total_count, total_size): (i64, i64) = conn.query_row(
@@ -581,7 +627,7 @@ impl Database {
         limit: i64,
         offset: i64,
     ) -> Result<Vec<LiveRecord>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self);
         let mut stmt = conn.prepare(
             "SELECT id, room_id, web_rid, title, nickname, sec_user_id, \
              file_path, file_size, duration_sec, status, started_at, ended_at, cover_url \
@@ -590,19 +636,19 @@ impl Database {
 
         let rows = stmt.query_map(rusqlite::params![limit, offset], |row| {
             Ok(LiveRecord {
-                id: row.get(0)?,
-                room_id: row.get(1)?,
-                web_rid: row.get(2)?,
-                title: row.get(3)?,
-                nickname: row.get(4)?,
-                sec_user_id: row.get(5)?,
-                file_path: row.get(6)?,
-                file_size: row.get(7)?,
-                duration_sec: row.get(8)?,
-                status: row.get(9)?,
-                started_at: row.get(10)?,
-                ended_at: row.get(11)?,
-                cover_url: row.get(12)?,
+                id: row.get("id")?,
+                room_id: row.get("room_id")?,
+                web_rid: row.get("web_rid")?,
+                title: row.get("title")?,
+                nickname: row.get("nickname")?,
+                sec_user_id: row.get("sec_user_id")?,
+                file_path: row.get("file_path")?,
+                file_size: row.get("file_size")?,
+                duration_sec: row.get("duration_sec")?,
+                status: row.get("status")?,
+                started_at: row.get("started_at")?,
+                ended_at: row.get("ended_at")?,
+                cover_url: row.get("cover_url")?,
             })
         })?;
 
@@ -785,14 +831,13 @@ impl Database {
         sort_order: Option<String>,
         post_type: Option<String>,
     ) -> Result<Vec<VideoInfo>> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);")?;
+        let conn = lock_conn!(self);
 
         let allowed_sorts = ["create_time", "digg_count", "comment_count", "share_count", "collect_count", "updated_at"];
         let sort_col = Self::validate_sort_field(&allowed_sorts, &sort_by, "updated_at");
         let sort_dir = Self::validate_sort_order(&sort_order);
 
-        let mut sql = String::from("SELECT * FROM video_info");
+        let mut sql = format!("SELECT {} FROM video_info", VIDEO_COLUMNS);
         let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
         let mut conditions = Vec::new();
 
@@ -842,7 +887,7 @@ impl Database {
         author_sec_uid: Option<String>,
         post_type: Option<String>,
     ) -> Result<i64> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self);
         let mut sql = String::from("SELECT COUNT(*) FROM video_info");
         let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
         let mut conditions = Vec::new();
@@ -887,14 +932,13 @@ impl Database {
         sort_by: Option<String>,
         sort_order: Option<String>,
     ) -> Result<Vec<UserInfo>> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);")?;
+        let conn = lock_conn!(self);
 
         let allowed_sorts = ["follower_count", "aweme_count", "following_count", "total_favorited", "updated_at"];
         let sort_col = Self::validate_sort_field(&allowed_sorts, &sort_by, "updated_at");
         let sort_dir = Self::validate_sort_order(&sort_order);
 
-        let mut sql = String::from("SELECT * FROM user_info");
+        let mut sql = format!("SELECT {} FROM user_info", USER_COLUMNS);
         let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
         let mut conditions = Vec::new();
 
@@ -916,7 +960,7 @@ impl Database {
         params.push(Box::new(limit));
         params.push(Box::new(offset));
 
-        println!("[DB] get_users SQL: {}", sql);
+        debug!("[DB] get_users SQL: {}", sql);
         let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(param_refs.as_slice(), Self::row_to_user)?;
@@ -924,12 +968,12 @@ impl Database {
         for row in rows {
             records.push(row?);
         }
-        println!("[DB] get_users 返回 {} 条记录", records.len());
+        debug!("[DB] get_users 返回 {} 条记录", records.len());
         Ok(records)
     }
 
     pub fn get_user_count(&self, keyword: Option<String>) -> Result<i64> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self);
         let mut sql = String::from("SELECT COUNT(*) FROM user_info");
         let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
@@ -949,8 +993,8 @@ impl Database {
     }
 
     pub fn get_user_by_sec_uid(&self, sec_user_id: &str) -> Result<Option<UserInfo>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT * FROM user_info WHERE sec_user_id = ?1")?;
+        let conn = lock_conn!(self);
+        let mut stmt = conn.prepare(&format!("SELECT {} FROM user_info WHERE sec_user_id = ?1", USER_COLUMNS))?;
         let mut rows = stmt.query_map(rusqlite::params![sec_user_id], Self::row_to_user)?;
         match rows.next() {
             Some(row) => Ok(Some(row?)),
@@ -968,7 +1012,7 @@ impl Database {
     }
 
     pub fn get_video_stats(&self) -> Result<VideoStats> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self);
         let (total_count, total_digg, total_comment, total_share, total_collect) = conn.query_row(
             "SELECT COALESCE(COUNT(*),0), COALESCE(SUM(digg_count),0), COALESCE(SUM(comment_count),0), \
              COALESCE(SUM(share_count),0), COALESCE(SUM(collect_count),0) FROM video_info",
@@ -993,13 +1037,39 @@ impl Database {
     }
 
     pub fn get_user_stats(&self) -> Result<UserStats> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self);
         let (total_count, total_follower, total_aweme) = conn.query_row(
             "SELECT COALESCE(COUNT(*),0), COALESCE(SUM(follower_count),0), COALESCE(SUM(aweme_count),0) FROM user_info",
             [],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )?;
         Ok(UserStats { total_count, total_follower, total_aweme })
+    }
+
+    /// 执行迁移 SQL，只忽略 duplicate column/index 错误，其他错误必须传播。
+    ///
+    /// 设计意图：旧代码用 `let _ = conn.execute(sql, [])` 吞掉所有错误，
+    /// 会掩盖磁盘空间不足、数据库锁冲突等真实问题。
+    /// 此函数精确匹配 "duplicate column" / "already exists" 模式来幂等执行迁移，
+    /// 其他错误向上传播，由调用方决定是否 fatal。
+    fn run_migration_sql(conn: &Connection, sqls: &[&str]) -> Result<()> {
+        for sql in sqls {
+            match conn.execute(sql, []) {
+                Ok(_) => {}
+                Err(e) => {
+                    let msg = e.to_string();
+                    if msg.contains("duplicate column")
+                        || msg.contains("already exists")
+                        || msg.contains("SQLITE_ERROR") && msg.contains("duplicate")
+                    {
+                        // duplicate column/index — 可忽略
+                    } else {
+                        return Err(e);
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     fn migrate(conn: &Connection) -> Result<()> {
@@ -1012,34 +1082,24 @@ impl Database {
             .unwrap_or(0);
 
         if version < 1 {
-            println!("[DB] 迁移 v1: 扩展 user_info 表");
-            for sql in MIGRATE_V1_USER_INFO {
-                let _ = conn.execute(sql, []); // 忽略 "duplicate column" 错误
-            }
+            info!("[DB] 迁移 v1: 扩展 user_info 表");
+            Self::run_migration_sql(conn, MIGRATE_V1_USER_INFO)?;
         }
         if version < 2 {
-            println!("[DB] 迁移 v2: 扩展 video_info 表");
-            for sql in MIGRATE_V2_VIDEO_INFO {
-                let _ = conn.execute(sql, []);
-            }
+            info!("[DB] 迁移 v2: 扩展 video_info 表");
+            Self::run_migration_sql(conn, MIGRATE_V2_VIDEO_INFO)?;
         }
         if version < 3 {
-            println!("[DB] 迁移 v3: 添加索引");
-            for sql in MIGRATE_V3_INDEXES {
-                let _ = conn.execute(sql, []);
-            }
+            info!("[DB] 迁移 v3: 添加索引");
+            Self::run_migration_sql(conn, MIGRATE_V3_INDEXES)?;
         }
         if version < 4 {
-            println!("[DB] 迁移 v4: live_records 添加 cover_url");
-            for sql in MIGRATE_V4_LIVE_COVER {
-                let _ = conn.execute(sql, []);
-            }
+            info!("[DB] 迁移 v4: live_records 添加 cover_url");
+            Self::run_migration_sql(conn, MIGRATE_V4_LIVE_COVER)?;
         }
         if version < 5 {
-            println!("[DB] 迁移 v5: download_history 添加唯一索引");
-            for sql in MIGRATE_V5_DOWNLOAD_UNIQUE {
-                let _ = conn.execute(sql, []);
-            }
+            info!("[DB] 迁移 v5: download_history 添加唯一索引");
+            Self::run_migration_sql(conn, MIGRATE_V5_DOWNLOAD_UNIQUE)?;
         }
 
         let now = SystemTime::now()
@@ -1060,12 +1120,12 @@ impl Database {
     // === 写入方法 ===
 
     pub fn save_download(&self, record: &NewDownloadRecord) -> Result<i64> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self);
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
-        println!("[DB] save_download: aweme_id={:?}, file_path={:?}", record.aweme_id, record.file_path);
+        debug!("[DB] save_download: aweme_id={:?}, file_path={:?}", record.aweme_id, record.file_path);
 
         // 使用 INSERT OR IGNORE 避免重复记录（基于 aweme_id + file_path）
         conn.execute(
@@ -1088,12 +1148,12 @@ impl Database {
             ],
         )?;
         let id = conn.last_insert_rowid();
-        println!("[DB] save_download 成功, id={}", id);
+        debug!("[DB] save_download 成功, id={}", id);
         Ok(id)
     }
 
     pub fn get_download_file_path(&self, id: i64) -> Result<Option<String>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self);
         let mut stmt = conn.prepare("SELECT file_path FROM download_history WHERE id = ?1")?;
         let mut rows = stmt.query_map(rusqlite::params![id], |row| row.get(0))?;
         match rows.next() {
@@ -1103,13 +1163,13 @@ impl Database {
     }
 
     pub fn delete_download(&self, id: i64) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self);
         conn.execute("DELETE FROM download_history WHERE id = ?1", rusqlite::params![id])?;
         Ok(())
     }
 
     pub fn save_live_record(&self, record: &NewLiveRecord) -> Result<i64> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self);
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -1138,7 +1198,7 @@ impl Database {
     }
 
     pub fn get_live_record_file_path(&self, id: i64) -> Result<Option<String>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self);
         let mut stmt = conn.prepare("SELECT file_path FROM live_records WHERE id = ?1")?;
         let mut rows = stmt.query_map(rusqlite::params![id], |row| row.get(0))?;
         match rows.next() {
@@ -1148,13 +1208,13 @@ impl Database {
     }
 
     pub fn delete_live_record(&self, id: i64) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self);
         conn.execute("DELETE FROM live_records WHERE id = ?1", rusqlite::params![id])?;
         Ok(())
     }
 
     pub fn save_user(&self, user: &UserInfo) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self);
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -1193,13 +1253,13 @@ impl Database {
     }
 
     pub fn delete_user(&self, sec_user_id: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self);
         conn.execute("DELETE FROM user_info WHERE sec_user_id = ?1", rusqlite::params![sec_user_id])?;
         Ok(())
     }
 
     pub fn save_video(&self, video: &VideoInfo) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self);
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -1259,13 +1319,13 @@ impl Database {
     }
 
     pub fn delete_video(&self, aweme_id: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self);
         conn.execute("DELETE FROM video_info WHERE aweme_id = ?1", rusqlite::params![aweme_id])?;
         Ok(())
     }
 
     pub fn is_video_downloaded(&self, aweme_id: &str) -> Result<bool> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self);
         let count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM download_history WHERE aweme_id = ?1 AND status = 'completed'",
             rusqlite::params![aweme_id],
@@ -1277,7 +1337,7 @@ impl Database {
     // === 音乐收藏 ===
 
     pub fn save_music_collection(&self, music: &NewMusicCollection) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self);
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -1303,7 +1363,7 @@ impl Database {
     }
 
     pub fn save_music_collection_batch(&self, musics: &[NewMusicCollection]) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self);
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -1338,8 +1398,7 @@ impl Database {
         keyword: Option<String>,
         status: Option<String>,
     ) -> Result<Vec<MusicCollection>> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);")?;
+        let conn = lock_conn!(self);
 
         let mut sql = String::from(
             "SELECT music_id, mid, title, author, owner_nickname, duration, cover, play_url, file_path, status, created_at \
@@ -1377,17 +1436,17 @@ impl Database {
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(param_refs.as_slice(), |row| {
             Ok(MusicCollection {
-                music_id: row.get(0)?,
-                mid: row.get(1)?,
-                title: row.get(2)?,
-                author: row.get(3)?,
-                owner_nickname: row.get(4)?,
-                duration: row.get(5)?,
-                cover: row.get(6)?,
-                play_url: row.get(7)?,
-                file_path: row.get(8)?,
-                status: row.get(9)?,
-                created_at: row.get(10)?,
+                music_id: row.get("music_id")?,
+                mid: row.get("mid")?,
+                title: row.get("title")?,
+                author: row.get("author")?,
+                owner_nickname: row.get("owner_nickname")?,
+                duration: row.get("duration")?,
+                cover: row.get("cover")?,
+                play_url: row.get("play_url")?,
+                file_path: row.get("file_path")?,
+                status: row.get("status")?,
+                created_at: row.get("created_at")?,
             })
         })?;
 
@@ -1399,7 +1458,7 @@ impl Database {
     }
 
     pub fn get_music_collection_count(&self, keyword: Option<String>, status: Option<String>) -> Result<i64> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self);
         let mut sql = String::from("SELECT COUNT(*) FROM music_collection");
         let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
         let mut conditions = Vec::new();
@@ -1432,7 +1491,7 @@ impl Database {
     }
 
     pub fn update_music_file_path(&self, music_id: &str, file_path: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self);
         conn.execute(
             "UPDATE music_collection SET file_path = ?1, status = 'downloaded' WHERE music_id = ?2",
             rusqlite::params![file_path, music_id],
@@ -1441,7 +1500,7 @@ impl Database {
     }
 
     pub fn get_music_file_path(&self, music_id: &str) -> Result<Option<String>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self);
         let mut stmt = conn.prepare("SELECT file_path FROM music_collection WHERE music_id = ?1")?;
         let mut rows = stmt.query_map(rusqlite::params![music_id], |row| row.get(0))?;
         match rows.next() {
@@ -1451,7 +1510,7 @@ impl Database {
     }
 
     pub fn delete_music_collection(&self, music_id: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self);
         conn.execute("DELETE FROM music_collection WHERE music_id = ?1", rusqlite::params![music_id])?;
         Ok(())
     }

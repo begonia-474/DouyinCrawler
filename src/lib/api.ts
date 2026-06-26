@@ -10,9 +10,16 @@ import type { DownloadRecord, DownloadStats, LiveRecord, VideoInfo, UserInfo, Vi
 // 辅助：包装后端返回值到 ApiResponse.data
 // ============================================================
 
-function wrap<T = unknown>(raw: any): ApiResponse<T> {
+/** 后端（Python/Rust）返回的原始响应结构 */
+interface BackendResponse {
+  success: boolean;
+  data?: unknown;
+  error?: string;
+  [key: string]: unknown;
+}
+
+function wrap<T = unknown>(raw: BackendResponse): ApiResponse<T> {
   if (raw && typeof raw === "object" && "success" in raw) {
-    // 如果 Python 返回了 {success, data}，提取 data；否则整个 raw 作为 data
     const hasDataKey = "data" in raw;
     return {
       success: raw.success,
@@ -83,14 +90,17 @@ export async function downloadOne(url: string): Promise<ApiResponse<DownloadResu
   }
 }
 
-export async function downloadUserPosts(url: string): Promise<ApiResponse> {
+/** 通用批量下载入口，返回 task_id 供页面订阅进度 */
+export async function startBatchDownload(download_type: string, url: string): Promise<ApiResponse & { task_id?: string }> {
   try {
-    const raw = await invoke<any>("py_start_batch_download", { url, downloadType: "user_post" });
-    if (raw?.success && raw.task_id) {
+    const raw = await invoke<BackendResponse>("py_start_batch_download", { url, download_type });
+    let taskId: string | undefined;
+    if (raw?.success && raw.task_id != null) {
+      taskId = String(raw.task_id);
       const { useBatchStore } = await import("@/stores/batch-store");
       useBatchStore.getState().addTask({
-        task_id: raw.task_id,
-        type: "user_post",
+        task_id: taskId,
+        type: download_type,
         url,
         status: "starting",
         total: 0,
@@ -100,80 +110,16 @@ export async function downloadUserPosts(url: string): Promise<ApiResponse> {
         error: "",
       });
     }
-    return wrap(raw);
+    return { ...wrap(raw), task_id: taskId };
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "调用失败" };
   }
 }
 
-export async function downloadUserLikes(url: string): Promise<ApiResponse> {
-  try {
-    const raw = await invoke<any>("py_start_batch_download", { url, downloadType: "user_like" });
-    if (raw?.success && raw.task_id) {
-      const { useBatchStore } = await import("@/stores/batch-store");
-      useBatchStore.getState().addTask({
-        task_id: raw.task_id,
-        type: "user_like",
-        url,
-        status: "starting",
-        total: 0,
-        completed: 0,
-        failed: 0,
-        current_item: "",
-        error: "",
-      });
-    }
-    return wrap(raw);
-  } catch (e) {
-    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
-  }
-}
-
-export async function downloadMix(url: string): Promise<ApiResponse> {
-  try {
-    const raw = await invoke<any>("py_start_batch_download", { url, downloadType: "mix" });
-    if (raw?.success && raw.task_id) {
-      const { useBatchStore } = await import("@/stores/batch-store");
-      useBatchStore.getState().addTask({
-        task_id: raw.task_id,
-        type: "mix",
-        url,
-        status: "starting",
-        total: 0,
-        completed: 0,
-        failed: 0,
-        current_item: "",
-        error: "",
-      });
-    }
-    return wrap(raw);
-  } catch (e) {
-    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
-  }
-}
-
-export async function downloadCollectsVideo(collectsId: string): Promise<ApiResponse> {
-  try {
-    const raw = await invoke<any>("py_start_batch_download", { url: collectsId, downloadType: "collects" });
-    if (raw?.success && raw.task_id) {
-      const { useBatchStore } = await import("@/stores/batch-store");
-      useBatchStore.getState().addTask({
-        task_id: raw.task_id,
-        type: "collects",
-        url: collectsId,
-        status: "starting",
-        total: 0,
-        completed: 0,
-        failed: 0,
-        current_item: "",
-        error: "",
-      });
-    }
-    return wrap(raw);
-  } catch (e) {
-    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
-  }
-}
+export const downloadUserPosts = (url: string) => startBatchDownload("user_post", url);
+export const downloadUserLikes = (url: string) => startBatchDownload("user_like", url);
+export const downloadMix = (url: string) => startBatchDownload("mix", url);
+export const downloadCollectsVideo = (collectsId: string) => startBatchDownload("collects", collectsId);
 
 // ============================================================
 // 评论
@@ -189,7 +135,7 @@ export async function getComments(url: string, cursor = 0, count = 20): Promise<
 
 export async function getCommentReplies(url: string, commentId: string, cursor = 0, count = 3): Promise<ApiResponse<{ comments: CommentItem[]; has_more: boolean; cursor: number }>> {
   try {
-    return wrap(await invoke("py_get_comment_replies", { url, commentId, cursor, count }));
+    return wrap(await invoke("py_get_comment_replies", { url, comment_id: commentId, cursor, count }));
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "调用失败" };
   }
@@ -249,7 +195,7 @@ export async function getMusicCollection(cursor = 0, count = 18): Promise<ApiRes
 
 export async function downloadMusic(play_url: string, title: string, author = ""): Promise<ApiResponse<{ path: string }>> {
   try {
-    return wrap(await invoke("py_download_music", { playUrl: play_url, title, author }));
+    return wrap(await invoke("py_download_music", { play_url, title, author }));
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "调用失败" };
   }
@@ -293,7 +239,7 @@ export async function getUserCollects(): Promise<ApiResponse<PostDetailResponse>
 
 export async function getCollectsVideoList(collectsId: string, cursor: number = 0, count: number = 20): Promise<ApiResponse<PostDetailResponse>> {
   try {
-    return wrap(await invoke("py_get_collects_video_list", { collectsId, cursor, count }));
+    return wrap(await invoke("py_get_collects_video_list", { collects_id: collectsId, cursor, count }));
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "调用失败" };
   }
@@ -353,7 +299,7 @@ export async function startLiveRecord(url: string): Promise<ApiResponse<{ task_i
 
 export async function stopLiveRecord(taskId: string): Promise<ApiResponse<{ task_id: string }>> {
   try {
-    return wrap(await invoke("py_stop_live_record", { taskId }));
+    return wrap(await invoke("py_stop_live_record", { task_id: taskId }));
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "调用失败" };
   }
@@ -443,10 +389,10 @@ export async function getVideos(params: {
     limit: params.limit ?? 20,
     offset: params.offset ?? 0,
     keyword: params.keyword ?? null,
-    authorSecUid: params.author_sec_uid ?? null,
-    sortBy: params.sort_by ?? null,
-    sortOrder: params.sort_order ?? null,
-    postType: params.post_type ?? null,
+    author_sec_uid: params.author_sec_uid ?? null,
+    sort_by: params.sort_by ?? null,
+    sort_order: params.sort_order ?? null,
+    post_type: params.post_type ?? null,
   });
 }
 
@@ -458,7 +404,7 @@ export async function getVideoCount(params?: {
   return invoke("get_video_count", {
     keyword: params?.keyword ?? null,
     author_sec_uid: params?.author_sec_uid ?? null,
-    postType: params?.post_type ?? null,
+    post_type: params?.post_type ?? null,
   });
 }
 
@@ -499,7 +445,7 @@ export async function getUserStats(): Promise<UserStats> {
 }
 
 export async function isVideoDownloaded(awemeId: string): Promise<boolean> {
-  return invoke("is_video_downloaded", { awemeId });
+  return invoke("is_video_downloaded", { aweme_id: awemeId });
 }
 
 // === 音乐收藏 ===
@@ -556,27 +502,27 @@ export async function saveMusicCollectionBatch(musics: NewMusicCollectionItem[])
 }
 
 export async function updateMusicFilePath(musicId: string, filePath: string): Promise<void> {
-  return invoke("update_music_file_path", { musicId, filePath });
+  return invoke("update_music_file_path", { music_id: musicId, file_path: filePath });
 }
 
 export async function deleteDownloadRecord(id: number, deleteFile = false): Promise<void> {
-  return invoke("delete_download_record", { id, deleteFile });
+  return invoke("delete_download_record", { id, delete_file: deleteFile });
 }
 
 export async function deleteLiveRecord(id: number, deleteFile = false): Promise<void> {
-  return invoke("delete_live_record", { id, deleteFile });
+  return invoke("delete_live_record", { id, delete_file: deleteFile });
 }
 
 export async function deleteVideoInfo(awemeId: string): Promise<void> {
-  return invoke("delete_video_info", { awemeId });
+  return invoke("delete_video_info", { aweme_id: awemeId });
 }
 
 export async function deleteUserInfo(secUserId: string): Promise<void> {
-  return invoke("delete_user_info", { secUserId });
+  return invoke("delete_user_info", { sec_user_id: secUserId });
 }
 
 export async function deleteMusicCollection(musicId: string, deleteFile = false): Promise<void> {
-  return invoke("delete_music_collection", { musicId, deleteFile });
+  return invoke("delete_music_collection", { music_id: musicId, delete_file: deleteFile });
 }
 
 // ============================================================

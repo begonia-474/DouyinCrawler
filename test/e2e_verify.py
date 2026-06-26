@@ -9,10 +9,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # 加载 cookie
-CONFIG_PATH = Path(__file__).resolve().parent.parent / "backend" / "config.json"
+CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "app.json"
 with open(CONFIG_PATH, encoding="utf-8") as f:
     _cfg = json.load(f)
-COOKIE = _cfg["cookie"]
+COOKIE = _cfg["douyin"]["cookie"]
 
 TEST_VIDEO_URL = "https://www.douyin.com/video/7650450403901017571"
 

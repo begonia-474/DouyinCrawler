@@ -1,4 +1,3 @@
-import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Header } from "@/components/layout/header";
 import { AnimateEntry } from "@/components/shared/animate-entry";
@@ -13,8 +12,13 @@ import {
   Image,
   Music,
 } from "lucide-react";
-import { getLiveRecords, getVideoStats, getUserStats, getVideoCount, getMusicCollectionCountFromDB } from "@/lib/api";
-import type { VideoStats, UserStats } from "@/lib/tauri-types";
+import {
+  useLiveRecordsQuery,
+  useMusicCountQuery,
+  useUserStatsQuery,
+  useVideoCountQuery,
+  useVideoStatsQuery,
+} from "@/lib/queries";
 
 const categories = [
   { key: "video_info", title: "视频库", icon: Film, path: "/douyin/library/video-info", span: "col-span-8" },
@@ -26,38 +30,22 @@ const categories = [
 
 export default function LibraryPage() {
   const navigate = useNavigate();
-  const [videoStats, setVideoStats] = useState<VideoStats | null>(null);
-  const [userStats, setUserStats] = useState<UserStats | null>(null);
-  const [typeCounts, setTypeCounts] = useState<Record<string, number>>({});
+  const liveRecordsQuery = useLiveRecordsQuery({ limit: 1 });
+  const videoStatsQuery = useVideoStatsQuery();
+  const userStatsQuery = useUserStatsQuery();
+  const videoCountQuery = useVideoCountQuery({ post_type: "video" });
+  const imageCountQuery = useVideoCountQuery({ post_type: "images" });
+  const musicCountQuery = useMusicCountQuery({ status: "downloaded" });
 
-  const loadStats = useCallback(async () => {
-    try {
-      const [liveData, vs, us, videoCount, imgCount, musicCount] = await Promise.all([
-        getLiveRecords({ limit: 1 }),
-        getVideoStats().catch(() => null),
-        getUserStats().catch(() => null),
-        getVideoCount({ post_type: "video" }).catch(() => 0),
-        getVideoCount({ post_type: "images" }).catch(() => 0),
-        getMusicCollectionCountFromDB(undefined, "downloaded").catch(() => 0),
-      ]);
-      setVideoStats(vs);
-      setUserStats(us);
-
-      const counts: Record<string, number> = {};
-      counts.video_info = videoCount;
-      if (us) counts.user_info = us.total_count;
-      counts.images = imgCount;
-      counts.music = musicCount;
-      counts.live = liveData.length;
-      setTypeCounts(counts);
-    } catch (err) {
-      console.error("加载统计失败:", err);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadStats();
-  }, [loadStats]);
+  const videoStats = videoStatsQuery.data ?? null;
+  const userStats = userStatsQuery.data ?? null;
+  const typeCounts: Record<string, number> = {
+    video_info: videoCountQuery.data ?? 0,
+    user_info: userStats?.total_count ?? 0,
+    images: imageCountQuery.data ?? 0,
+    music: musicCountQuery.data ?? 0,
+    live: liveRecordsQuery.data?.length ?? 0,
+  };
 
   return (
     <>

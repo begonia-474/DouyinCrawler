@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from core.crawler import DouyinCrawler
 from core.filter import UserProfileFilter
 
-DB_PATH = Path.home() / "AppData/Roaming/com.axiao.douyin-crawler/douyin.db"
+DB_PATH = Path(__file__).resolve().parent.parent / "data" / "douyin.db"
 
 
 async def backfill():
@@ -40,7 +40,8 @@ async def backfill():
 
     print(f"找到 {len(users)} 条 user_info 记录")
 
-    cookie = json.load(open("backend/config.json"))["cookie"]
+    cfg_path = Path(__file__).resolve().parent.parent / "config" / "app.json"
+    cookie = json.load(open(cfg_path, encoding="utf-8"))["douyin"]["cookie"]
 
     for user in users:
         sec_uid = user["sec_user_id"]

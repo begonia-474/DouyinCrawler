@@ -1,11 +1,16 @@
-"""管理 DouyinHandler 实例和配置，支持持久化"""
+"""管理 DouyinHandler 实例和配置，支持持久化
+
+职责拆分：
+- TaskManager（本文件）：配置管理 + Handler 生命周期 + 事件广播（门面）
+- LiveRecordManager（live_manager.py）：直播录制任务管理
+- BatchManager（batch_manager.py）：批量下载任务管理
+"""
 
 import json
-import asyncio
-import uuid
-import threading
 from pathlib import Path
 from backend.logger import get_logger, setup_logging
+from backend.live_manager import LiveRecordManager
+from backend.batch_manager import BatchManager
 from core.handler import DouyinHandler
 
 # 确保日志系统初始化（PyO3 路径不会经过 server.py）
@@ -39,25 +44,27 @@ class TaskManager:
         self._max_retries: int = 5
         self._max_tasks: int = 10
         self._handler: DouyinHandler | None = None
-        self._live_tasks: dict[str, dict] = {}
-        self._batch_tasks: dict[str, dict] = {}  # 批量下载任务
+        self._live_mgr = LiveRecordManager()
+        self._batch_mgr = BatchManager()
         self._load_config()
+
+    # ============================================================
+    # 配置管理
+    # ============================================================
 
     def _load_config(self):
         """从 config/app.json 加载配置"""
         if CONFIG_PATH.exists():
             try:
                 data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-                # 读取 douyin 配置（默认平台）
                 douyin_config = data.get("douyin", {})
                 self._cookie = douyin_config.get("cookie", "")
-                logger.info("[_load_config] cookie 原始长度=%d, 前60字符=%s", len(self._cookie), repr(self._cookie[:60]))
-                # 检查并清理 cookie 中的换行符
+                logger.info("[_load_config] 已加载 cookie (len=%d)", len(self._cookie))
                 if '\n' in self._cookie or '\r' in self._cookie:
                     logger.warning("[_load_config] cookie 中包含换行符! \\n=%d, \\r=%d, 正在清理...",
                                    self._cookie.count('\n'), self._cookie.count('\r'))
                     self._cookie = " ".join(self._cookie.split())
-                    logger.info("[_load_config] 清理后 cookie 长度=%d, 前60字符=%s", len(self._cookie), repr(self._cookie[:60]))
+                    logger.info("[_load_config] cookie 已清理换行符 (len=%d)", len(self._cookie))
                 self._download_path = douyin_config.get("download_path", "Download")
                 self._naming = douyin_config.get("naming", "{create}_{desc}")
                 self._encryption = douyin_config.get("encryption", "ab")
@@ -83,12 +90,10 @@ class TaskManager:
     def _save_config(self):
         """保存配置到 config/app.json"""
         try:
-            # 读取现有配置
             existing_config = {}
             if CONFIG_PATH.exists():
                 existing_config = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
 
-            # 更新 douyin 配置
             existing_config["douyin"] = {
                 "cookie": self._cookie,
                 "download_path": self._download_path,
@@ -109,10 +114,7 @@ class TaskManager:
                 "max_tasks": self._max_tasks,
             }
 
-            # 确保目录存在
             CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-
-            # 保存配置
             CONFIG_PATH.write_text(
                 json.dumps(existing_config, ensure_ascii=False, indent=2),
                 encoding="utf-8"
@@ -120,42 +122,6 @@ class TaskManager:
             logger.info("已保存配置: %s", CONFIG_PATH)
         except Exception as e:
             logger.error("保存配置失败: %s", e)
-
-    @property
-    def handler(self) -> DouyinHandler:
-        if self._handler is None:
-            proxies = None
-            if self._proxy:
-                proxies = {"http://": self._proxy, "https://": self._proxy}
-            # 将相对路径解析为基于项目根目录的绝对路径
-            download_path = Path(self._download_path)
-            if not download_path.is_absolute():
-                download_path = PROJECT_ROOT / download_path
-            logger.info("[handler] 创建 DouyinHandler, cookie 长度=%d, 前40字符=%s", len(self._cookie), repr(self._cookie[:40]))
-            logger.info("[handler] download_path=%s (原始=%s)", download_path, self._download_path)
-            logger.info("[handler] encryption=%s, max_retries=%d, timeout=%d, max_connections=%d",
-                        self._encryption, self._max_retries, self._timeout, self._max_connections)
-            self._handler = DouyinHandler(
-                cookie=self._cookie,
-                download_path=str(download_path),
-                naming=self._naming,
-                encryption=self._encryption,
-                proxies=proxies,
-                app_name=self._app_name,
-                folderize=self._folderize,
-                music=self._music,
-                cover=self._cover,
-                desc=self._desc,
-                interval=self._interval,
-                page_counts=self._page_counts,
-                max_counts=self._max_counts,
-                timeout=self._timeout,
-                max_connections=self._max_connections,
-                max_retries=self._max_retries,
-                max_tasks=self._max_tasks,
-            )
-            logger.info("已创建 DouyinHandler (cookie=%s..., path=%s)", self._cookie[:20], self._download_path)
-        return self._handler
 
     def update_config(self, cookie: str = None, download_path: str = None,
                       naming: str = None, encryption: str = None, proxy: str = None,
@@ -166,13 +132,12 @@ class TaskManager:
                       max_connections: int = None, max_retries: int = None,
                       max_tasks: int = None):
         if cookie is not None:
-            # 清理换行符，合并为空格分隔的单行格式
-            logger.info("[update_config] 收到 cookie, 原始长度=%d, 前60字符=%s", len(cookie), repr(cookie[:60]))
+            logger.info("[update_config] 收到 cookie (len=%d)", len(cookie))
             if '\n' in cookie or '\r' in cookie:
                 logger.warning("[update_config] cookie 中包含换行符! \\n=%d, \\r=%d",
                                cookie.count('\n'), cookie.count('\r'))
             self._cookie = " ".join(cookie.split())
-            logger.info("[update_config] 清理后 cookie 长度=%d, 前60字符=%s", len(self._cookie), repr(self._cookie[:60]))
+            logger.info("[update_config] cookie 已清理 (len=%d)", len(self._cookie))
         if download_path is not None:
             self._download_path = download_path
         if naming is not None:
@@ -256,191 +221,81 @@ class TaskManager:
         }
 
     # ============================================================
-    # 直播录制任务管理
+    # Handler 生命周期
+    # ============================================================
+
+    @property
+    def handler(self) -> DouyinHandler:
+        if self._handler is None:
+            proxies = None
+            if self._proxy:
+                proxies = {"http://": self._proxy, "https://": self._proxy}
+            download_path = Path(self._download_path)
+            if not download_path.is_absolute():
+                download_path = PROJECT_ROOT / download_path
+            logger.info("[handler] 创建 DouyinHandler (has_cookie=%s)", bool(self._cookie))
+            logger.info("[handler] download_path=%s (原始=%s)", download_path, self._download_path)
+            logger.info("[handler] encryption=%s, max_retries=%d, timeout=%d, max_connections=%d",
+                        self._encryption, self._max_retries, self._timeout, self._max_connections)
+            self._handler = DouyinHandler(
+                cookie=self._cookie,
+                download_path=str(download_path),
+                naming=self._naming,
+                encryption=self._encryption,
+                proxies=proxies,
+                app_name=self._app_name,
+                folderize=self._folderize,
+                music=self._music,
+                cover=self._cover,
+                desc=self._desc,
+                interval=self._interval,
+                page_counts=self._page_counts,
+                max_counts=self._max_counts,
+                timeout=self._timeout,
+                max_connections=self._max_connections,
+                max_retries=self._max_retries,
+                max_tasks=self._max_tasks,
+            )
+            logger.info("已创建 DouyinHandler (path=%s)", self._download_path)
+        return self._handler
+
+    # ============================================================
+    # 直播录制（委托给 LiveRecordManager）
     # ============================================================
 
     def start_live_record(self, url: str) -> str:
-        """启动直播录制，返回 task_id（同步版本，使用线程后台执行）"""
-        task_id = str(uuid.uuid4())[:8]
-        stop_event = threading.Event()
-        self._live_tasks[task_id] = {
-            "task_id": task_id,
-            "url": url,
-            "status": "starting",
-            "file": "",
-            "error": "",
-            "_stop_event": stop_event,
-        }
-
-        def _run():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                async def _do():
-                    self._live_tasks[task_id]["status"] = "recording"
-                    self.broadcast_task_update_sync(task_id, self._live_tasks[task_id], "live")
-
-                    # 将 threading.Event 包装为 asyncio.Event
-                    async_stop = asyncio.Event()
-                    # 保存 loop 引用，供 stop_live_record 线程安全地唤醒
-                    self._live_tasks[task_id]["_async_stop"] = async_stop
-                    self._live_tasks[task_id]["_loop"] = loop
-
-                    result = await self.handler.handle_live_record(url, task_id, stop_event=async_stop)
-                    if result.get("success"):
-                        self._live_tasks[task_id].update({
-                            "status": "completed",
-                            "file": result.get("file", ""),
-                            "room_id": result.get("room_id", ""),
-                            "web_rid": result.get("web_rid", ""),
-                            "title": result.get("title", ""),
-                            "nickname": result.get("nickname", ""),
-                            "file_size": result.get("file_size", 0),
-                            "duration_sec": result.get("duration_sec", 0),
-                            "started_at": result.get("started_at", 0),
-                            "ended_at": result.get("ended_at", 0),
-                            "cover_url": result.get("cover_url", ""),
-                        })
-                    else:
-                        self._live_tasks[task_id]["status"] = "error"
-                        self._live_tasks[task_id]["error"] = result.get("error", "未知错误")
-
-                loop.run_until_complete(_do())
-            except Exception as e:
-                self._live_tasks[task_id]["status"] = "error"
-                self._live_tasks[task_id]["error"] = str(e)
-                logger.error("[live_record] 异常: %s", e, exc_info=True)
-            finally:
-                # 广播最终状态
-                self.broadcast_task_update_sync(task_id, self._live_tasks[task_id], "live")
-                loop.close()
-
-        thread = threading.Thread(target=_run, daemon=True)
-        thread.start()
-        logger.info("[live_record] 直播录制已启动, task_id=%s", task_id)
-        return task_id
+        """启动直播录制，返回 task_id"""
+        return self._live_mgr.start_live_record(url, self.handler, self.broadcast_task_update_sync)
 
     def stop_live_record(self, task_id: str) -> bool:
         """停止直播录制"""
-        if task_id not in self._live_tasks:
-            return False
-        stop_event = self._live_tasks[task_id].get("_stop_event")
-        if stop_event:
-            stop_event.set()
-        # 线程安全地唤醒 asyncio.Event（无轮询）
-        async_stop = self._live_tasks[task_id].get("_async_stop")
-        loop = self._live_tasks[task_id].get("_loop")
-        if async_stop and loop:
-            loop.call_soon_threadsafe(async_stop.set)
-        self._live_tasks[task_id]["status"] = "stopping"
-        return True
+        return self._live_mgr.stop_live_record(task_id)
 
     def get_live_status(self) -> dict[str, dict]:
-        """获取所有录制任务状态（排除内部字段），以 task_id 为 key"""
-        return {
-            t["task_id"]: {k: v for k, v in t.items() if not k.startswith("_")}
-            for t in self._live_tasks.values()
-        }
+        """获取所有录制任务状态"""
+        return self._live_mgr.get_live_status()
 
     # ============================================================
-    # 批量下载任务管理
+    # 批量下载（委托给 BatchManager）
     # ============================================================
 
     def start_batch_download(self, url: str, download_type: str) -> str:
-        """启动批量下载任务，返回 task_id（同步版本，使用线程后台执行）"""
-        task_id = str(uuid.uuid4())[:8]
-        self._batch_tasks[task_id] = {
-            "task_id": task_id,
-            "type": download_type,
-            "url": url,
-            "status": "starting",
-            "total": 0,
-            "completed": 0,
-            "failed": 0,
-            "current_item": "",
-            "error": "",
-            "results": [],  # 存储下载结果，供前端保存到数据库
-        }
-
-        def _run():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            logger.info("[batch_download] 线程启动 task_id=%s", task_id)
-            try:
-                async def _do():
-                    self._batch_tasks[task_id]["status"] = "running"
-                    logger.info("[batch_download] 状态改为 running, 开始广播 task_id=%s", task_id)
-                    self.broadcast_task_update_sync(task_id, self._batch_tasks[task_id], "batch")
-
-                    # 根据类型调用对应的下载方法
-                    handler = self.handler
-                    logger.info("[batch_download] 开始下载 task_id=%s, type=%s, url=%s", task_id, download_type, url)
-                    if download_type == "user_post":
-                        result = await handler.handle_user_post(url)
-                    elif download_type == "user_like":
-                        result = await handler.handle_user_like(url)
-                    elif download_type == "mix":
-                        result = await handler.handle_user_mix(url)
-                    elif download_type == "collects":
-                        result = await handler.handle_collects_video(url)
-                    else:
-                        result = {"success": False, "error": f"未知的下载类型: {download_type}"}
-
-                    logger.info("[batch_download] handler 返回 task_id=%s, success=%s, count=%s, results=%d",
-                               task_id, result.get("success"), result.get("count"), len(result.get("results", [])))
-                    if result.get("success"):
-                        count = result.get("count", 0)
-                        results = result.get("results", [])
-
-                        # 直接写入数据库（不经过前端）
-                        try:
-                            from core.db import save_batch_results
-                            db_result = save_batch_results(results, download_type)
-                            logger.info("[batch_download] 数据库写入完成: %s", db_result)
-                        except Exception as e:
-                            logger.error("[batch_download] 数据库写入失败: %s", e, exc_info=True)
-
-                        self._batch_tasks[task_id].update({
-                            "status": "completed",
-                            "total": count,
-                            "completed": count,
-                        })
-                        logger.info("[batch_download] 任务状态已更新为 completed task_id=%s", task_id)
-                    else:
-                        self._batch_tasks[task_id]["status"] = "error"
-                        self._batch_tasks[task_id]["error"] = result.get("error", "未知错误")
-                        logger.error("[batch_download] 下载失败 task_id=%s, error=%s", task_id, result.get("error"))
-
-                loop.run_until_complete(_do())
-            except Exception as e:
-                self._batch_tasks[task_id]["status"] = "error"
-                self._batch_tasks[task_id]["error"] = str(e)
-                logger.error("[batch_download] 线程异常: %s", e, exc_info=True)
-            finally:
-                # 广播最终状态
-                logger.info("[batch_download] finally: 准备广播最终状态 task_id=%s, status=%s",
-                           task_id, self._batch_tasks[task_id].get("status"))
-                self.broadcast_task_update_sync(task_id, self._batch_tasks[task_id], "batch")
-                loop.close()
-                logger.info("[batch_download] 线程结束 task_id=%s", task_id)
-
-        thread = threading.Thread(target=_run, daemon=True)
-        thread.start()
-        logger.info("[batch_download] 批量下载已启动, task_id=%s, type=%s", task_id, download_type)
-        return task_id
+        """启动批量下载任务，返回 task_id"""
+        return self._batch_mgr.start_batch_download(url, download_type, self.handler, self.broadcast_task_update_sync)
 
     def get_batch_status(self) -> dict[str, dict]:
-        """获取所有批量下载任务状态，以 task_id 为 key"""
-        return {t["task_id"]: t for t in self._batch_tasks.values()}
+        """获取所有批量下载任务状态"""
+        return self._batch_mgr.get_batch_status()
+
+    # ============================================================
+    # 事件广播
+    # ============================================================
 
     def broadcast_task_update_sync(self, task_id: str, task_data: dict, task_type: str = "unknown"):
         """广播任务状态更新到前端（通过 Tauri 事件系统，同步版本）"""
         try:
             import core.tauri_bridge as tb
-            import sys
-            # 过滤内部字段（以 _ 开头的）
             clean_data = {k: v for k, v in task_data.items() if not k.startswith("_")}
-            # 直接从模块获取最新值（避免导入时的值拷贝）
             emit_func = getattr(tb, '_emit_func', None)
             logger.info("[broadcast] 广播 task_id=%s, task_type=%s, status=%s, results=%d, _emit_func=%s",
                        task_id, task_type, clean_data.get("status"), len(clean_data.get("results", [])),
@@ -454,9 +309,8 @@ class TaskManager:
         except Exception as e:
             logger.error("[broadcast] Tauri 事件发射失败: %s", e, exc_info=True)
 
-    # 保留异步版本以兼容
     async def broadcast_task_update(self, task_id: str, task_data: dict, task_type: str = "unknown"):
-        """广播任务状态更新到前端（通过 Tauri 事件系统）"""
+        """广播任务状态更新到前端（异步版本，兼容）"""
         self.broadcast_task_update_sync(task_id, task_data, task_type)
 
 

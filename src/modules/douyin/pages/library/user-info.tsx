@@ -1,14 +1,19 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Header } from "@/components/layout/header";
 import { AnimateEntry } from "@/components/shared/animate-entry";
 import { Bezel } from "@/components/shared/bezel";
-import {
-  Users, Loader2, Search, ChevronDown, Trash2,
-} from "lucide-react";
-import { deleteUserInfo, getUsers, getUserCount } from "@/lib/api";
+import { SortDropdown } from "@/components/shared/sort-dropdown";
+import { Pagination } from "@/components/shared/pagination";
+import { Users, Loader2, Search, Trash2 } from "lucide-react";
+import { deleteUserInfo } from "@/lib/api";
+import { queryKeys } from "@/lib/query-keys";
+import { useUsersQuery, useUserCountQuery } from "@/lib/queries";
+import { usePagination } from "@/hooks/use-pagination";
 import type { UserInfo } from "@/lib/tauri-types";
+import { formatCount } from "@/lib/utils";
 
 const SORT_OPTIONS = [
   { value: "updated_at", label: "更新时间" },
@@ -18,57 +23,39 @@ const SORT_OPTIONS = [
   { value: "total_favorited", label: "获赞数" },
 ];
 
-function formatCount(n: number): string {
-  if (n >= 10000) return (n / 10000).toFixed(1) + "w";
-  return String(n);
-}
-
 export default function LibraryUserInfoPage() {
-  const [items, setItems] = useState<UserInfo[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(0);
+  const { page, pageSize, setPage, offset, resetPage } = usePagination();
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState("updated_at");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
-  const [showSort, setShowSort] = useState(false);
-  const pageSize = 20;
+  const queryClient = useQueryClient();
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [data, count] = await Promise.all([
-        getUsers({
-          limit: pageSize,
-          offset: page * pageSize,
-          keyword: search || undefined,
-          sort_by: sortBy,
-          sort_order: sortOrder,
-        }),
-        getUserCount({ keyword: search || undefined }),
-      ]);
-      setItems(data);
-      setTotal(count);
-    } catch (err) {
-      console.error("加载失败:", err);
-    }
-    setLoading(false);
-  }, [page, search, sortBy, sortOrder]);
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  const itemsQuery = useUsersQuery({
+    limit: pageSize,
+    offset,
+    keyword: search || undefined,
+    sort_by: sortBy,
+    sort_order: sortOrder,
+  });
+  const countQuery = useUserCountQuery({ keyword: search || undefined });
+  const items = itemsQuery.data ?? [];
+  const total = countQuery.data ?? 0;
+  const loading = itemsQuery.isLoading || countQuery.isLoading;
 
   const handleSearch = (value: string) => {
     setSearch(value);
-    setPage(0);
+    resetPage();
   };
 
   const handleDelete = async (item: UserInfo) => {
     if (!window.confirm("确定删除这条用户记录？")) return;
     try {
       await deleteUserInfo(item.sec_user_id);
-      await loadData();
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.users() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.userCount() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.userStats() }),
+      ]);
     } catch (err) {
       window.alert(err instanceof Error ? err.message : "删除失败");
     }
@@ -92,48 +79,13 @@ export default function LibraryUserInfoPage() {
                 className="h-11 rounded-xl pl-10 border-foreground/[0.08] bg-foreground/[0.03]"
               />
             </div>
-            <div className="relative">
-              <Button
-                variant="capsule"
-                size="sm"
-                onClick={() => setShowSort(!showSort)}
-                className="gap-1 h-11"
-              >
-                {SORT_OPTIONS.find((o) => o.value === sortBy)?.label}
-                <ChevronDown className="h-3 w-3" />
-              </Button>
-              {showSort && (
-                <div className="absolute right-0 top-full mt-1 z-10 bg-popover border rounded-md shadow-md py-1 min-w-[140px]">
-                  {SORT_OPTIONS.map((opt) => (
-                    <button
-                      key={opt.value}
-                      className={`w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors ${
-                        sortBy === opt.value ? "font-medium" : ""
-                      }`}
-                      onClick={() => {
-                        setSortBy(opt.value);
-                        setShowSort(false);
-                        setPage(0);
-                      }}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                  <div className="border-t mt-1 pt-1">
-                    <button
-                      className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent"
-                      onClick={() => {
-                        setSortOrder(sortOrder === "desc" ? "asc" : "desc");
-                        setShowSort(false);
-                        setPage(0);
-                      }}
-                    >
-                      {sortOrder === "desc" ? "降序 ↓" : "升序 ↑"}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
+            <SortDropdown
+              options={SORT_OPTIONS}
+              sortBy={sortBy}
+              sortOrder={sortOrder}
+              onSortByChange={(v) => { setSortBy(v); resetPage(); }}
+              onSortOrderChange={(v) => { setSortOrder(v); resetPage(); }}
+            />
           </div>
         </AnimateEntry>
 
@@ -217,27 +169,7 @@ export default function LibraryUserInfoPage() {
               </AnimateEntry>
             ))}
 
-            <div className="flex justify-between items-center pt-4">
-              <Button
-                variant="capsule"
-                size="sm"
-                disabled={page === 0}
-                onClick={() => setPage((p) => p - 1)}
-              >
-                上一页
-              </Button>
-              <span className="text-sm text-muted-foreground">
-                第 {page + 1} 页 / 共 {Math.ceil(total / pageSize)} 页
-              </span>
-              <Button
-                variant="capsule"
-                size="sm"
-                disabled={(page + 1) * pageSize >= total}
-                onClick={() => setPage((p) => p + 1)}
-              >
-                下一页
-              </Button>
-            </div>
+            <Pagination page={page} totalPages={Math.ceil(total / pageSize)} onPageChange={setPage} />
           </div>
         )}
       </div>

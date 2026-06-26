@@ -232,8 +232,11 @@ def filter_by_date_interval(aweme_list: list, interval: str, field: str = "creat
 
     filtered = []
     for item in aweme_list:
-        # 获取创建时间
-        create_time = item.get(field, 0)
+        # 获取创建时间（兼容 dict 和对象）
+        if isinstance(item, dict):
+            create_time = item.get(field, 0)
+        else:
+            create_time = getattr(item, field, 0)
         if isinstance(create_time, str):
             try:
                 create_time = int(time.mktime(time.strptime(create_time, "%Y-%m-%d %H:%M:%S")))
@@ -266,25 +269,34 @@ async def get_segments_from_m3u8(url: str):
     return segments
 
 
-async def get_content_length(url: str, headers: dict, proxies: dict = None) -> int:
-    """获取远程文件大小（字节），HEAD 失败降级为 GET"""
-    proxy = proxies.get("https://") or proxies.get("http://") if proxies else None
-    kwargs = {"timeout": 10, "follow_redirects": True}
-    if proxy:
-        kwargs["proxy"] = proxy
-    async with httpx.AsyncClient(**kwargs) as client:
+async def get_content_length(
+    url: str, headers: dict, proxies: dict = None, client: httpx.AsyncClient = None
+) -> int:
+    """获取远程文件大小（字节），HEAD 失败降级为 GET。可复用已有 client。"""
+
+    async def _fetch(c: httpx.AsyncClient) -> int:
         try:
-            resp = await client.head(url, headers=headers)
+            resp = await c.head(url, headers=headers)
             resp.raise_for_status()
             return int(resp.headers.get("Content-Length", 0))
         except Exception:
             try:
-                req = client.build_request("GET", url, headers=headers)
-                resp = await client.send(req, stream=True)
+                req = c.build_request("GET", url, headers=headers)
+                resp = await c.send(req, stream=True)
                 resp.raise_for_status()
                 return int(resp.headers.get("Content-Length", 0))
             except Exception:
                 return 0
+
+    if client is not None:
+        return await _fetch(client)
+
+    proxy = proxies.get("https://") or proxies.get("http://") if proxies else None
+    kwargs: dict = {"timeout": 10, "follow_redirects": True}
+    if proxy:
+        kwargs["proxy"] = proxy
+    async with httpx.AsyncClient(**kwargs) as c:
+        return await _fetch(c)
 
 
 def get_chunk_size(file_size: int) -> int:

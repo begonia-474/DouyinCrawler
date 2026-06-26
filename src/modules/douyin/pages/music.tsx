@@ -1,34 +1,47 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Header } from "@/components/layout/header";
 import { AnimateEntry } from "@/components/shared/animate-entry";
 import { Bezel } from "@/components/shared/bezel";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { getMusicCollection, downloadMusic, saveMusicCollectionBatch } from "@/lib/api";
+import { useMusicCollectionQuery } from "@/lib/queries";
+import { queryKeys } from "@/lib/query-keys";
 import type { MusicItem } from "@/lib/api-types";
-import { Loader2, AlertCircle, Download, Music, CheckCircle2 } from "lucide-react";
-
-function formatDuration(ms: number): string {
-  const seconds = Math.floor(ms / 1000);
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-}
+import { Loader2, AlertCircle, Download, Music, CheckCircle2, RefreshCw } from "lucide-react";
+import { formatDurationMs } from "@/lib/utils";
 
 export default function MusicPage() {
-  const [loading, setLoading] = useState(false);
-  const [musicList, setMusicList] = useState<MusicItem[]>([]);
+  const queryClient = useQueryClient();
+  // 从 DB 读取已缓存的音乐列表
+  const { data: dbMusicList, isLoading: dbLoading } = useMusicCollectionQuery({});
+  const [apiMusicList, setApiMusicList] = useState<MusicItem[] | null>(null);
+  const [fetching, setFetching] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
   const [downloadedIds, setDownloadedIds] = useState<Set<string>>(new Set());
 
-  const fetchMusic = useCallback(async () => {
-    setLoading(true);
+  // API 数据优先，DB 缓存兜底（DB 字段可空，需补默认值）
+  const dbAsMusicItems: MusicItem[] | undefined = dbMusicList?.map((item) => ({
+    music_id: item.music_id,
+    mid: item.mid ?? "",
+    title: item.title ?? "",
+    author: item.author ?? "",
+    owner_nickname: item.owner_nickname ?? "",
+    duration: item.duration,
+    cover: item.cover ?? "",
+    play_url: item.play_url ?? "",
+  }));
+  const musicList: MusicItem[] = apiMusicList ?? dbAsMusicItems ?? [];
+
+  const fetchFromApi = useCallback(async () => {
+    setFetching(true);
     setError(null);
 
     const res = await getMusicCollection();
     if (res.success && res.data?.music_list) {
-      setMusicList(res.data.music_list);
+      setApiMusicList(res.data.music_list);
       try {
         await saveMusicCollectionBatch(
           res.data.music_list.map((item) => ({
@@ -42,6 +55,8 @@ export default function MusicPage() {
             play_url: item.play_url,
           }))
         );
+        // 同步更新 React Query 缓存
+        queryClient.invalidateQueries({ queryKey: queryKeys.musicCollection({}) });
       } catch (e) {
         console.error("保存音乐收藏到数据库失败:", e);
       }
@@ -49,30 +64,35 @@ export default function MusicPage() {
       setError(res.error || "获取音乐收藏失败");
     }
 
-    setLoading(false);
-  }, []);
+    setFetching(false);
+  }, [queryClient]);
 
-  useEffect(() => {
-    fetchMusic();
-  }, [fetchMusic]);
+  const CONCURRENT_LIMIT = 3;
 
   const handleDownload = async (item: MusicItem) => {
     if (!item.play_url) return;
-    setDownloadingId(item.music_id);
+    setDownloadingIds((prev) => new Set(prev).add(item.music_id));
 
     const res = await downloadMusic(item.play_url, item.title, item.author);
     if (res.success) {
       setDownloadedIds((prev) => new Set(prev).add(item.music_id));
     }
 
-    setDownloadingId(null);
+    setDownloadingIds((prev) => {
+      const next = new Set(prev);
+      next.delete(item.music_id);
+      return next;
+    });
   };
 
   const handleDownloadAll = async () => {
-    for (const item of musicList) {
-      if (item.play_url && !downloadedIds.has(item.music_id)) {
-        await handleDownload(item);
-      }
+    const pending = musicList.filter(
+      (item) => item.play_url && !downloadedIds.has(item.music_id)
+    );
+    // 按 CONCURRENT_LIMIT 分批并发
+    for (let i = 0; i < pending.length; i += CONCURRENT_LIMIT) {
+      const batch = pending.slice(i, i + CONCURRENT_LIMIT);
+      await Promise.all(batch.map((item) => handleDownload(item)));
     }
   };
 
@@ -86,6 +106,10 @@ export default function MusicPage() {
               全部下载
             </Button>
           )}
+          <Button variant="capsule" size="sm" onClick={fetchFromApi} disabled={fetching}>
+            {fetching ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1" />}
+            刷新
+          </Button>
         </Header>
       </AnimateEntry>
 
@@ -97,13 +121,13 @@ export default function MusicPage() {
           </div>
         )}
 
-        {loading && (
+        {(dbLoading || fetching) && (
           <div className="flex items-center justify-center py-16">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         )}
 
-        {!loading && musicList.length === 0 && !error && (
+        {!dbLoading && !fetching && musicList.length === 0 && !error && (
           <Bezel radius="xl">
             <div className="p-12 text-center">
               <Music className="h-12 w-12 text-muted-foreground/30 mx-auto mb-4" />
@@ -115,7 +139,7 @@ export default function MusicPage() {
           </Bezel>
         )}
 
-        {!loading && musicList.length > 0 && (
+        {!dbLoading && musicList.length > 0 && (
           <div className="space-y-2">
             {musicList.map((item, i) => (
               <AnimateEntry key={item.music_id} delay={i * 25}>
@@ -135,18 +159,18 @@ export default function MusicPage() {
                       </p>
                     </div>
                     <Badge variant="secondary" className="text-xs rounded-full font-mono tabular-nums">
-                      {formatDuration(item.duration)}
+                      {formatDurationMs(item.duration)}
                     </Badge>
                     <Button
                       variant="capsule"
                       size="icon"
                       className="h-8 w-8 shrink-0"
                       onClick={() => handleDownload(item)}
-                      disabled={downloadingId === item.music_id || downloadedIds.has(item.music_id)}
+                      disabled={downloadingIds.has(item.music_id) || downloadedIds.has(item.music_id)}
                     >
                       {downloadedIds.has(item.music_id) ? (
                         <CheckCircle2 className="h-4 w-4 text-success" />
-                      ) : downloadingId === item.music_id ? (
+                      ) : downloadingIds.has(item.music_id) ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
                         <Download className="h-4 w-4" />

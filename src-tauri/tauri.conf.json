@@ -26,7 +26,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https://*.douyinpic.com https://*.byteimg.com https://*.pstatp.com https: data:; connect-src 'self' https:; font-src 'self' data:"
     }
   },
   "bundle": {
