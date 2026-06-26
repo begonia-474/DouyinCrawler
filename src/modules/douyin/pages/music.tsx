@@ -5,11 +5,13 @@ import { AnimateEntry } from "@/components/shared/animate-entry";
 import { Bezel } from "@/components/shared/bezel";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { getMusicCollection, downloadMusic, saveMusicCollectionBatch } from "@/lib/api";
+import { getMusicCollection, downloadMusic, saveMusicCollectionBatch, updateMusicFilePath } from "@/lib/api";
 import { useMusicCollectionQuery } from "@/lib/queries";
 import { queryKeys } from "@/lib/query-keys";
 import type { MusicItem } from "@/lib/api-types";
-import { Loader2, AlertCircle, Download, Music, CheckCircle2, RefreshCw } from "lucide-react";
+import { Loader2, Download, Music, CheckCircle2, RefreshCw } from "lucide-react";
+import { ErrorBanner } from "@/components/shared/error-banner";
+import { useAsyncAction } from "@/hooks/use-async-action";
 import { formatDurationMs } from "@/lib/utils";
 
 export default function MusicPage() {
@@ -17,8 +19,6 @@ export default function MusicPage() {
   // 从 DB 读取已缓存的音乐列表
   const { data: dbMusicList, isLoading: dbLoading } = useMusicCollectionQuery({});
   const [apiMusicList, setApiMusicList] = useState<MusicItem[] | null>(null);
-  const [fetching, setFetching] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
   const [downloadedIds, setDownloadedIds] = useState<Set<string>>(new Set());
 
@@ -35,14 +35,11 @@ export default function MusicPage() {
   }));
   const musicList: MusicItem[] = apiMusicList ?? dbAsMusicItems ?? [];
 
-  const fetchFromApi = useCallback(async () => {
-    setFetching(true);
-    setError(null);
-
-    const res = await getMusicCollection();
-    if (res.success && res.data?.music_list) {
-      setApiMusicList(res.data.music_list);
-      try {
+  const { run: fetchFromApi, loading: fetching, error } = useAsyncAction({
+    action: useCallback(async () => {
+      const res = await getMusicCollection();
+      if (res.success && res.data?.music_list) {
+        setApiMusicList(res.data.music_list);
         await saveMusicCollectionBatch(
           res.data.music_list.map((item) => ({
             music_id: item.music_id,
@@ -55,17 +52,12 @@ export default function MusicPage() {
             play_url: item.play_url,
           }))
         );
-        // 同步更新 React Query 缓存
         queryClient.invalidateQueries({ queryKey: queryKeys.musicCollection({}) });
-      } catch (e) {
-        console.error("保存音乐收藏到数据库失败:", e);
+      } else {
+        throw new Error(res.error || "获取音乐收藏失败");
       }
-    } else {
-      setError(res.error || "获取音乐收藏失败");
-    }
-
-    setFetching(false);
-  }, [queryClient]);
+    }, [queryClient]),
+  });
 
   const CONCURRENT_LIMIT = 3;
 
@@ -76,6 +68,15 @@ export default function MusicPage() {
     const res = await downloadMusic(item.play_url, item.title, item.author);
     if (res.success) {
       setDownloadedIds((prev) => new Set(prev).add(item.music_id));
+      // 更新 music_collection 的 file_path 和 status
+      if (res.data?.path) {
+        try {
+          await updateMusicFilePath(item.music_id, res.data.path);
+          queryClient.invalidateQueries({ queryKey: queryKeys.musicCollection({}) });
+        } catch (e) {
+          console.error("更新音乐文件路径失败:", e);
+        }
+      }
     }
 
     setDownloadingIds((prev) => {
@@ -114,12 +115,7 @@ export default function MusicPage() {
       </AnimateEntry>
 
       <div className="space-y-6">
-        {error && (
-          <div className="flex items-center gap-2 p-4 rounded-2xl bg-destructive/[0.06] ring-1 ring-destructive/20 text-destructive text-sm">
-            <AlertCircle className="h-4 w-4 shrink-0" />
-            <span>{error}</span>
-          </div>
-        )}
+        <ErrorBanner message={error} />
 
         {(dbLoading || fetching) && (
           <div className="flex items-center justify-center py-16">

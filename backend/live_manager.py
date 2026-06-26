@@ -5,6 +5,7 @@ import uuid
 import threading
 from typing import Callable
 from backend.logger import get_logger
+from core import db
 
 logger = get_logger(__name__)
 
@@ -61,6 +62,24 @@ class LiveRecordManager:
                             "ended_at": result.get("ended_at", 0),
                             "cover_url": result.get("cover_url", ""),
                         })
+                        # 后端外围层保存直播记录到 DB
+                        try:
+                            db.save_live_record({
+                                "room_id": result.get("room_id"),
+                                "web_rid": result.get("web_rid"),
+                                "title": result.get("title"),
+                                "nickname": result.get("nickname"),
+                                "file_path": result.get("file"),
+                                "file_size": result.get("file_size", 0),
+                                "duration_sec": result.get("duration_sec", 0),
+                                "status": "completed",
+                                "started_at": result.get("started_at"),
+                                "ended_at": result.get("ended_at"),
+                                "cover_url": result.get("cover_url"),
+                            })
+                            logger.info("[live_record] 直播记录已保存到 DB, task_id=%s", task_id)
+                        except Exception as save_err:
+                            logger.error("[live_record] 保存直播记录到 DB 失败: %s", save_err)
                     else:
                         self._live_tasks[task_id]["status"] = "error"
                         self._live_tasks[task_id]["error"] = result.get("error", "未知错误")

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useLocation } from "react-router-dom";
 import { Header } from "@/components/layout/header";
 import { AnimateEntry } from "@/components/shared/animate-entry";
@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Bezel } from "@/components/shared/bezel";
-import { getLiveInfo, startLiveRecord, stopLiveRecord, getLiveStatus, saveLiveRecordAfterStop } from "@/lib/api";
+import { getLiveInfo, startLiveRecord, stopLiveRecord, getLiveStatus } from "@/lib/api";
 import { useLiveStore } from "@/stores/live-store";
 import type { LiveInfo as LiveInfoType } from "@/lib/api-types";
 import {
@@ -17,11 +17,11 @@ import {
   Copy,
   CheckCircle2,
   Circle,
-  AlertCircle,
   Loader2,
   Disc,
   Square,
 } from "lucide-react";
+import { ErrorBanner } from "@/components/shared/error-banner";
 
 export default function LivePage() {
   const location = useLocation();
@@ -45,12 +45,8 @@ export default function LivePage() {
   const recording = !!activeTask;
   const recordTaskId = activeTask?.task_id || null;
 
-  // 查找刚完成/出错的任务（用于保存记录），用 useMemo 稳定引用避免 effect 过度触发
-  const doneTasks = useMemo(
-    () => Object.values(liveTasks).filter((t) => t.status === "completed" || t.status === "error"),
-    [liveTasks]
-  );
-  const savedTaskIds = useRef<Set<string>>(new Set());
+  // 已通知过的完成/出错任务 ID（避免重复处理）
+  const notifiedTaskIds = useRef<Set<string>>(new Set());
 
   // 连接 Tauri 事件
   useEffect(() => {
@@ -94,24 +90,20 @@ export default function LivePage() {
     checkExistingTask();
   }, [connectLive]);
 
-  // 监听任务完成/出错，保存记录
+  // 监听任务完成/出错，显示错误并延迟清理（DB 保存由后端完成）
   useEffect(() => {
+    const doneTasks = Object.values(liveTasks).filter((t) => t.status === "completed" || t.status === "error");
     for (const task of doneTasks) {
-      if (savedTaskIds.current.has(task.task_id)) continue;
-      savedTaskIds.current.add(task.task_id);
+      if (notifiedTaskIds.current.has(task.task_id)) continue;
+      notifiedTaskIds.current.add(task.task_id);
 
-      if (task.status === "completed") {
-        saveLiveRecordAfterStop(task).catch((saveErr) => {
-          console.error("保存录制记录失败:", saveErr);
-          setError("录制已完成，但保存记录失败");
-        });
-        setTimeout(() => removeTask(task.task_id), 3000);
-      } else if (task.status === "error") {
+      if (task.status === "error") {
         setError(task.error || "录制出错");
-        setTimeout(() => removeTask(task.task_id), 5000);
       }
+      // 延迟清理已完成/出错的任务
+      setTimeout(() => removeTask(task.task_id), task.status === "completed" ? 3000 : 5000);
     }
-  }, [doneTasks, removeTask]);
+  }, [liveTasks, removeTask]);
 
   const handleParse = useCallback(async (url: string) => {
     setLoading(true);
@@ -181,12 +173,7 @@ export default function LivePage() {
           autoSubmit={!!initialUrl}
         />
 
-        {error && (
-          <div className="flex items-center gap-2 p-4 rounded-2xl bg-destructive/[0.06] ring-1 ring-destructive/20 text-destructive text-sm">
-            <AlertCircle className="h-4 w-4 shrink-0" />
-            <span>{error}</span>
-          </div>
-        )}
+        <ErrorBanner message={error} />
 
         {loading && (
           <div className="flex items-center justify-center py-16">

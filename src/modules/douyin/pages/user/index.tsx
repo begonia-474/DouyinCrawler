@@ -18,8 +18,9 @@ import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import type { UserProfile as UserProfileType, VideoItem, FollowItem } from "@/lib/api-types";
 import {
   Download, Users, Heart, Video, Loader2,
-  UserPlus, UserCheck, ThumbsUp, AlertCircle,
+  UserPlus, UserCheck, ThumbsUp,
 } from "lucide-react";
+import { ErrorBanner } from "@/components/shared/error-banner";
 import { Progress } from "@/components/ui/progress";
 import { formatCount, formatDurationSec } from "@/lib/utils";
 
@@ -142,12 +143,7 @@ export default function UserPage() {
       <div className="space-y-6">
         <UrlInput onSubmit={handleParse} loading={loading} placeholder="粘贴用户主页链接..." allowedTypes={["user"]} />
 
-        {error && (
-          <div className="flex items-center gap-2 p-4 rounded-2xl bg-destructive/[0.06] ring-1 ring-destructive/20 text-destructive text-sm">
-            <AlertCircle className="h-4 w-4 shrink-0" />
-            <span>{error}</span>
-          </div>
-        )}
+        <ErrorBanner message={error} />
 
         {loading && (
           <div className="flex items-center justify-center py-16">

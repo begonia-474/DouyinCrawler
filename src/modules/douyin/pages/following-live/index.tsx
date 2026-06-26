@@ -13,8 +13,8 @@ import {
   Radio,
   RefreshCw,
   Loader2,
-  AlertCircle,
 } from "lucide-react";
+import { ErrorBanner } from "@/components/shared/error-banner";
 
 function Dot({ className }: { className?: string }) {
   return (
@@ -65,12 +65,7 @@ export default function FollowingLivePage() {
           </Button>
         </div>
 
-        {error && (
-          <div className="flex items-center gap-2.5 p-4 rounded-2xl bg-destructive/[0.06] ring-1 ring-destructive/20 text-destructive text-sm">
-            <AlertCircle className="h-4 w-4 shrink-0" />
-            <span>{error}</span>
-          </div>
-        )}
+        <ErrorBanner message={error} />
 
         {loading && lives.length === 0 && (
           <div className="flex items-center justify-center py-16">

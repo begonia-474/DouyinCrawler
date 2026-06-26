@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 _save_download_record = None
 _save_video_info = None
 _save_user_info = None
+_save_live_record = None
 _has_user = None
 
 
@@ -56,6 +57,19 @@ def save_user_info(data: dict) -> bool:
         return True
     except Exception as e:
         logger.error("[db_bridge] save_user_info 失败: %s", e)
+        return False
+
+
+def save_live_record(data: dict) -> bool:
+    """保存直播录制记录（通过 Rust）"""
+    if _save_live_record is None:
+        logger.error("[db_bridge] _save_live_record 未注册")
+        return False
+    try:
+        _save_live_record(data)
+        return True
+    except Exception as e:
+        logger.error("[db_bridge] save_live_record 失败: %s", e)
         return False
 
 

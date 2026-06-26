@@ -9,7 +9,8 @@ import { getCollectsVideoList, downloadCollectsVideo } from "@/lib/api";
 import { useBatchStore } from "@/stores/batch-store";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import type { VideoItem } from "@/lib/api-types";
-import { Loader2, AlertCircle, Download, ArrowLeft } from "lucide-react";
+import { Loader2, Download, ArrowLeft } from "lucide-react";
+import { ErrorBanner } from "@/components/shared/error-banner";
 import { Progress } from "@/components/ui/progress";
 import { formatDurationSec } from "@/lib/utils";
 
@@ -81,12 +82,7 @@ export default function CollectsDetailPage() {
       </Header>
 
       <div className="space-y-6">
-        {error && (
-          <div className="flex items-center gap-2 p-4 rounded-2xl bg-destructive/[0.06] ring-1 ring-destructive/20 text-destructive text-sm">
-            <AlertCircle className="h-4 w-4 shrink-0" />
-            <span>{error}</span>
-          </div>
-        )}
+        <ErrorBanner message={error} />
 
         {downloading && (
           <Bezel radius="xl">

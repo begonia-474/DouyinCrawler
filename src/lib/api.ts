@@ -313,6 +313,7 @@ export async function getLiveStatus(): Promise<ApiResponse<Record<string, LiveRe
   }
 }
 
+/** @deprecated 直播记录已由后端 live_manager 自动保存，此函数不再使用 */
 export async function saveLiveRecordAfterStop(task: LiveRecordTask): Promise<void> {
   if (!task.file) return;
   await invoke("save_live_record_record", {

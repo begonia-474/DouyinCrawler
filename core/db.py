@@ -64,6 +64,17 @@ def save_user_info(user_data: dict) -> bool:
     return db_bridge.save_user_info(user_data)
 
 
+def save_live_record(record: dict) -> bool:
+    """保存直播录制记录（通过 Rust 桥接）
+
+    Args:
+        record: 直播记录字典，字段参见 NewLiveRecord:
+            room_id, web_rid, title, nickname, sec_user_id,
+            file_path, file_size, duration_sec, status, started_at, ended_at, cover_url
+    """
+    return db_bridge.save_live_record(record)
+
+
 def save_batch_results(results: list, download_type: str = "batch") -> dict:
     """批量保存下载结果
 

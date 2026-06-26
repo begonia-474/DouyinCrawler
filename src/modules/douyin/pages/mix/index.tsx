@@ -17,8 +17,8 @@ import {
   Loader2,
   CheckCircle2,
   ListVideo,
-  AlertCircle,
 } from "lucide-react";
+import { ErrorBanner } from "@/components/shared/error-banner";
 import { formatCount, formatDurationSec } from "@/lib/utils";
 
 type MixVideo = VideoItem & { downloaded?: boolean };
@@ -103,12 +103,7 @@ export default function MixPage() {
       <div className="space-y-6">
         <UrlInput onSubmit={handleParse} loading={loading} placeholder="粘贴合集链接..." allowedTypes={["mix"]} />
 
-        {error && (
-          <div className="flex items-center gap-2 p-4 rounded-2xl bg-destructive/[0.06] ring-1 ring-destructive/20 text-destructive text-sm">
-            <AlertCircle className="h-4 w-4 shrink-0" />
-            <span>{error}</span>
-          </div>
-        )}
+        <ErrorBanner message={error} />
 
         {videos.length > 0 && (
           <>

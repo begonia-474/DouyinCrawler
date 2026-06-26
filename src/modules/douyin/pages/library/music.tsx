@@ -7,7 +7,7 @@ import { AnimateEntry } from "@/components/shared/animate-entry";
 import { Bezel } from "@/components/shared/bezel";
 import { Pagination } from "@/components/shared/pagination";
 import { Music, Loader2, Search, Clock, Download, CheckCircle2, Trash2 } from "lucide-react";
-import { deleteMusicCollection, downloadMusic } from "@/lib/api";
+import { deleteMusicCollection, downloadMusic, updateMusicFilePath } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { useMusicCollectionQuery, useMusicCountQuery } from "@/lib/queries";
 import { usePagination } from "@/hooks/use-pagination";
@@ -36,6 +36,14 @@ export default function LibraryMusicPage() {
 
     const res = await downloadMusic(item.play_url, item.title || "", item.author || "");
     if (res.success) {
+      // 更新 music_collection 的 file_path 和 status
+      if (res.data?.path) {
+        try {
+          await updateMusicFilePath(item.music_id, res.data.path);
+        } catch (e) {
+          console.error("更新音乐文件路径失败:", e);
+        }
+      }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.musicCollection() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.musicCount() }),

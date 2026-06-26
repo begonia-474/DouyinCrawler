@@ -6,7 +6,8 @@ import { Bezel } from "@/components/shared/bezel";
 import { Badge } from "@/components/ui/badge";
 import { getUserCollects } from "@/lib/api";
 import type { CollectsFolder } from "@/lib/api-types";
-import { FolderOpen, ChevronRight, Loader2, AlertCircle, Heart } from "lucide-react";
+import { FolderOpen, ChevronRight, Loader2, Heart } from "lucide-react";
+import { ErrorBanner } from "@/components/shared/error-banner";
 
 export default function FavoritesPage() {
   const navigate = useNavigate();
@@ -39,12 +40,7 @@ export default function FavoritesPage() {
       </AnimateEntry>
 
       <div className="space-y-5">
-        {error && (
-          <div className="flex items-center gap-2 p-4 rounded-2xl bg-destructive/[0.06] ring-1 ring-destructive/20 text-destructive text-sm">
-            <AlertCircle className="h-4 w-4 shrink-0" />
-            <span>{error}</span>
-          </div>
-        )}
+        <ErrorBanner message={error} />
 
         {loading && (
           <div className="flex items-center justify-center py-16">

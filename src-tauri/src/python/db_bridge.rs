@@ -1,9 +1,10 @@
 //! 数据库桥接模块 — Rust 侧注入
 //!
-//! 在应用启动时（`register_db_bridge()`），将 4 个 PyO3 闭包注入到 Python 的 `core.db_bridge` 模块：
+//! 在应用启动时（`register_db_bridge()`），将 5 个 PyO3 闭包注入到 Python 的 `core.db_bridge` 模块：
 //! - `_save_download_record`: 提取字段 → `NewDownloadRecord` → `db.save_download()`
 //! - `_save_video_info`: JSON 中转 → `VideoInfo` → `db.save_video()`
 //! - `_save_user_info`: JSON 中转 → `UserInfo` → `db.save_user()`
+//! - `_save_live_record`: 提取字段 → `NewLiveRecord` → `db.save_live_record()`
 //! - `_has_user`: 查询 `db.get_user_by_sec_uid()` → 返回 bool
 //!
 //! 架构边界：Python 不直接执行 SQL。所有 DB 写入最终由本模块的闭包通过 rusqlite 执行。
@@ -148,6 +149,58 @@ pub fn register_db_bridge() {
             },
         ).expect("创建 save_user_info 闭包失败");
 
+        // 注册 save_live_record
+        let save_live_record_fn = pyo3::types::PyCFunction::new_closure_bound(
+            py,
+            None,
+            None,
+            move |args: &Bound<'_, pyo3::types::PyTuple>, _kwargs: Option<&Bound<'_, pyo3::types::PyDict>>| -> PyResult<()> {
+                let data = args.get_item(0)?;
+                let app_handle = crate::APP_HANDLE.get()
+                    .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("AppHandle 未初始化"))?;
+
+                let room_id: Option<String> = data.get_item("room_id").ok().and_then(|v| v.extract().ok());
+                let web_rid: Option<String> = data.get_item("web_rid").ok().and_then(|v| v.extract().ok());
+                let title: Option<String> = data.get_item("title").ok().and_then(|v| v.extract().ok());
+                let nickname: Option<String> = data.get_item("nickname").ok().and_then(|v| v.extract().ok());
+                let sec_user_id: Option<String> = data.get_item("sec_user_id").ok().and_then(|v| v.extract().ok());
+                let file_path: Option<String> = data.get_item("file_path").ok().and_then(|v| v.extract().ok());
+                let file_size: i64 = data.get_item("file_size").ok().and_then(|v| v.extract().ok()).unwrap_or(0);
+                let duration_sec: i64 = data.get_item("duration_sec").ok().and_then(|v| v.extract().ok()).unwrap_or(0);
+                let status: String = data.get_item("status").ok().and_then(|v| v.extract().ok()).unwrap_or_else(|| "completed".to_string());
+                let started_at: Option<i64> = data.get_item("started_at").ok().and_then(|v| v.extract().ok());
+                let ended_at: Option<i64> = data.get_item("ended_at").ok().and_then(|v| v.extract().ok());
+                let cover_url: Option<String> = data.get_item("cover_url").ok().and_then(|v| v.extract().ok());
+
+                let db = app_handle.state::<crate::db::Database>();
+                let record = crate::db::NewLiveRecord {
+                    room_id,
+                    web_rid,
+                    title,
+                    nickname,
+                    sec_user_id,
+                    file_path,
+                    file_size,
+                    duration_sec,
+                    status,
+                    started_at,
+                    ended_at,
+                    cover_url,
+                };
+
+                match db.save_live_record(&record) {
+                    Ok(id) => {
+                        info!("[db_bridge] save_live_record 成功: id={}", id);
+                    }
+                    Err(e) => {
+                        return Err(pyo3::exceptions::PyRuntimeError::new_err(format!("保存直播记录失败: {}", e)));
+                    }
+                }
+
+                Ok(())
+            },
+        ).expect("创建 save_live_record 闭包失败");
+
         // 注册 has_user（查询用户是否已存在）
         let has_user_fn = pyo3::types::PyCFunction::new_closure_bound(
             py,
@@ -179,6 +232,9 @@ pub fn register_db_bridge() {
         }
         if let Err(e) = db_bridge.setattr("_save_user_info", save_user_fn) {
             warn!("[db_bridge] 注入 save_user_info 失败: {}", e);
+        }
+        if let Err(e) = db_bridge.setattr("_save_live_record", save_live_record_fn) {
+            warn!("[db_bridge] 注入 save_live_record 失败: {}", e);
         }
         if let Err(e) = db_bridge.setattr("_has_user", has_user_fn) {
             warn!("[db_bridge] 注入 has_user 失败: {}", e);
