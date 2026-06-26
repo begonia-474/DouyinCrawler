@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { getDownloadStats, getDownloads, getLiveRecords, getMusicCollectionCountFromDB, getMusicCollectionFromDB, getUserCount, getUserStats, getUsers, getVideoCount, getVideos, getVideoStats } from "@/lib/api";
+import { getDownloadStats, getDownloads, getLiveRecordCount, getLiveRecords, getMusicCollectionCountFromDB, getMusicCollectionFromDB, getUserCount, getUserStats, getUsers, getVideoCount, getVideos, getVideoStats } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 
 export function useDownloadsQuery(params: {
@@ -25,6 +25,13 @@ export function useLiveRecordsQuery(params: { limit?: number; offset?: number })
   return useQuery({
     queryKey: queryKeys.liveRecords(params),
     queryFn: () => getLiveRecords(params),
+  });
+}
+
+export function useLiveRecordCountQuery() {
+  return useQuery({
+    queryKey: queryKeys.liveRecordCount(),
+    queryFn: () => getLiveRecordCount(),
   });
 }
 

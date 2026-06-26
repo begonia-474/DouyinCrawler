@@ -16,7 +16,6 @@ import { formatDurationSec } from "@/lib/utils";
 export default function CollectsDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [downloadedCount, setDownloadedCount] = useState(0);
@@ -24,7 +23,7 @@ export default function CollectsDetailPage() {
   const batchTask = useBatchStore((s) => activeTaskId ? s.tasks[activeTaskId] : null);
   const downloadProgress = batchTask ? (batchTask.total > 0 ? Math.round((batchTask.completed / batchTask.total) * 100) : 0) : 0;
 
-  const { items: videos, hasMore, loadingMore, sentinelRef, reset } = useInfiniteScroll<VideoItem>({
+  const { items: videos, hasMore, loadingMore, initialLoading, sentinelRef, reset } = useInfiniteScroll<VideoItem>({
     fetchPage: useCallback(async (cursor: number) => {
       if (!id) return null;
       const res = await getCollectsVideoList(id, cursor, 20);
@@ -42,10 +41,9 @@ export default function CollectsDetailPage() {
 
   useEffect(() => {
     if (!id) return;
-    setLoading(true);
     setError(null);
+    // reset() 触发 useInfiniteScroll 内部重新加载，loading 由其内部状态管理
     reset();
-    setLoading(false);
   }, [id, reset]);
 
   const handleDownloadAll = async () => {
@@ -90,12 +88,6 @@ export default function CollectsDetailPage() {
           </div>
         )}
 
-        {loading && (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-          </div>
-        )}
-
         {downloading && (
           <Bezel radius="xl">
             <div className="p-5">
@@ -107,7 +99,13 @@ export default function CollectsDetailPage() {
           </Bezel>
         )}
 
-        {!loading && videos.length === 0 && !error && (
+        {initialLoading && (
+          <div className="flex items-center justify-center py-16">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        )}
+
+        {!initialLoading && videos.length === 0 && !error && (
           <Bezel radius="xl">
             <div className="p-12 text-center">
               <p className="text-muted-foreground">暂无视频</p>
@@ -115,7 +113,7 @@ export default function CollectsDetailPage() {
           </Bezel>
         )}
 
-        {!loading && videos.length > 0 && (
+        {!initialLoading && videos.length > 0 && (
           <>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
               {videos.map((video) => (

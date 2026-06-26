@@ -13,7 +13,7 @@ import {
   Music,
 } from "lucide-react";
 import {
-  useLiveRecordsQuery,
+  useLiveRecordCountQuery,
   useMusicCountQuery,
   useUserStatsQuery,
   useVideoCountQuery,
@@ -30,7 +30,7 @@ const categories = [
 
 export default function LibraryPage() {
   const navigate = useNavigate();
-  const liveRecordsQuery = useLiveRecordsQuery({ limit: 1 });
+  const liveRecordCountQuery = useLiveRecordCountQuery();
   const videoStatsQuery = useVideoStatsQuery();
   const userStatsQuery = useUserStatsQuery();
   const videoCountQuery = useVideoCountQuery({ post_type: "video" });
@@ -44,7 +44,7 @@ export default function LibraryPage() {
     user_info: userStats?.total_count ?? 0,
     images: imageCountQuery.data ?? 0,
     music: musicCountQuery.data ?? 0,
-    live: liveRecordsQuery.data?.length ?? 0,
+    live: liveRecordCountQuery.data ?? 0,
   };
 
   return (

@@ -490,7 +490,7 @@ impl Database {
         }
         let conn = Connection::open(path)?;
         // 启用 WAL 模式，与 Python 侧一致
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;")?;
         // 执行 WAL checkpoint，确保读取到最新数据
         conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
         // 自动建表（与 core/db.py 的 _create_tables 保持一致）
@@ -657,6 +657,12 @@ impl Database {
             records.push(row?);
         }
         Ok(records)
+    }
+
+    pub fn get_live_records_count(&self) -> Result<i64> {
+        let conn = lock_conn!(self);
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM live_records", [], |row| row.get(0))?;
+        Ok(count)
     }
 
     // === video_info / user_info 查询 ===

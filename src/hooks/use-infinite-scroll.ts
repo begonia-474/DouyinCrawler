@@ -16,6 +16,8 @@ interface UseInfiniteScrollReturn<T> {
   setItems: React.Dispatch<React.SetStateAction<T[]>>;
   hasMore: boolean;
   loadingMore: boolean;
+  /** 首次加载或 reset 后的初始加载中 */
+  initialLoading: boolean;
   sentinelRef: React.RefObject<HTMLDivElement | null>;
   /** 重置所有状态并触发首次加载 */
   reset: (fetchFn?: (cursor: number) => Promise<{ items: T[]; nextCursor: number; hasMore: boolean } | null>) => void;
@@ -46,6 +48,7 @@ export function useInfiniteScroll<T>({
   const [cursor, setCursor] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(false);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
   // 用 ref 存储最新的 fetchPage 避免 useEffect 依赖问题
@@ -89,6 +92,7 @@ export function useInfiniteScroll<T>({
       setCursor(0);
       setHasMore(false);
       setLoadingMore(false);
+      setInitialLoading(true);
       // 首次加载
       (async () => {
         const result = await fn(0);
@@ -97,10 +101,11 @@ export function useInfiniteScroll<T>({
           setCursor(result.nextCursor);
           setHasMore(result.hasMore);
         }
+        setInitialLoading(false);
       })();
     },
     []
   );
 
-  return { items, setItems, hasMore, loadingMore, sentinelRef, reset };
+  return { items, setItems, hasMore, loadingMore, initialLoading, sentinelRef, reset };
 }

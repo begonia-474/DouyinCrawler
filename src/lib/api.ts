@@ -374,6 +374,10 @@ export async function getLiveRecords(params: {
   });
 }
 
+export async function getLiveRecordCount(): Promise<number> {
+  return invoke("get_live_record_count");
+}
+
 // === video_info / user_info 查询 ===
 
 export async function getVideos(params: {

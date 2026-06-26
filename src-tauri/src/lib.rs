@@ -186,6 +186,7 @@ pub fn run() {
             commands::db::get_downloads,
             commands::db::get_download_stats,
             commands::db::get_live_records,
+            commands::db::get_live_record_count,
             commands::db::get_videos,
             commands::db::get_video_count,
             commands::db::get_users,

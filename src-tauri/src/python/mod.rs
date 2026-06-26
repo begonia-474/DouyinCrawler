@@ -7,6 +7,7 @@ pub mod config;
 pub mod db_bridge;
 pub mod emit;
 pub mod handler;
+pub mod runtime;
 
 // 重新导出主要接口
 pub use bridge::PythonBridge;

@@ -4,6 +4,7 @@ export const queryKeys = {
   downloads: (params: QueryParams = {}) => ["downloads", params] as const,
   downloadStats: () => ["download-stats"] as const,
   liveRecords: (params: QueryParams = {}) => ["live-records", params] as const,
+  liveRecordCount: () => ["live-record-count"] as const,
   videoStats: () => ["video-stats"] as const,
   userStats: () => ["user-stats"] as const,
   videos: (params: QueryParams = {}) => ["videos", params] as const,

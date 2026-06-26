@@ -1,79 +1,162 @@
-# DouyinCrawler
+# DouyinCrawler Desktop
 
-抖音内容爬虫 - 轻量级、高效的抖音数据采集工具
+抖音内容爬虫桌面应用。项目使用 Tauri 2 + React 19 构建桌面界面，Python 爬虫核心通过 PyO3 嵌入 Rust 进程，由 Tauri command 直接调用，不需要独立 HTTP 服务。
 
 ## 功能特性
 
-- 单视频下载
-- 用户主页视频批量下载
-- 用户点赞视频下载
-- 用户收藏视频下载
-- 收藏夹视频下载
-- 合集视频下载
-- 直播信息获取
-- 评论获取
-- 搜索功能
-- 关注/粉丝列表获取
+- 单视频解析与下载
+- 用户作品、点赞、收藏、收藏夹、合集批量下载
+- 直播信息获取与直播录制
+- 评论、评论回复、搜索、推荐流、关注流、朋友流获取
+- 关注/粉丝列表与关注直播列表获取
+- 视频、用户、音乐、下载记录本地 SQLite 管理
+- 下载任务与直播录制任务实时进度事件
+- 图集、音乐、视频、用户信息分页与排序浏览
 
-## 安装
+## 技术栈
+
+- 前端：React 19、TypeScript、Vite 7、Tailwind CSS 4、shadcn/ui、Zustand、React Query
+- 桌面：Tauri 2、Rust、PyO3
+- 爬虫核心：Python 3.12+、httpx、pydantic、ABogus/XBogus 签名算法
+- 数据库：SQLite、rusqlite、WAL 模式
+- 测试：pytest、pytest-asyncio、前端 TypeScript 构建、Cargo check
+
+## 环境准备
+
+Python 建议使用项目约定的 Conda 环境：
 
 ```bash
-pip install -r requirements.txt
+conda activate projects-python
+pip install -r requirements.txt -c requirements.lock
 ```
 
-## 使用方法
+安装前端依赖：
 
-```python
-import asyncio
-from core.handler import DouyinHandler
+```bash
+pnpm install
+```
 
-async def main():
-    handler = DouyinHandler(
-        cookie="your_cookie_here",
-        download_path="Download",
-    )
+## 开发
 
-    # 下载单个视频
-    result = await handler.handle_one_video("https://www.douyin.com/video/xxx")
-    print(result)
+启动完整桌面应用：
 
-asyncio.run(main())
+```bash
+pnpm tauri dev
+```
+
+仅启动前端开发服务器：
+
+```bash
+pnpm dev
+```
+
+生产构建：
+
+```bash
+pnpm tauri build
+```
+
+## 测试与检查
+
+推荐提交前至少运行：
+
+```bash
+pnpm build
+cd src-tauri && cargo check
+cd ..
+python -m pytest -m offline
+```
+
+完整集成验证需要有效 Cookie 和网络环境：
+
+```bash
+PYTHONIOENCODING=utf-8 python test/test_all_modes.py
+PYTHONIOENCODING=utf-8 python test/e2e_verify.py
 ```
 
 ## 项目结构
 
+```text
+DouyinCrawler-desktop/
+├── backend/                 # 任务管理与日志
+│   ├── task_manager.py      # 配置、Handler 生命周期、事件广播门面
+│   ├── batch_manager.py     # 批量下载任务
+│   └── live_manager.py      # 直播录制任务
+├── core/                    # Python 爬虫核心
+│   ├── handler.py           # 业务门面，保持 py_bridge 调用接口
+│   ├── services/            # 视频、用户、收藏、合集、直播、Feed、音乐等服务
+│   ├── crawler.py           # HTTP 爬虫引擎
+│   ├── downloader.py        # 下载器
+│   ├── filter.py            # 响应数据过滤
+│   ├── db.py                # Python 侧 DB 辅助
+│   ├── db_bridge.py         # Rust 注入的 DB 写入桥
+│   ├── py_bridge.py         # PyO3 调用入口
+│   ├── tauri_bridge.py      # Tauri 事件桥
+│   └── signature/           # ABogus/XBogus 签名算法
+├── src-tauri/               # Rust/Tauri 后端
+│   ├── src/lib.rs           # 应用初始化、共享命令、事件/DB/Python 注入
+│   ├── src/commands/        # Tauri commands，按 Python/DB 边界拆分
+│   ├── src/db.rs            # SQLite 数据库层与迁移
+│   ├── src/config.rs        # 配置管理
+│   └── src/python/          # PyO3 桥接封装
+├── src/                     # React 前端
+│   ├── modules/douyin/      # 抖音功能页面
+│   ├── shared/              # 共享页面
+│   ├── components/          # UI 组件
+│   ├── hooks/               # 分页、无限滚动等 hooks
+│   ├── lib/                 # API、React Query、类型和工具
+│   └── stores/              # Zustand 实时任务状态
+├── scripts/                 # 辅助脚本
+├── test/                    # 离线单测和集成验证
+├── config/                  # 运行时配置，已忽略
+├── data/                    # SQLite 数据库，已忽略
+└── Download/                # 下载目录，已忽略
 ```
-DouyinCrawler/
-├── core/
-│   ├── api.py              # API 端点定义
-│   ├── config.py           # 配置管理
-│   ├── config_manager.py   # 客户端配置管理器
-│   ├── crawler.py          # HTTP 爬虫引擎
-│   ├── db.py               # 数据库层
-│   ├── downloader.py       # 下载器
-│   ├── filter.py           # 响应数据过滤
-│   ├── handler.py          # 业务处理器
-│   ├── models.py           # 请求参数模型
-│   ├── utils.py            # 工具函数
-│   ├── signature/          # 签名算法
-│   │   ├── abogus.py       # ABogus 签名
-│   │   ├── xbogus.py       # XBogus 签名
-│   │   ├── fingerprint.py  # 浏览器指纹生成
-│   │   └── manager.py      # 签名管理器
-│   └── tokens/             # Token 管理
-│       └── token_manager.py
-├── test/                   # 测试文件
-├── requirements.txt        # 依赖列表
-└── README.md              # 项目说明
+
+## 架构概览
+
+```text
+React 前端
+  ↓ Tauri invoke
+Rust command
+  ↓ PyO3
+core.py_bridge
+  ↓
+DouyinHandler / core.services
+  ↓
+DouyinCrawler / Downloader / SQLite bridge
+
+Python 任务进度
+  ↓ core.tauri_bridge.emit()
+Tauri event
+  ↓
+Zustand stores / React Query cache invalidation
 ```
+
+前端通过 `src/lib/api.ts` 调用 Tauri command。Rust command 按边界拆在 `src-tauri/src/commands/` 中：Python 业务调用走 `commands/python.rs`，数据库 CRUD 走 `commands/db.rs`。Python 侧 `core/handler.py` 是稳定门面，具体业务逻辑位于 `core/services/`。
+
+## 配置与数据
+
+- 运行时配置文件：`config/app.json`
+- 默认数据库：`data/douyin.db`
+- 默认下载目录：`Download/`
+- 前端开发端口：`3000`
+
+`config/app.json` 可能包含有效抖音 Cookie，`config/` 已被 `.gitignore` 忽略，请不要提交或公开 Cookie。
+
+## 类型生成
+
+前端 Tauri 数据类型由 Rust 数据结构生成：
+
+```bash
+python scripts/gen_tauri_types.py
+```
+
+生成目标为 `src/lib/tauri-types.ts`。
 
 ## 致谢
 
-本项目的签名算法和部分核心代码参考了 [f2](https://github.com/Johnserf-Seed/f2) 项目。
-
-f2 是一个功能强大的社交媒体数据采集工具，支持多个平台。本项目专注于抖音平台，采用了 f2 的核心签名算法和部分实现，以保持与抖音反爬机制的同步更新。
-
-感谢 f2 项目的作者 [Johnserf-Seed](https://github.com/Johnserf-Seed) 和所有贡献者的辛勤工作。
+本项目的签名算法和部分核心代码参考了 [f2](https://github.com/Johnserf-Seed/f2) 项目。感谢 f2 项目的作者 [Johnserf-Seed](https://github.com/Johnserf-Seed) 和所有贡献者。
 
 ## 许可证
 

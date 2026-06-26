@@ -44,6 +44,13 @@ pub fn get_live_records(
 }
 
 #[tauri::command(rename_all = "snake_case")]
+pub fn get_live_record_count(
+    db: State<'_, Database>,
+) -> Result<i64, String> {
+    db.get_live_records_count().map_err(|e| e.to_string())
+}
+
+#[tauri::command(rename_all = "snake_case")]
 pub fn get_videos(
     db: State<'_, Database>,
     limit: i64,

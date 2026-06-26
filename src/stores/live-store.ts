@@ -74,6 +74,7 @@ export const useLiveStore = create<LiveState>((set) => ({
 
       if (msg.data.status === "completed" || msg.data.status === "error") {
         void queryClient.invalidateQueries({ queryKey: ["live-records"] });
+        void queryClient.invalidateQueries({ queryKey: ["live-record-count"] });
       }
     }).then((fn) => {
       unlisten = fn;

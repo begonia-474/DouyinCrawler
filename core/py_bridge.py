@@ -6,7 +6,6 @@ Python API 模块
 import asyncio
 import json
 import uuid
-import threading
 import logging
 from typing import Optional
 
@@ -45,24 +44,12 @@ def _get_task_manager():
 
 
 def _run_async(coro):
-    """运行异步函数"""
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            logger.debug("[_run_async] 事件循环运行中，使用 ThreadPoolExecutor")
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(asyncio.run, coro)
-                return future.result(timeout=60)
-        else:
-            logger.debug("[_run_async] 使用现有事件循环")
-            return loop.run_until_complete(coro)
-    except RuntimeError as e:
-        logger.debug("[_run_async] RuntimeError: %s, 使用 asyncio.run", e)
-        return asyncio.run(coro)
-    except Exception as e:
-        logger.error("[_run_async] 异常: %s", e, exc_info=True)
-        raise
+    """运行异步函数。
+
+    调用方来自 Tauri spawn_blocking 线程，无 running event loop，
+    直接使用 asyncio.run 创建新事件循环执行协程。
+    """
+    return asyncio.run(coro)
 
 
 @_safe_call

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useLocation } from "react-router-dom";
 import { Header } from "@/components/layout/header";
 import { AnimateEntry } from "@/components/shared/animate-entry";
@@ -45,9 +45,10 @@ export default function LivePage() {
   const recording = !!activeTask;
   const recordTaskId = activeTask?.task_id || null;
 
-  // 查找刚完成/出错的任务（用于保存记录）
-  const doneTasks = Object.values(liveTasks).filter(
-    (t) => t.status === "completed" || t.status === "error"
+  // 查找刚完成/出错的任务（用于保存记录），用 useMemo 稳定引用避免 effect 过度触发
+  const doneTasks = useMemo(
+    () => Object.values(liveTasks).filter((t) => t.status === "completed" || t.status === "error"),
+    [liveTasks]
   );
   const savedTaskIds = useRef<Set<string>>(new Set());
 
