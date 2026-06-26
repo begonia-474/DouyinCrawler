@@ -101,7 +101,7 @@ export default function LikesPage() {
       </AnimateEntry>
 
       <div className="space-y-6">
-        <UrlInput onSubmit={handleParse} loading={loading} placeholder="粘贴用户主页链接..." allowedTypes={["user"]} />
+        <UrlInput onSubmit={handleParse} loading={loading} placeholder="粘贴用户主页链接..." allowedTypes={["user"]} autoDetect />
 
         <ErrorBanner message={error} />
 

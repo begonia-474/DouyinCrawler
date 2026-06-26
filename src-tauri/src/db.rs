@@ -559,6 +559,38 @@ pub struct UserStats {
 }
 
 #[derive(Serialize, Clone)]
+pub struct TrendPoint {
+    pub day: String,
+    pub cnt: i64,
+    pub size: i64,
+}
+
+#[derive(Serialize, Clone)]
+pub struct AuthorStat {
+    pub author_nickname: String,
+    pub cnt: i64,
+    pub total_size: i64,
+}
+
+#[derive(Serialize, Clone)]
+pub struct StorageStat {
+    pub download_type: String,
+    pub cnt: i64,
+    pub total_size: i64,
+}
+
+#[derive(Serialize, Clone)]
+pub struct DbHealth {
+    pub download_count: i64,
+    pub video_count: i64,
+    pub user_count: i64,
+    pub live_count: i64,
+    pub music_count: i64,
+    pub task_count: i64,
+    pub db_size_bytes: i64,
+}
+
+#[derive(Serialize, Clone)]
 pub struct MusicCollection {
     pub music_id: String,
     pub mid: Option<String>,
@@ -1162,6 +1194,120 @@ impl Database {
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )?;
         Ok(UserStats { total_count, total_follower, total_aweme })
+    }
+
+    /// 下载趋势：按日/周/月维度统计下载量
+    /// range: "day"=30天, "week"=12周, "month"=12月
+    pub fn get_download_trend(&self, range: &str) -> Result<Vec<TrendPoint>> {
+        let conn = lock_conn!(self);
+
+        let (group_expr, label_expr, limit_clause) = match range {
+            "week" => (
+                "strftime('%Y-W%W', created_at, 'unixepoch', 'localtime')",
+                "strftime('%Y-W%W', created_at, 'unixepoch', 'localtime')",
+                "12",
+            ),
+            "month" => (
+                "strftime('%Y-%m', created_at, 'unixepoch', 'localtime')",
+                "strftime('%Y-%m', created_at, 'unixepoch', 'localtime')",
+                "12",
+            ),
+            _ => (
+                "DATE(created_at, 'unixepoch', 'localtime')",
+                "DATE(created_at, 'unixepoch', 'localtime')",
+                "30",
+            ),
+        };
+
+        let sql = format!(
+            "SELECT {} as period, COUNT(*), COALESCE(SUM(file_size), 0) \
+             FROM download_history WHERE status = 'completed' \
+             GROUP BY {} ORDER BY period DESC LIMIT {}",
+            label_expr, group_expr, limit_clause,
+        );
+
+        let mut stmt = conn.prepare(&sql)?;
+        let points = stmt
+            .query_map([], |row| {
+                Ok(TrendPoint {
+                    day: row.get(0)?,
+                    cnt: row.get(1)?,
+                    size: row.get(2)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(points)
+    }
+
+    /// 下载量最多的作者 Top N
+    pub fn get_top_authors(&self, limit: i64) -> Result<Vec<AuthorStat>> {
+        let conn = lock_conn!(self);
+        let mut stmt = conn.prepare(
+            "SELECT author_nickname, COUNT(*), COALESCE(SUM(file_size), 0) \
+             FROM download_history \
+             WHERE status = 'completed' AND author_nickname IS NOT NULL AND author_nickname != '' \
+             GROUP BY author_nickname ORDER BY COUNT(*) DESC LIMIT ?1",
+        )?;
+        let authors = stmt
+            .query_map(rusqlite::params![limit], |row| {
+                Ok(AuthorStat {
+                    author_nickname: row.get(0)?,
+                    cnt: row.get(1)?,
+                    total_size: row.get(2)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(authors)
+    }
+
+    /// 存储占用分析：按下载类型统计
+    pub fn get_storage_analysis(&self) -> Result<Vec<StorageStat>> {
+        let conn = lock_conn!(self);
+        let mut stmt = conn.prepare(
+            "SELECT download_type, COUNT(*), COALESCE(SUM(file_size), 0) \
+             FROM download_history WHERE status = 'completed' \
+             GROUP BY download_type ORDER BY SUM(file_size) DESC",
+        )?;
+        let stats = stmt
+            .query_map([], |row| {
+                Ok(StorageStat {
+                    download_type: row.get(0)?,
+                    cnt: row.get(1)?,
+                    total_size: row.get(2)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(stats)
+    }
+
+    /// 数据库健康检查：各表记录数 + 数据库文件大小
+    pub fn db_health_check(&self, db_path: &str) -> Result<DbHealth> {
+        let conn = lock_conn!(self);
+
+        let count = |table: &str| -> Result<i64> {
+            let c: i64 = conn.query_row(
+                &format!("SELECT COUNT(*) FROM {}", table), [], |row| row.get(0),
+            )?;
+            Ok(c)
+        };
+
+        let db_size = std::fs::metadata(db_path)
+            .map(|m| m.len() as i64)
+            .unwrap_or(0);
+
+        Ok(DbHealth {
+            download_count: count("download_history")?,
+            video_count: count("video_info")?,
+            user_count: count("user_info")?,
+            live_count: count("live_records")?,
+            music_count: count("music_collection")?,
+            task_count: count("download_tasks")?,
+            db_size_bytes: db_size,
+        })
     }
 
     /// 执行迁移 SQL，只忽略 duplicate column/index 错误，其他错误必须传播。

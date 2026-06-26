@@ -1,9 +1,9 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Bezel } from "@/components/shared/bezel";
-import { Link, Loader2, ArrowRight } from "lucide-react";
+import { Link, Loader2, ArrowRight, Clipboard, X } from "lucide-react";
 
 interface UrlInputProps {
   onSubmit: (url: string) => void;
@@ -12,6 +12,8 @@ interface UrlInputProps {
   allowedTypes?: UrlType[];
   defaultValue?: string;
   autoSubmit?: boolean;
+  /** 启用剪贴板自动检测抖音链接 */
+  autoDetect?: boolean;
 }
 
 type UrlType = "video" | "user" | "mix" | "live" | "unknown";
@@ -44,9 +46,11 @@ const typeLabels: Record<UrlType, string> = {
   unknown: "未知",
 };
 
-export function UrlInput({ onSubmit, loading, placeholder, allowedTypes, defaultValue, autoSubmit }: UrlInputProps) {
+export function UrlInput({ onSubmit, loading, placeholder, allowedTypes, defaultValue, autoSubmit, autoDetect }: UrlInputProps) {
   const [url, setUrl] = useState(defaultValue || "");
   const [typeError, setTypeError] = useState<string | null>(null);
+  const [clipboardHint, setClipboardHint] = useState<string | null>(null);
+  const lastClipboardRef = useRef<string>("");
   const urlType = detectUrlType(url);
 
   useEffect(() => {
@@ -54,6 +58,42 @@ export function UrlInput({ onSubmit, loading, placeholder, allowedTypes, default
       onSubmit(defaultValue);
     }
   }, [defaultValue, autoSubmit, onSubmit]);
+
+  // 剪贴板自动检测
+  useEffect(() => {
+    if (!autoDetect) return;
+
+    const poll = setInterval(() => {
+      // 仅在页面聚焦时轮询
+      if (!document.hasFocus()) return;
+
+      navigator.clipboard.readText().then((text) => {
+        if (!text || text === lastClipboardRef.current) return;
+        lastClipboardRef.current = text;
+
+        const extracted = extractUrl(text);
+        const type = detectUrlType(extracted);
+        if (type !== "unknown" && extracted !== url) {
+          setClipboardHint(extracted);
+        }
+      }).catch(() => {
+        // 剪贴板权限被拒绝时静默忽略
+      });
+    }, 2000);
+
+    return () => clearInterval(poll);
+  }, [autoDetect, url]);
+
+  const handleAcceptClipboard = useCallback(() => {
+    if (clipboardHint) {
+      setUrl(clipboardHint);
+      setClipboardHint(null);
+    }
+  }, [clipboardHint]);
+
+  const handleDismissClipboard = useCallback(() => {
+    setClipboardHint(null);
+  }, []);
 
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
@@ -123,6 +163,32 @@ export function UrlInput({ onSubmit, loading, placeholder, allowedTypes, default
       </form>
       {typeError && (
         <p className="text-xs text-destructive tracking-wide">{typeError}</p>
+      )}
+      {clipboardHint && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/[0.06] border border-primary/10 text-xs">
+          <Clipboard className="h-3.5 w-3.5 text-primary/70 shrink-0" />
+          <span className="text-muted-foreground truncate flex-1 min-w-0">
+            检测到链接：{clipboardHint}
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-xs shrink-0"
+            onClick={handleAcceptClipboard}
+          >
+            使用
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="h-6 w-6 shrink-0"
+            onClick={handleDismissClipboard}
+          >
+            <X className="h-3 w-3" />
+          </Button>
+        </div>
       )}
     </div>
   );

@@ -45,7 +45,7 @@ export default function CollectsPage() {
       <Header title="用户收藏" description="查看用户的收藏夹，点击进入下载" parent={{ label: "首页", path: "/douyin" }} />
 
       <div className="space-y-6">
-        <UrlInput onSubmit={handleParse} loading={loading} placeholder="粘贴用户主页链接..." allowedTypes={["user"]} />
+        <UrlInput onSubmit={handleParse} loading={loading} placeholder="粘贴用户主页链接..." allowedTypes={["user"]} autoDetect />
 
         <ErrorBanner message={error} />
 

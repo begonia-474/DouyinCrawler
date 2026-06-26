@@ -6,6 +6,12 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AnimateEntry } from "@/components/shared/animate-entry";
 import { Bezel } from "@/components/shared/bezel";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 import { TaskCard } from "@/components/shared/task-card";
 import {
   Download,
@@ -14,8 +20,9 @@ import {
   FolderOpen,
   Radio,
   Trash2,
+  DownloadCloud,
 } from "lucide-react";
-import { deleteLiveRecord, deleteDownloadTask } from "@/lib/api";
+import { deleteLiveRecord, deleteDownloadTask, openFolder, getConfig, exportData } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { useLiveRecordsQuery, useDownloadTasksQuery } from "@/lib/queries";
 import { useTaskStore } from "@/stores/task-store";
@@ -34,6 +41,35 @@ export default function DownloadsPage() {
   useEffect(() => {
     connect();
   }, [connect]);
+
+  const handleOpenFolder = async () => {
+    try {
+      const config = await getConfig();
+      await openFolder(config.download_path);
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "打开文件夹失败");
+    }
+  };
+
+  const EXPORT_TYPES: Record<string, string> = {
+    downloads: "下载记录",
+    videos: "视频列表",
+    users: "用户列表",
+    live_records: "直播录制",
+    music: "音乐收藏",
+  };
+
+  const handleExport = async (dataType: string) => {
+    try {
+      const config = await getConfig();
+      const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+      const savePath = `${config.download_path}/export_${dataType}_${ts}.json`;
+      await exportData(dataType, savePath);
+      window.alert(`导出成功：${savePath}`);
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "导出失败");
+    }
+  };
 
   const askDeleteFile = (filePath: string | null) => {
     if (!filePath) return false;
@@ -127,7 +163,22 @@ export default function DownloadsPage() {
                 清除已完成任务
               </Button>
             )}
-            <Button variant="capsule" size="sm">
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={<Button variant="capsule" size="sm" />}
+              >
+                <DownloadCloud className="h-4 w-4 mr-1.5" />
+                导出数据
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {Object.entries(EXPORT_TYPES).map(([key, label]) => (
+                  <DropdownMenuItem key={key} onClick={() => handleExport(key)}>
+                    {label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button variant="capsule" size="sm" onClick={handleOpenFolder}>
               <FolderOpen className="h-4 w-4 mr-1.5" />
               打开文件夹
             </Button>

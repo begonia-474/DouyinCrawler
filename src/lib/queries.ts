@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { getDownloadStats, getDownloads, getLiveRecordCount, getLiveRecords, getMusicCollectionCountFromDB, getMusicCollectionFromDB, getUserCount, getUserStats, getUsers, getVideoCount, getVideos, getVideoStats, getDownloadTasks, getDownloadTaskDetail, getDownloadTaskItems, getDownloadTaskItemCounts } from "@/lib/api";
+import { getDownloadStats, getDownloads, getLiveRecordCount, getLiveRecords, getMusicCollectionCountFromDB, getMusicCollectionFromDB, getUserCount, getUserStats, getUsers, getVideoCount, getVideos, getVideoStats, getDownloadTasks, getDownloadTaskDetail, getDownloadTaskItems, getDownloadTaskItemCounts, getDownloadTrend, getTopAuthors, getStorageAnalysis, dbHealthCheck, getDbPath } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 
 export function useDownloadsQuery(params: {
@@ -141,5 +141,36 @@ export function useDownloadTaskItemCountsQuery(taskId: string) {
     queryKey: queryKeys.downloadTaskItemCounts(taskId),
     queryFn: () => getDownloadTaskItemCounts(taskId),
     enabled: !!taskId,
+  });
+}
+
+export function useDownloadTrendQuery(range: string) {
+  return useQuery({
+    queryKey: queryKeys.downloadTrend(range),
+    queryFn: () => getDownloadTrend(range),
+  });
+}
+
+export function useTopAuthorsQuery(limit = 10) {
+  return useQuery({
+    queryKey: queryKeys.topAuthors(limit),
+    queryFn: () => getTopAuthors(limit),
+  });
+}
+
+export function useStorageAnalysisQuery() {
+  return useQuery({
+    queryKey: queryKeys.storageAnalysis(),
+    queryFn: () => getStorageAnalysis(),
+  });
+}
+
+export function useDbHealthQuery() {
+  return useQuery({
+    queryKey: queryKeys.dbHealth(),
+    queryFn: async () => {
+      const dbPath = await getDbPath();
+      return dbHealthCheck(dbPath);
+    },
   });
 }

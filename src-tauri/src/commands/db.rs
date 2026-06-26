@@ -11,6 +11,7 @@ use crate::db::{
     LiveRecord, MusicCollection, NewDownloadRecord, NewDownloadTask,
     NewLiveRecord, NewMusicCollection, NewTaskItem,
     TaskItem, TaskItemCounts, UserInfo, VideoInfo, VideoStats, UserStats,
+    TrendPoint, AuthorStat, StorageStat, DbHealth,
 };
 
 // ============================================================
@@ -268,6 +269,91 @@ pub fn delete_music_collection(
         crate::delete_local_path(file_path)?;
     }
     db.delete_music_collection(&music_id).map_err(|e| e.to_string())
+}
+
+// ============================================================
+// 高级统计
+// ============================================================
+
+#[tauri::command(rename_all = "snake_case")]
+pub fn get_download_trend(
+    db: State<'_, Database>,
+    range: String,
+) -> Result<Vec<TrendPoint>, String> {
+    db.get_download_trend(&range).map_err(|e| e.to_string())
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub fn get_top_authors(
+    db: State<'_, Database>,
+    limit: i64,
+) -> Result<Vec<AuthorStat>, String> {
+    db.get_top_authors(limit).map_err(|e| e.to_string())
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub fn get_storage_analysis(db: State<'_, Database>) -> Result<Vec<StorageStat>, String> {
+    db.get_storage_analysis().map_err(|e| e.to_string())
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub fn db_health_check(
+    db: State<'_, Database>,
+    db_path: String,
+) -> Result<DbHealth, String> {
+    db.db_health_check(&db_path).map_err(|e| e.to_string())
+}
+
+// ============================================================
+// 数据导出
+// ============================================================
+
+#[tauri::command(rename_all = "snake_case")]
+pub fn export_data(
+    db: State<'_, Database>,
+    data_type: String,
+    save_path: String,
+) -> Result<String, String> {
+    let json = match data_type.as_str() {
+        "downloads" => {
+            let records = db.get_downloads(i64::MAX, 0, None, None)
+                .map_err(|e| e.to_string())?;
+            serde_json::to_string_pretty(&records).map_err(|e| e.to_string())?
+        }
+        "videos" => {
+            let records = db.get_videos(i64::MAX, 0, None, None, None, None, None)
+                .map_err(|e| e.to_string())?;
+            serde_json::to_string_pretty(&records).map_err(|e| e.to_string())?
+        }
+        "users" => {
+            let records = db.get_users(i64::MAX, 0, None, None, None)
+                .map_err(|e| e.to_string())?;
+            serde_json::to_string_pretty(&records).map_err(|e| e.to_string())?
+        }
+        "live_records" => {
+            let records = db.get_live_records(i64::MAX, 0)
+                .map_err(|e| e.to_string())?;
+            serde_json::to_string_pretty(&records).map_err(|e| e.to_string())?
+        }
+        "music" => {
+            let records = db.get_music_collection(i64::MAX, 0, None, None)
+                .map_err(|e| e.to_string())?;
+            serde_json::to_string_pretty(&records).map_err(|e| e.to_string())?
+        }
+        _ => return Err(format!("不支持的导出类型: {}", data_type)),
+    };
+
+    // 确保父目录存在
+    if let Some(parent) = std::path::Path::new(&save_path).parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("创建目录失败: {}", e))?;
+    }
+
+    std::fs::write(&save_path, &json)
+        .map_err(|e| format!("写入文件失败: {}", e))?;
+
+    info!("[export_data] 已导出 {} 到 {}", data_type, save_path);
+    Ok(save_path)
 }
 
 // ============================================================

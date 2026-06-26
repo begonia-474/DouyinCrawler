@@ -101,7 +101,7 @@ export default function MixPage() {
       </AnimateEntry>
 
       <div className="space-y-6">
-        <UrlInput onSubmit={handleParse} loading={loading} placeholder="粘贴合集链接..." allowedTypes={["mix"]} />
+        <UrlInput onSubmit={handleParse} loading={loading} placeholder="粘贴合集链接..." allowedTypes={["mix"]} autoDetect />
 
         <ErrorBanner message={error} />
 

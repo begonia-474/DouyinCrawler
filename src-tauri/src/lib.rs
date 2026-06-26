@@ -24,6 +24,16 @@ fn get_config(config_manager: tauri::State<'_, Arc<Mutex<ConfigManager>>>) -> Re
     Ok(manager.get_douyin_config())
 }
 
+/// 存储数据库路径，供 db_health_check 使用
+static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
+
+#[tauri::command(rename_all = "snake_case")]
+fn get_db_path() -> Result<String, String> {
+    DB_PATH.get()
+        .map(|p| p.to_string_lossy().to_string())
+        .ok_or_else(|| "数据库路径未初始化".to_string())
+}
+
 #[tauri::command(rename_all = "snake_case")]
 fn set_config(
     config_manager: tauri::State<'_, Arc<Mutex<ConfigManager>>>,
@@ -114,6 +124,9 @@ pub fn run() {
                 .expect("Failed to open database");
             app.manage(database);
 
+            // 存储数据库路径
+            let _ = DB_PATH.set(db_path.clone());
+
             // 初始化配置管理器
             let config_manager = Arc::new(Mutex::new(ConfigManager::new()));
             app.manage(config_manager.clone());
@@ -155,6 +168,7 @@ pub fn run() {
             // 配置
             get_config,
             set_config,
+            get_db_path,
             // Python 桥接调用（commands/python.rs）
             commands::python::py_parse_video,
             commands::python::py_download_video,
@@ -211,6 +225,13 @@ pub fn run() {
             commands::db::delete_user_info,
             commands::db::delete_music_collection,
             commands::db::is_video_downloaded,
+            // 高级统计（commands/db.rs）
+            commands::db::get_download_trend,
+            commands::db::get_top_authors,
+            commands::db::get_storage_analysis,
+            commands::db::db_health_check,
+            // 数据导出（commands/db.rs）
+            commands::db::export_data,
             // 下载任务（commands/db.rs）
             commands::db::create_download_task,
             commands::db::get_download_tasks,

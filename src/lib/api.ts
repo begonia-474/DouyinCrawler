@@ -1,11 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
+import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import type {
   ApiResponse, PostDetailResponse, DownloadResult,
   CommentItem, MusicItem, FollowItem, LiveInfo,
   LiveRecordTask, FollowingLiveItem,
   DownloadMode, DownloadTask, TaskItem, TaskItemCounts, DownloadTaskDetail,
 } from "./api-types";
-import type { DownloadRecord, DownloadStats, LiveRecord, VideoInfo, UserInfo, VideoStats, UserStats } from "./tauri-types";
+import type { DownloadRecord, DownloadStats, LiveRecord, VideoInfo, UserInfo, VideoStats, UserStats, TrendPoint, AuthorStat, StorageStat, DbHealth } from "./tauri-types";
 
 // ============================================================
 // 辅助：包装后端返回值到 ApiResponse.data
@@ -61,6 +62,25 @@ export async function getConfig(): Promise<AppConfig> {
 
 export async function setConfig(updates: Record<string, string>): Promise<void> {
   await invoke("set_config", { updates });
+}
+
+// ============================================================
+// 文件管理（tauri-plugin-opener）
+// ============================================================
+
+/** 在系统文件管理器中打开路径 */
+export async function openFolder(path: string): Promise<void> {
+  await openPath(path);
+}
+
+/** 在系统文件管理器中定位到文件 */
+export async function revealInFolder(path: string): Promise<void> {
+  await revealItemInDir(path);
+}
+
+/** 导出数据为 JSON 文件 */
+export async function exportData(dataType: string, savePath: string): Promise<string> {
+  return invoke("export_data", { data_type: dataType, save_path: savePath });
 }
 
 // ============================================================
@@ -502,6 +522,26 @@ export async function getVideoStats(): Promise<VideoStats> {
 
 export async function getUserStats(): Promise<UserStats> {
   return invoke("get_user_stats");
+}
+
+export async function getDownloadTrend(range: string): Promise<TrendPoint[]> {
+  return invoke("get_download_trend", { range });
+}
+
+export async function getTopAuthors(limit = 10): Promise<AuthorStat[]> {
+  return invoke("get_top_authors", { limit });
+}
+
+export async function getStorageAnalysis(): Promise<StorageStat[]> {
+  return invoke("get_storage_analysis");
+}
+
+export async function dbHealthCheck(dbPath: string): Promise<DbHealth> {
+  return invoke("db_health_check", { db_path: dbPath });
+}
+
+export async function getDbPath(): Promise<string> {
+  return invoke("get_db_path");
 }
 
 export async function isVideoDownloaded(awemeId: string): Promise<boolean> {

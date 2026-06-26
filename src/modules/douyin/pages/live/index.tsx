@@ -176,6 +176,7 @@ export default function LivePage() {
           allowedTypes={["live"]}
           defaultValue={initialUrl}
           autoSubmit={!!initialUrl}
+          autoDetect
         />
 
         <ErrorBanner message={error} />

@@ -109,7 +109,7 @@ export default function VideoPage() {
 
       <div className="space-y-6">
         <AnimateEntry delay={50}>
-          <UrlInput onSubmit={handleParse} loading={loading} allowedTypes={["video"]} />
+          <UrlInput onSubmit={handleParse} loading={loading} allowedTypes={["video"]} autoDetect />
         </AnimateEntry>
 
         {error && (

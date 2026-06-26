@@ -142,6 +142,38 @@ export interface DownloadStats {
   by_day: DayStat[];
 }
 
+/** TrendPoint（对齐 Rust TrendPoint 结构体） */
+export interface TrendPoint {
+  day: string;
+  cnt: number;
+  size: number;
+}
+
+/** AuthorStat（对齐 Rust AuthorStat 结构体） */
+export interface AuthorStat {
+  author_nickname: string;
+  cnt: number;
+  total_size: number;
+}
+
+/** StorageStat（对齐 Rust StorageStat 结构体） */
+export interface StorageStat {
+  download_type: string;
+  cnt: number;
+  total_size: number;
+}
+
+/** DbHealth（对齐 Rust DbHealth 结构体） */
+export interface DbHealth {
+  download_count: number;
+  video_count: number;
+  user_count: number;
+  live_count: number;
+  music_count: number;
+  task_count: number;
+  db_size_bytes: number;
+}
+
 /** VideoInfo（对齐 Rust VideoInfo 结构体） */
 export interface VideoInfo {
   aweme_id: string;
