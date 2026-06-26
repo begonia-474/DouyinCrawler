@@ -13,7 +13,7 @@ import {
   getUserProfile, getUserPosts,
   getUserFollowing, getUserFollowers, downloadUserPosts,
 } from "@/lib/api";
-import { useBatchStore } from "@/stores/batch-store";
+import { useTaskStore } from "@/stores/task-store";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import type { UserProfile as UserProfileType, VideoItem, FollowItem } from "@/lib/api-types";
 import {
@@ -55,8 +55,8 @@ export default function UserPage() {
   const [downloadedCount, setDownloadedCount] = useState(0);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [currentUrl, setCurrentUrl] = useState("");
-  const batchTask = useBatchStore((s) => activeTaskId ? s.tasks[activeTaskId] : null);
-  const downloadProgress = batchTask ? (batchTask.total > 0 ? Math.round((batchTask.completed / batchTask.total) * 100) : 0) : 0;
+  const batchTask = useTaskStore((s) => activeTaskId ? s.tasks[activeTaskId] : null);
+  const downloadProgress = batchTask ? ((batchTask.total ?? 0) > 0 ? Math.round(((batchTask.completed ?? 0) / (batchTask.total ?? 1)) * 100) : 0) : 0;
 
   const { items: videos, setItems: setVideos, hasMore, loadingMore, sentinelRef, reset } = useInfiniteScroll<VideoItem>({
     fetchPage: useCallback(async (cursor: number) => {

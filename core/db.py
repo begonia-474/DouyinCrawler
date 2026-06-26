@@ -77,6 +77,35 @@ def save_live_record(record: dict) -> bool:
     return db_bridge.save_live_record(record)
 
 
+# ============================================================
+# 下载任务管理
+# ============================================================
+
+def create_task(task_id: str, mode: str, url: str, title: str = None) -> bool:
+    """创建下载任务记录（通过 Rust 桥接）"""
+    return db_bridge.create_task(task_id, mode, url, title)
+
+
+def update_task_status(task_id: str, status: str, error_msg: str = None) -> bool:
+    """更新任务状态"""
+    return db_bridge.update_task_status(task_id, status, error_msg)
+
+
+def create_task_item(task_id: str, aweme_id: str = None, title: str = None,
+                     author_nickname: str = None, cover_url: str = None) -> bool:
+    """创建任务子项"""
+    return db_bridge.create_task_item(task_id, aweme_id, title, author_nickname, cover_url)
+
+
+def update_task_item_status(task_id: str, aweme_id: str, status: str,
+                            file_path: str = None, file_size: int = 0,
+                            error_msg: str = None) -> bool:
+    """更新子项状态（completed / skipped / failed）"""
+    return db_bridge.update_task_item_status(
+        task_id, aweme_id, status, file_path, file_size, error_msg
+    )
+
+
 def save_batch_results(results: list, download_type: str = "batch") -> dict:
     """批量保存下载结果
 

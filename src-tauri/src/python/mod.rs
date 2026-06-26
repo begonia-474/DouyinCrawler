@@ -15,7 +15,7 @@ pub use config::init_config;
 pub use db_bridge::register_db_bridge;
 pub use emit::register_app_handle;
 pub use handler::{
-    parse_video, download_video, get_live_info, start_batch_download,
+    parse_video, download_video, get_live_info, start_batch_download, start_download,
     get_user_profile, get_user_posts, search_videos, get_mix_info,
     get_collects_list, get_collects_video_list, get_following_list,
     get_follower_list, get_music_collection, download_music, get_following_live,

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Bezel } from "@/components/shared/bezel";
 import { DownloadStatusCard } from "@/components/shared/download-status-card";
 import { getCollectsVideoList, downloadCollectsVideo } from "@/lib/api";
-import { useBatchStore } from "@/stores/batch-store";
+import { useTaskStore } from "@/stores/task-store";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import type { VideoItem } from "@/lib/api-types";
 import { Loader2, Download, ArrowLeft } from "lucide-react";
@@ -21,8 +21,8 @@ export default function CollectsDetailPage() {
   const [downloading, setDownloading] = useState(false);
   const [downloadedCount, setDownloadedCount] = useState(0);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
-  const batchTask = useBatchStore((s) => activeTaskId ? s.tasks[activeTaskId] : null);
-  const downloadProgress = batchTask ? (batchTask.total > 0 ? Math.round((batchTask.completed / batchTask.total) * 100) : 0) : 0;
+  const batchTask = useTaskStore((s) => activeTaskId ? s.tasks[activeTaskId] : null);
+  const downloadProgress = batchTask ? ((batchTask.total ?? 0) > 0 ? Math.round(((batchTask.completed ?? 0) / (batchTask.total ?? 1)) * 100) : 0) : 0;
 
   const { items: videos, hasMore, loadingMore, initialLoading, sentinelRef, reset } = useInfiniteScroll<VideoItem>({
     fetchPage: useCallback(async (cursor: number) => {

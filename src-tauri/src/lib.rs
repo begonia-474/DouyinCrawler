@@ -160,6 +160,7 @@ pub fn run() {
             commands::python::py_download_video,
             commands::python::py_get_live_info,
             commands::python::py_start_batch_download,
+            commands::python::py_start_download,
             commands::python::py_get_user_profile,
             commands::python::py_get_user_posts,
             commands::python::py_search_videos,
@@ -210,6 +211,16 @@ pub fn run() {
             commands::db::delete_user_info,
             commands::db::delete_music_collection,
             commands::db::is_video_downloaded,
+            // 下载任务（commands/db.rs）
+            commands::db::create_download_task,
+            commands::db::get_download_tasks,
+            commands::db::get_download_task_detail,
+            commands::db::update_download_task_status,
+            commands::db::create_download_task_item,
+            commands::db::update_download_task_item_status,
+            commands::db::get_download_task_items,
+            commands::db::get_download_task_item_counts,
+            commands::db::delete_download_task,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

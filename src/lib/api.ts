@@ -3,6 +3,7 @@ import type {
   ApiResponse, PostDetailResponse, DownloadResult,
   CommentItem, MusicItem, FollowItem, LiveInfo,
   LiveRecordTask, FollowingLiveItem,
+  DownloadMode, DownloadTask, TaskItem, TaskItemCounts, DownloadTaskDetail,
 } from "./api-types";
 import type { DownloadRecord, DownloadStats, LiveRecord, VideoInfo, UserInfo, VideoStats, UserStats } from "./tauri-types";
 
@@ -97,9 +98,10 @@ export async function startBatchDownload(download_type: string, url: string): Pr
     let taskId: string | undefined;
     if (raw?.success && raw.task_id != null) {
       taskId = String(raw.task_id);
-      const { useBatchStore } = await import("@/stores/batch-store");
-      useBatchStore.getState().addTask({
+      const { useTaskStore } = await import("@/stores/task-store");
+      useTaskStore.getState().addTask({
         task_id: taskId,
+        task_type: "batch",
         type: download_type,
         url,
         status: "starting",
@@ -120,6 +122,57 @@ export const downloadUserPosts = (url: string) => startBatchDownload("user_post"
 export const downloadUserLikes = (url: string) => startBatchDownload("user_like", url);
 export const downloadMix = (url: string) => startBatchDownload("mix", url);
 export const downloadCollectsVideo = (collectsId: string) => startBatchDownload("collects", collectsId);
+
+/** 统一下载入口（通过 mode 分发） */
+export async function startDownload(mode: DownloadMode, url: string): Promise<ApiResponse & { task_id?: string }> {
+  try {
+    const raw = await invoke<BackendResponse>("py_start_download", { mode, url });
+    let taskId: string | undefined;
+    if (raw?.success && raw.task_id != null) {
+      taskId = String(raw.task_id);
+      const { useTaskStore } = await import("@/stores/task-store");
+      useTaskStore.getState().addTask({
+        task_id: taskId,
+        task_type: "batch",
+        type: mode,
+        url,
+        status: "starting",
+        total: 0,
+        completed: 0,
+        failed: 0,
+        current_item: "",
+        error: "",
+      });
+    }
+    return { ...wrap(raw), task_id: taskId };
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "调用失败" };
+  }
+}
+
+// ============================================================
+// 下载任务查询（DB 直接调用）
+// ============================================================
+
+export async function getDownloadTasks(limit = 50, offset = 0, status?: string, mode?: string): Promise<DownloadTask[]> {
+  return invoke("get_download_tasks", { limit, offset, status: status || null, mode: mode || null });
+}
+
+export async function getDownloadTaskDetail(taskId: string): Promise<DownloadTaskDetail | null> {
+  return invoke("get_download_task_detail", { task_id: taskId });
+}
+
+export async function getDownloadTaskItems(taskId: string, status?: string): Promise<TaskItem[]> {
+  return invoke("get_download_task_items", { task_id: taskId, status: status || null });
+}
+
+export async function getDownloadTaskItemCounts(taskId: string): Promise<TaskItemCounts> {
+  return invoke("get_download_task_item_counts", { task_id: taskId });
+}
+
+export async function deleteDownloadTask(taskId: string): Promise<void> {
+  return invoke("delete_download_task", { task_id: taskId });
+}
 
 // ============================================================
 // 评论

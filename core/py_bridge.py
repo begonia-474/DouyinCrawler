@@ -132,6 +132,15 @@ def start_batch_download(url: str, download_type: str) -> dict:
 
 
 @_safe_call
+def start_download(mode: str, url: str) -> dict:
+    """统一下载入口（通过 mode 分发）"""
+    logger.info("[py_bridge] start_download 调用, mode=%s, url=%s", mode, url[:80])
+    task_id = _get_task_manager().start_download(mode, url)
+    logger.info("[py_bridge] 下载任务已启动, task_id=%s", task_id)
+    return {"success": True, "task_id": task_id}
+
+
+@_safe_call
 def get_user_profile(url: str) -> dict:
     """获取用户信息"""
     logger.info("[py_bridge] get_user_profile 调用, url=%s", url[:80])

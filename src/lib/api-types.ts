@@ -142,6 +142,54 @@ export interface FollowingLiveItem {
   tag_name: string;
 }
 
+// ============================================================
+// 统一任务系统
+// ============================================================
+
+export type DownloadMode = "one" | "post" | "like" | "mix" | "collects" | "live" | "music";
+
+export interface DownloadTask {
+  id: string;
+  mode: DownloadMode;
+  url: string;
+  title: string | null;
+  status: "running" | "starting" | "completed" | "error" | "cancelled" | "recording" | "stopping";
+  total: number;
+  completed: number;
+  skipped: number;
+  failed: number;
+  error_msg: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface TaskItem {
+  id: number;
+  task_id: string;
+  aweme_id: string | null;
+  title: string | null;
+  author_nickname: string | null;
+  cover_url: string | null;
+  file_path: string | null;
+  file_size: number;
+  status: "pending" | "downloading" | "completed" | "skipped" | "failed";
+  error_msg: string | null;
+  created_at: number;
+}
+
+export interface TaskItemCounts {
+  total: number;
+  completed: number;
+  skipped: number;
+  failed: number;
+  pending: number;
+}
+
+export interface DownloadTaskDetail {
+  task: DownloadTask;
+  items: TaskItem[];
+}
+
 export interface DownloadResult {
   type: "video" | "images";
   path?: string;

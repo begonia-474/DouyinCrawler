@@ -2,30 +2,26 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Bezel } from "@/components/shared/bezel";
 import { Button } from "@/components/ui/button";
-import { useBatchStore } from "@/stores/batch-store";
-import { useLiveStore } from "@/stores/live-store";
+import { useTaskStore } from "@/stores/task-store";
 import { Loader2, CheckCircle2, XCircle } from "lucide-react";
 
 export function DownloadStatusCard() {
   const navigate = useNavigate();
-  const { tasks, connect } = useBatchStore();
-  const { connect: connectLive } = useLiveStore();
+  const { tasks, connect } = useTaskStore();
   const [dismissed, setDismissed] = useState(false);
 
   // 全局注册事件监听（确保任何页面都能收到事件）
   useEffect(() => {
     connect();
-    connectLive();
-  }, [connect, connectLive]);
+  }, [connect]);
 
-  // 找到当前正在进行的任务
+  // 找到当前正在进行的任务（batch 或 live）
   const activeTask = Object.values(tasks).find(
-    (t) => t.status === "running" || t.status === "starting"
+    (t) => t.status === "running" || t.status === "starting" || t.status === "recording" || t.status === "stopping"
   );
   const recentCompletedTask = Object.values(tasks)
     .filter((t) => t.status === "completed" || t.status === "error")
     .sort((a, b) => {
-      // 按 task_id 排序（简单的时间排序）
       return b.task_id.localeCompare(a.task_id);
     })[0];
 
@@ -61,11 +57,11 @@ export function DownloadStatusCard() {
           )}
 
           <span className="text-sm">
-            {task.status === "running" || task.status === "starting"
-              ? "正在下载..."
+            {task.status === "running" || task.status === "starting" || task.status === "recording" || task.status === "stopping"
+              ? "正在执行..."
               : task.status === "completed"
-              ? "下载完成"
-              : "下载失败"}
+              ? "任务完成"
+              : "任务失败"}
           </span>
 
           {(task.status === "completed" || task.status === "error") && (

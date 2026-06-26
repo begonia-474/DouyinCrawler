@@ -7,9 +7,10 @@ use tauri::State;
 use log::{info, error};
 
 use crate::db::{
-    Database, DownloadRecord, DownloadStats, LiveRecord,
-    MusicCollection, NewDownloadRecord, NewLiveRecord, NewMusicCollection,
-    UserInfo, VideoInfo, VideoStats, UserStats,
+    Database, DownloadRecord, DownloadStats, DownloadTask, DownloadTaskDetail,
+    LiveRecord, MusicCollection, NewDownloadRecord, NewDownloadTask,
+    NewLiveRecord, NewMusicCollection, NewTaskItem,
+    TaskItem, TaskItemCounts, UserInfo, VideoInfo, VideoStats, UserStats,
 };
 
 // ============================================================
@@ -267,4 +268,95 @@ pub fn delete_music_collection(
         crate::delete_local_path(file_path)?;
     }
     db.delete_music_collection(&music_id).map_err(|e| e.to_string())
+}
+
+// ============================================================
+// 下载任务
+// ============================================================
+
+#[tauri::command(rename_all = "snake_case")]
+pub fn create_download_task(
+    db: State<'_, Database>,
+    task: NewDownloadTask,
+) -> Result<(), String> {
+    db.create_task(&task).map_err(|e| e.to_string())
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub fn get_download_tasks(
+    db: State<'_, Database>,
+    limit: i64,
+    offset: i64,
+    status: Option<String>,
+    mode: Option<String>,
+) -> Result<Vec<DownloadTask>, String> {
+    db.get_tasks(limit, offset, status, mode).map_err(|e| e.to_string())
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub fn get_download_task_detail(
+    db: State<'_, Database>,
+    task_id: String,
+) -> Result<Option<DownloadTaskDetail>, String> {
+    db.get_task_detail(&task_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub fn update_download_task_status(
+    db: State<'_, Database>,
+    task_id: String,
+    status: String,
+    error_msg: Option<String>,
+) -> Result<(), String> {
+    db.update_task_status(&task_id, &status, error_msg.as_deref()).map_err(|e| e.to_string())
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub fn create_download_task_item(
+    db: State<'_, Database>,
+    item: NewTaskItem,
+) -> Result<(), String> {
+    db.create_task_item(&item).map_err(|e| e.to_string())
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub fn update_download_task_item_status(
+    db: State<'_, Database>,
+    task_id: String,
+    aweme_id: String,
+    status: String,
+    file_path: Option<String>,
+    file_size: Option<i64>,
+    error_msg: Option<String>,
+) -> Result<(), String> {
+    db.update_task_item_status(
+        &task_id, &aweme_id, &status,
+        file_path.as_deref(), file_size.unwrap_or(0), error_msg.as_deref(),
+    ).map_err(|e| e.to_string())?;
+    db.update_task_counts(&task_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub fn get_download_task_items(
+    db: State<'_, Database>,
+    task_id: String,
+    status: Option<String>,
+) -> Result<Vec<TaskItem>, String> {
+    db.get_task_items(&task_id, status).map_err(|e| e.to_string())
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub fn get_download_task_item_counts(
+    db: State<'_, Database>,
+    task_id: String,
+) -> Result<TaskItemCounts, String> {
+    db.get_task_item_counts(&task_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub fn delete_download_task(
+    db: State<'_, Database>,
+    task_id: String,
+) -> Result<(), String> {
+    db.delete_task(&task_id).map_err(|e| e.to_string())
 }

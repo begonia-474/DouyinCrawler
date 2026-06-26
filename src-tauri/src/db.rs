@@ -215,6 +215,43 @@ const MIGRATE_V6_LIVE_UNIQUE: &[&str] = &[
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_live_unique ON live_records(room_id, started_at)",
 ];
 
+const MIGRATE_V7_TASK_TABLES: &[&str] = &[
+    "CREATE TABLE IF NOT EXISTS download_tasks (
+        id TEXT PRIMARY KEY,
+        mode TEXT NOT NULL,
+        url TEXT NOT NULL,
+        title TEXT,
+        status TEXT NOT NULL DEFAULT 'running',
+        total INTEGER NOT NULL DEFAULT 0,
+        completed INTEGER NOT NULL DEFAULT 0,
+        skipped INTEGER NOT NULL DEFAULT 0,
+        failed INTEGER NOT NULL DEFAULT 0,
+        error_msg TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+    )",
+    "CREATE INDEX IF NOT EXISTS idx_task_status ON download_tasks(status)",
+    "CREATE INDEX IF NOT EXISTS idx_task_mode ON download_tasks(mode)",
+    "CREATE INDEX IF NOT EXISTS idx_task_created ON download_tasks(created_at)",
+    "CREATE TABLE IF NOT EXISTS download_task_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id TEXT NOT NULL,
+        aweme_id TEXT,
+        title TEXT,
+        author_nickname TEXT,
+        cover_url TEXT,
+        file_path TEXT,
+        file_size INTEGER DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending',
+        error_msg TEXT,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (task_id) REFERENCES download_tasks(id) ON DELETE CASCADE
+    )",
+    "CREATE INDEX IF NOT EXISTS idx_item_task ON download_task_items(task_id)",
+    "CREATE INDEX IF NOT EXISTS idx_item_status ON download_task_items(status)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_item_unique ON download_task_items(task_id, aweme_id)",
+];
+
 pub struct Database {
     conn: Mutex<Connection>,
 }
@@ -301,6 +338,71 @@ pub struct NewLiveRecord {
     pub started_at: Option<i64>,
     pub ended_at: Option<i64>,
     pub cover_url: Option<String>,
+}
+
+// === 下载任务 ===
+
+#[derive(Serialize, Clone)]
+pub struct DownloadTask {
+    pub id: String,
+    pub mode: String,
+    pub url: String,
+    pub title: Option<String>,
+    pub status: String,
+    pub total: i64,
+    pub completed: i64,
+    pub skipped: i64,
+    pub failed: i64,
+    pub error_msg: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct NewDownloadTask {
+    pub id: String,
+    pub mode: String,
+    pub url: String,
+    pub title: Option<String>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct TaskItem {
+    pub id: i64,
+    pub task_id: String,
+    pub aweme_id: Option<String>,
+    pub title: Option<String>,
+    pub author_nickname: Option<String>,
+    pub cover_url: Option<String>,
+    pub file_path: Option<String>,
+    pub file_size: i64,
+    pub status: String,
+    pub error_msg: Option<String>,
+    pub created_at: i64,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct NewTaskItem {
+    pub task_id: String,
+    pub aweme_id: Option<String>,
+    pub title: Option<String>,
+    pub author_nickname: Option<String>,
+    pub cover_url: Option<String>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct TaskItemCounts {
+    pub total: i64,
+    pub completed: i64,
+    pub skipped: i64,
+    pub failed: i64,
+    pub pending: i64,
+}
+
+#[derive(Serialize, Clone)]
+pub struct DownloadTaskDetail {
+    pub task: DownloadTask,
+    pub items: Vec<TaskItem>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -1115,13 +1217,17 @@ impl Database {
             info!("[DB] 迁移 v6: live_records 添加唯一索引 (room_id + started_at)");
             Self::run_migration_sql(conn, MIGRATE_V6_LIVE_UNIQUE)?;
         }
+        if version < 7 {
+            info!("[DB] 迁移 v7: 新增 download_tasks / download_task_items 表");
+            Self::run_migration_sql(conn, MIGRATE_V7_TASK_TABLES)?;
+        }
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
         conn.execute(
-            "INSERT OR REPLACE INTO _metadata (name, value) VALUES ('schema_version', '6')",
+            "INSERT OR REPLACE INTO _metadata (name, value) VALUES ('schema_version', '7')",
             [],
         )?;
         conn.execute(
@@ -1527,5 +1633,266 @@ impl Database {
         let conn = lock_conn!(self);
         conn.execute("DELETE FROM music_collection WHERE music_id = ?1", rusqlite::params![music_id])?;
         Ok(())
+    }
+
+    // === 下载任务 (download_tasks) ===
+
+    pub fn create_task(&self, task: &NewDownloadTask) -> Result<()> {
+        let conn = lock_conn!(self);
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        conn.execute(
+            "INSERT OR IGNORE INTO download_tasks \
+             (id, mode, url, title, status, total, completed, skipped, failed, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, 'running', 0, 0, 0, 0, ?5, ?5)",
+            rusqlite::params![task.id, task.mode, task.url, task.title, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_task_status(&self, task_id: &str, status: &str, error_msg: Option<&str>) -> Result<()> {
+        let conn = lock_conn!(self);
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        conn.execute(
+            "UPDATE download_tasks SET status = ?1, error_msg = ?2, updated_at = ?3 WHERE id = ?4",
+            rusqlite::params![status, error_msg, now, task_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_task_counts(&self, task_id: &str) -> Result<()> {
+        let conn = lock_conn!(self);
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        conn.execute(
+            "UPDATE download_tasks SET \
+             completed = (SELECT COUNT(*) FROM download_task_items WHERE task_id = ?1 AND status = 'completed'), \
+             skipped = (SELECT COUNT(*) FROM download_task_items WHERE task_id = ?1 AND status = 'skipped'), \
+             failed = (SELECT COUNT(*) FROM download_task_items WHERE task_id = ?1 AND status = 'failed'), \
+             total = (SELECT COUNT(*) FROM download_task_items WHERE task_id = ?1), \
+             updated_at = ?2 \
+             WHERE id = ?1",
+            rusqlite::params![task_id, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_tasks(
+        &self,
+        limit: i64,
+        offset: i64,
+        status: Option<String>,
+        mode: Option<String>,
+    ) -> Result<Vec<DownloadTask>> {
+        let conn = lock_conn!(self);
+        let mut sql = String::from(
+            "SELECT id, mode, url, title, status, total, completed, skipped, failed, error_msg, created_at, updated_at \
+             FROM download_tasks"
+        );
+        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        let mut conditions = Vec::new();
+
+        if let Some(ref s) = status {
+            if !s.is_empty() {
+                conditions.push("status = ?");
+                params.push(Box::new(s.clone()));
+            }
+        }
+        if let Some(ref m) = mode {
+            if !m.is_empty() {
+                conditions.push("mode = ?");
+                params.push(Box::new(m.clone()));
+            }
+        }
+
+        if !conditions.is_empty() {
+            sql.push_str(" WHERE ");
+            sql.push_str(&conditions.join(" AND "));
+        }
+        sql.push_str(" ORDER BY created_at DESC LIMIT ? OFFSET ?");
+        params.push(Box::new(limit));
+        params.push(Box::new(offset));
+
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(param_refs.as_slice(), |row| {
+            Ok(DownloadTask {
+                id: row.get("id")?,
+                mode: row.get("mode")?,
+                url: row.get("url")?,
+                title: row.get("title")?,
+                status: row.get("status")?,
+                total: row.get("total")?,
+                completed: row.get("completed")?,
+                skipped: row.get("skipped")?,
+                failed: row.get("failed")?,
+                error_msg: row.get("error_msg")?,
+                created_at: row.get("created_at")?,
+                updated_at: row.get("updated_at")?,
+            })
+        })?;
+
+        let mut tasks = Vec::new();
+        for row in rows {
+            tasks.push(row?);
+        }
+        Ok(tasks)
+    }
+
+    pub fn get_task_by_id(&self, task_id: &str) -> Result<Option<DownloadTask>> {
+        let conn = lock_conn!(self);
+        let mut stmt = conn.prepare(
+            "SELECT id, mode, url, title, status, total, completed, skipped, failed, error_msg, created_at, updated_at \
+             FROM download_tasks WHERE id = ?1"
+        )?;
+        let mut rows = stmt.query_map(rusqlite::params![task_id], |row| {
+            Ok(DownloadTask {
+                id: row.get("id")?,
+                mode: row.get("mode")?,
+                url: row.get("url")?,
+                title: row.get("title")?,
+                status: row.get("status")?,
+                total: row.get("total")?,
+                completed: row.get("completed")?,
+                skipped: row.get("skipped")?,
+                failed: row.get("failed")?,
+                error_msg: row.get("error_msg")?,
+                created_at: row.get("created_at")?,
+                updated_at: row.get("updated_at")?,
+            })
+        })?;
+        match rows.next() {
+            Some(row) => Ok(Some(row?)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn delete_task(&self, task_id: &str) -> Result<()> {
+        let conn = lock_conn!(self);
+        // CASCADE 会自动删除子项
+        conn.execute("DELETE FROM download_task_items WHERE task_id = ?1", rusqlite::params![task_id])?;
+        conn.execute("DELETE FROM download_tasks WHERE id = ?1", rusqlite::params![task_id])?;
+        Ok(())
+    }
+
+    // === 下载任务子项 (download_task_items) ===
+
+    pub fn create_task_item(&self, item: &NewTaskItem) -> Result<()> {
+        let conn = lock_conn!(self);
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        conn.execute(
+            "INSERT OR IGNORE INTO download_task_items \
+             (task_id, aweme_id, title, author_nickname, cover_url, status, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6)",
+            rusqlite::params![
+                item.task_id, item.aweme_id, item.title, item.author_nickname, item.cover_url, now,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_task_item_status(
+        &self,
+        task_id: &str,
+        aweme_id: &str,
+        status: &str,
+        file_path: Option<&str>,
+        file_size: i64,
+        error_msg: Option<&str>,
+    ) -> Result<()> {
+        let conn = lock_conn!(self);
+        conn.execute(
+            "UPDATE download_task_items SET status = ?1, file_path = COALESCE(?2, file_path), \
+             file_size = CASE WHEN ?3 > 0 THEN ?3 ELSE file_size END, \
+             error_msg = ?4 \
+             WHERE task_id = ?5 AND aweme_id = ?6",
+            rusqlite::params![status, file_path, file_size, error_msg, task_id, aweme_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_task_items(&self, task_id: &str, status: Option<String>) -> Result<Vec<TaskItem>> {
+        let conn = lock_conn!(self);
+        let mut sql = String::from(
+            "SELECT id, task_id, aweme_id, title, author_nickname, cover_url, file_path, file_size, status, error_msg, created_at \
+             FROM download_task_items WHERE task_id = ?1"
+        );
+        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        params.push(Box::new(task_id.to_string()));
+
+        if let Some(ref s) = status {
+            if !s.is_empty() {
+                sql.push_str(" AND status = ?");
+                params.push(Box::new(s.clone()));
+            }
+        }
+        sql.push_str(" ORDER BY id ASC");
+
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(param_refs.as_slice(), |row| {
+            Ok(TaskItem {
+                id: row.get("id")?,
+                task_id: row.get("task_id")?,
+                aweme_id: row.get("aweme_id")?,
+                title: row.get("title")?,
+                author_nickname: row.get("author_nickname")?,
+                cover_url: row.get("cover_url")?,
+                file_path: row.get("file_path")?,
+                file_size: row.get("file_size")?,
+                status: row.get("status")?,
+                error_msg: row.get("error_msg")?,
+                created_at: row.get("created_at")?,
+            })
+        })?;
+
+        let mut items = Vec::new();
+        for row in rows {
+            items.push(row?);
+        }
+        Ok(items)
+    }
+
+    pub fn get_task_item_counts(&self, task_id: &str) -> Result<TaskItemCounts> {
+        let conn = lock_conn!(self);
+        let counts = conn.query_row(
+            "SELECT \
+             COUNT(*), \
+             COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0), \
+             COALESCE(SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END), 0), \
+             COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0), \
+             COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0) \
+             FROM download_task_items WHERE task_id = ?1",
+            rusqlite::params![task_id],
+            |row| Ok(TaskItemCounts {
+                total: row.get(0)?,
+                completed: row.get(1)?,
+                skipped: row.get(2)?,
+                failed: row.get(3)?,
+                pending: row.get(4)?,
+            }),
+        )?;
+        Ok(counts)
+    }
+
+    pub fn get_task_detail(&self, task_id: &str) -> Result<Option<DownloadTaskDetail>> {
+        let task = self.get_task_by_id(task_id)?;
+        match task {
+            Some(t) => {
+                let items = self.get_task_items(task_id, None)?;
+                Ok(Some(DownloadTaskDetail { task: t, items }))
+            }
+            None => Ok(None),
+        }
     }
 }

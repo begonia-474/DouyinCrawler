@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Bezel } from "@/components/shared/bezel";
 import { getLiveInfo, startLiveRecord, stopLiveRecord, getLiveStatus } from "@/lib/api";
-import { useLiveStore } from "@/stores/live-store";
+import { useTaskStore } from "@/stores/task-store";
 import type { LiveInfo as LiveInfoType } from "@/lib/api-types";
 import {
   Radio,
@@ -36,7 +36,10 @@ export default function LivePage() {
   const lastParsedUrl = useRef("");
 
   // 使用全局 store
-  const { tasks: liveTasks, connect: connectLive, updateTask, removeTask } = useLiveStore();
+  const { tasks: allTasks, connect: connectLive, updateTask, removeTask } = useTaskStore();
+  const liveTasks = Object.fromEntries(
+    Object.entries(allTasks).filter(([, t]) => t.task_type === "live")
+  );
 
   // 查找当前正在进行的录制任务
   const activeTask = Object.values(liveTasks).find(
@@ -61,10 +64,11 @@ export default function LivePage() {
           for (const task of tasks) {
             if (task.status === "recording" || task.status === "starting" || task.status === "stopping") {
               // 添加到全局 store
-              useLiveStore.getState().addTask({
+              useTaskStore.getState().addTask({
                 task_id: task.task_id,
+                task_type: "live",
                 url: task.url || "",
-                status: task.status as "starting" | "recording" | "completed" | "error" | "stopping",
+                status: task.status as string,
                 title: task.title,
                 nickname: task.nickname,
                 room_id: task.room_id,
@@ -132,8 +136,9 @@ export default function LivePage() {
     const res = await startLiveRecord(lastParsedUrl.current);
     if (res.success && res.data) {
       // 添加到全局 store
-      useLiveStore.getState().addTask({
+      useTaskStore.getState().addTask({
         task_id: res.data.task_id,
+        task_type: "live",
         url: lastParsedUrl.current,
         status: "starting",
       });

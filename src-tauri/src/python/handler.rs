@@ -97,6 +97,11 @@ pub fn start_batch_download(url: &str, download_type: &str) -> PyResult<Value> {
     call_py_json("start_batch_download", (url, download_type))
 }
 
+/// 统一下载入口（通过 mode 分发）
+pub fn start_download(mode: &str, url: &str) -> PyResult<Value> {
+    call_py_json("start_download", (mode, url))
+}
+
 /// 获取批量下载状态
 pub fn get_batch_status() -> PyResult<Value> {
     call_py_json("get_batch_status", ())

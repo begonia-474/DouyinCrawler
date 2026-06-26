@@ -1,12 +1,12 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Header } from "@/components/layout/header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AnimateEntry } from "@/components/shared/animate-entry";
 import { Bezel } from "@/components/shared/bezel";
+import { TaskCard } from "@/components/shared/task-card";
 import {
   Download,
   CheckCircle2,
@@ -17,15 +17,13 @@ import {
   Radio,
   Music,
   Trash2,
-  XCircle,
-  Disc,
 } from "lucide-react";
-import { deleteDownloadRecord, deleteLiveRecord } from "@/lib/api";
+import { deleteDownloadRecord, deleteLiveRecord, deleteDownloadTask } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
-import { useDownloadsQuery, useLiveRecordsQuery } from "@/lib/queries";
-import { useBatchStore } from "@/stores/batch-store";
-import { useLiveStore } from "@/stores/live-store";
+import { useDownloadsQuery, useLiveRecordsQuery, useDownloadTasksQuery } from "@/lib/queries";
+import { useTaskStore } from "@/stores/task-store";
 import type { DownloadRecord, LiveRecord } from "@/lib/tauri-types";
+import type { DownloadTask } from "@/lib/api-types";
 import { formatFileSize, formatTimestamp } from "@/lib/utils";
 
 const typeIcons: Record<string, typeof Video> = {
@@ -39,15 +37,16 @@ export default function DownloadsPage() {
   const queryClient = useQueryClient();
   const downloadsQuery = useDownloadsQuery({ limit: 50, status: "completed" });
   const liveRecordsQuery = useLiveRecordsQuery({ limit: 50 });
+  const dbTasksQuery = useDownloadTasksQuery({ limit: 100 });
   const downloads = downloadsQuery.data ?? [];
   const liveRecords = liveRecordsQuery.data ?? [];
+  const dbTasks = dbTasksQuery.data ?? [];
   const loading = downloadsQuery.isLoading || liveRecordsQuery.isLoading;
-  const { tasks: batchTasks, connect: connectBatch, clearCompleted, removeTask: removeBatchTask } = useBatchStore();
-  const { tasks: liveTasks, removeTask: removeLiveTask } = useLiveStore();
+  const { tasks: liveTasks, connect, clearCompleted, removeTask } = useTaskStore();
 
   useEffect(() => {
-    connectBatch();
-  }, [connectBatch]);
+    connect();
+  }, [connect]);
 
   const askDeleteFile = (filePath: string | null) => {
     if (!filePath) return false;
@@ -77,28 +76,77 @@ export default function DownloadsPage() {
     }
   };
 
-  const completedDownloads = downloads.filter((d) => d.status === "completed");
-  const batchTaskList = Object.values(batchTasks);
-  const runningBatchTasks = batchTaskList.filter((t) => t.status === "running" || t.status === "starting");
-  const completedBatchTasks = batchTaskList.filter((t) => t.status === "completed" || t.status === "error");
-
-  const liveTaskList = Object.values(liveTasks);
-  const runningLiveTasks = liveTaskList.filter((t) => t.status === "recording" || t.status === "starting" || t.status === "stopping");
-  const completedLiveTasks = liveTaskList.filter((t) => t.status === "completed" || t.status === "error");
-
-  const typeLabels: Record<string, string> = {
-    user_post: "用户主页",
-    user_like: "用户点赞",
-    mix: "合集",
-    collects: "收藏夹",
+  const handleRemoveTask = async (taskId: string) => {
+    removeTask(taskId);
+    try {
+      await deleteDownloadTask(taskId);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.downloadTasks() });
+    } catch {
+      // DB 删除失败不影响 UI 移除
+    }
   };
+
+  const completedDownloads = downloads.filter((d) => d.status === "completed");
+
+  // 合并 DB 任务和实时任务：实时状态覆盖 DB 数据
+  const mergedTasks = useMemo(() => {
+    const taskMap = new Map<string, DownloadTask>();
+
+    // 先放入 DB 任务
+    for (const task of dbTasks) {
+      taskMap.set(task.id, task);
+    }
+
+    // 实时任务覆盖或补充
+    for (const live of Object.values(liveTasks)) {
+      const existing = taskMap.get(live.task_id);
+      if (existing) {
+        // 覆盖实时字段
+        taskMap.set(live.task_id, {
+          ...existing,
+          status: (live.status as DownloadTask["status"]) ?? existing.status,
+          total: live.total ?? existing.total,
+          completed: live.completed ?? existing.completed,
+          failed: live.failed ?? existing.failed,
+          error_msg: live.error ?? existing.error_msg,
+        });
+      } else {
+        // 实时任务不在 DB 中（刚启动还没写入），创建临时条目
+        taskMap.set(live.task_id, {
+          id: live.task_id,
+          mode: (live.type as DownloadTask["mode"]) ?? "one",
+          url: live.url,
+          title: live.title ?? live.nickname ?? null,
+          status: (live.status as DownloadTask["status"]) ?? "running",
+          total: live.total ?? 0,
+          completed: live.completed ?? 0,
+          skipped: 0,
+          failed: live.failed ?? 0,
+          error_msg: live.error ?? null,
+          created_at: 0,
+          updated_at: 0,
+        });
+      }
+    }
+
+    // 按创建时间倒序（最新在前），实时任务（created_at=0）排最前面
+    return Array.from(taskMap.values()).sort((a, b) => b.created_at - a.created_at || b.id.localeCompare(a.id));
+  }, [dbTasks, liveTasks]);
+
+  const runningCount = mergedTasks.filter(
+    (t) => t.status === "running" || t.status === "starting" || t.status === "recording" || t.status === "stopping"
+  ).length;
+
+  const hasCompletedTasks = mergedTasks.some(
+    (t) => t.status === "completed" || t.status === "error"
+  );
 
   return (
     <>
       <AnimateEntry>
         <Header title="下载管理" description="查看下载历史记录">
           <div className="flex items-center gap-2">
-            {(completedBatchTasks.length > 0 || completedLiveTasks.length > 0) && (
+            {hasCompletedTasks && (
               <Button variant="capsule" size="sm" onClick={clearCompleted}>
                 清除已完成任务
               </Button>
@@ -115,9 +163,9 @@ export default function DownloadsPage() {
         <TabsList>
           <TabsTrigger value="batch">
             下载任务
-            {(runningBatchTasks.length + runningLiveTasks.length) > 0 && (
+            {runningCount > 0 && (
               <Badge variant="default" className="ml-1.5 text-[10px]">
-                {runningBatchTasks.length + runningLiveTasks.length}
+                {runningCount}
               </Badge>
             )}
           </TabsTrigger>
@@ -140,7 +188,7 @@ export default function DownloadsPage() {
         </TabsList>
 
         <TabsContent value="batch" className="mt-8 space-y-2">
-          {batchTaskList.length === 0 && liveTaskList.length === 0 ? (
+          {mergedTasks.length === 0 ? (
             <Bezel radius="xl">
               <div className="p-12 text-center text-muted-foreground">
                 <Download className="h-10 w-10 mx-auto mb-4 opacity-30" />
@@ -148,122 +196,19 @@ export default function DownloadsPage() {
               </div>
             </Bezel>
           ) : (
-            <>
-              {/* 批量下载任务 */}
-              {batchTaskList.map((task, i) => (
-              <AnimateEntry key={task.task_id} delay={i * 30}>
-                <Bezel radius="lg" padding="sm">
-                  <div className="p-4">
-                    <div className="flex items-center gap-4 mb-3">
-                      <div className="h-9 w-9 rounded-xl bg-primary/10 ring-1 ring-primary/20 flex items-center justify-center shrink-0">
-                        {task.status === "running" || task.status === "starting" ? (
-                          <Loader2 className="h-4 w-4 text-primary animate-spin" />
-                        ) : task.status === "completed" ? (
-                          <CheckCircle2 className="h-4 w-4 text-success" />
-                        ) : (
-                          <XCircle className="h-4 w-4 text-destructive" />
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">
-                          {typeLabels[task.type] || task.type}下载
-                        </p>
-                        <p className="text-xs text-muted-foreground truncate mt-0.5">
-                          {task.url}
-                        </p>
-                      </div>
-                      <Badge
-                        variant={task.status === "completed" ? "default" : task.status === "error" ? "destructive" : "secondary"}
-                        className="text-[11px] rounded-full"
-                      >
-                        {task.status === "running" ? "下载中" : task.status === "starting" ? "启动中" : task.status === "completed" ? "已完成" : "失败"}
-                      </Badge>
-                      {(task.status === "completed" || task.status === "error") && (
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          title="移除任务"
-                          onClick={() => removeBatchTask(task.task_id)}
-                        >
-                          <Trash2 className="h-4 w-4 text-muted-foreground" />
-                        </Button>
-                      )}
-                    </div>
-
-                    {(task.status === "running" || task.status === "starting") && (
-                      <div className="space-y-2">
-                        <Progress value={task.total > 0 ? (task.completed / task.total) * 100 : 0} className="h-1.5" />
-                        <div className="flex items-center justify-between text-xs text-muted-foreground">
-                          <span className="truncate">{task.current_item || "准备中..."}</span>
-                          <span className="font-mono tabular-nums">{task.completed}/{task.total}</span>
-                        </div>
-                      </div>
-                    )}
-
-                    {task.status === "error" && task.error && (
-                      <p className="text-xs text-destructive mt-2">{task.error}</p>
-                    )}
-                  </div>
-                </Bezel>
+            mergedTasks.map((task, i) => (
+              <AnimateEntry key={task.id} delay={i * 30}>
+                <TaskCard
+                  task={task}
+                  liveState={liveTasks[task.id]}
+                  onRemove={
+                    task.status === "completed" || task.status === "error"
+                      ? () => handleRemoveTask(task.id)
+                      : undefined
+                  }
+                />
               </AnimateEntry>
-            ))}
-
-              {/* 直播录制任务 */}
-              {liveTaskList.map((task, i) => (
-                <AnimateEntry key={task.task_id} delay={(batchTaskList.length + i) * 30}>
-                  <Bezel radius="lg" padding="sm">
-                    <div className="p-4">
-                      <div className="flex items-center gap-4 mb-3">
-                        <div className="h-9 w-9 rounded-xl bg-destructive/10 ring-1 ring-destructive/20 flex items-center justify-center shrink-0">
-                          {task.status === "recording" || task.status === "starting" || task.status === "stopping" ? (
-                            <Loader2 className="h-4 w-4 text-destructive animate-spin" />
-                          ) : task.status === "completed" ? (
-                            <CheckCircle2 className="h-4 w-4 text-success" />
-                          ) : (
-                            <XCircle className="h-4 w-4 text-destructive" />
-                          )}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate">
-                            直播录制 - {task.nickname || "未知主播"}
-                          </p>
-                          <p className="text-xs text-muted-foreground truncate mt-0.5">
-                            {task.title || task.url}
-                          </p>
-                        </div>
-                        <Badge
-                          variant={task.status === "completed" ? "default" : task.status === "error" ? "destructive" : "secondary"}
-                          className="text-[11px] rounded-full"
-                        >
-                          {task.status === "recording" ? "录制中" : task.status === "starting" ? "启动中" : task.status === "stopping" ? "停止中" : task.status === "completed" ? "已完成" : "失败"}
-                        </Badge>
-                        {(task.status === "completed" || task.status === "error") && (
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            title="移除任务"
-                            onClick={() => removeLiveTask(task.task_id)}
-                          >
-                            <Trash2 className="h-4 w-4 text-muted-foreground" />
-                          </Button>
-                        )}
-                      </div>
-
-                      {(task.status === "recording" || task.status === "starting") && (
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <Disc className="h-3 w-3 animate-pulse text-destructive" />
-                          <span>正在录制中...</span>
-                        </div>
-                      )}
-
-                      {task.status === "error" && task.error && (
-                        <p className="text-xs text-destructive mt-2">{task.error}</p>
-                      )}
-                    </div>
-                  </Bezel>
-                </AnimateEntry>
-              ))}
-            </>
+            ))
           )}
         </TabsContent>
 

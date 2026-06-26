@@ -21,9 +21,11 @@ class BatchManager:
         download_type: str,
         handler,
         broadcast_fn: Callable[[str, dict, str], None],
+        task_id: str = None,
     ) -> str:
         """启动批量下载任务，返回 task_id（同步版本，使用线程后台执行）"""
-        task_id = str(uuid.uuid4())[:8]
+        if task_id is None:
+            task_id = str(uuid.uuid4())[:8]
         self._batch_tasks[task_id] = {
             "task_id": task_id,
             "type": download_type,
@@ -73,6 +75,30 @@ class BatchManager:
                         except Exception as e:
                             logger.error("[batch_download] 数据库写入失败: %s", e, exc_info=True)
 
+                        # 写入任务子项记录
+                        try:
+                            from core import db
+                            for item in results:
+                                detail = item.get("detail", {})
+                                file_path = item.get("path")
+                                aweme_id = detail.get("aweme_id", "")
+                                file_size = 0
+                                if file_path:
+                                    from pathlib import Path as P
+                                    try:
+                                        file_size = P(file_path).stat().st_size
+                                    except (OSError, ValueError):
+                                        pass
+                                db.create_task_item(task_id, aweme_id=aweme_id,
+                                                    title=detail.get("desc"),
+                                                    author_nickname=detail.get("author_nickname"),
+                                                    cover_url=detail.get("cover_url"))
+                                db.update_task_item_status(task_id, aweme_id, "completed",
+                                                           file_path, file_size)
+                            db.update_task_status(task_id, "completed")
+                        except Exception as e:
+                            logger.error("[batch_download] 任务子项写入失败: %s", e, exc_info=True)
+
                         self._batch_tasks[task_id].update({
                             "status": "completed",
                             "total": count,
@@ -82,12 +108,22 @@ class BatchManager:
                     else:
                         self._batch_tasks[task_id]["status"] = "error"
                         self._batch_tasks[task_id]["error"] = result.get("error", "未知错误")
+                        try:
+                            from core import db
+                            db.update_task_status(task_id, "error", result.get("error", "未知错误"))
+                        except Exception:
+                            pass
                         logger.error("[batch_download] 下载失败 task_id=%s, error=%s", task_id, result.get("error"))
 
                 loop.run_until_complete(_do())
             except Exception as e:
                 self._batch_tasks[task_id]["status"] = "error"
                 self._batch_tasks[task_id]["error"] = str(e)
+                try:
+                    from core import db
+                    db.update_task_status(task_id, "error", str(e))
+                except Exception:
+                    pass
                 logger.error("[batch_download] 线程异常: %s", e, exc_info=True)
             finally:
                 logger.info("[batch_download] finally: 准备广播最终状态 task_id=%s, status=%s",

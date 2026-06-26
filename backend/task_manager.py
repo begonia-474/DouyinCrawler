@@ -7,6 +7,8 @@
 """
 
 import json
+import uuid
+import asyncio
 from pathlib import Path
 from backend.logger import get_logger, setup_logging
 from backend.live_manager import LiveRecordManager
@@ -130,7 +132,7 @@ class TaskManager:
                       interval: str = None, page_counts: int = None,
                       max_counts: int = None, timeout: int = None,
                       max_connections: int = None, max_retries: int = None,
-                      max_tasks: int = None):
+                      max_tasks: int = None, save: bool = True):
         if cookie is not None:
             logger.info("[update_config] 收到 cookie (len=%d)", len(cookie))
             if '\n' in cookie or '\r' in cookie:
@@ -171,7 +173,8 @@ class TaskManager:
         if max_tasks is not None:
             self._max_tasks = max_tasks
         self._handler = None  # 重建 handler
-        self._save_config()
+        if save:
+            self._save_config()
 
     @property
     def is_configured(self) -> bool:
@@ -286,6 +289,151 @@ class TaskManager:
     def get_batch_status(self) -> dict[str, dict]:
         """获取所有批量下载任务状态"""
         return self._batch_mgr.get_batch_status()
+
+    # ============================================================
+    # 统一下载入口（mode 调度）
+    # ============================================================
+
+    def start_download(self, mode: str, url: str) -> str:
+        """统一下载入口，根据 mode 分发到对应 handler，返回 task_id"""
+        from core.constants import DownloadMode
+        from core import db
+
+        task_id = str(uuid.uuid4())[:8]
+
+        # 在 DB 创建任务记录
+        db.create_task(task_id, mode, url)
+        logger.info("[start_download] 任务已创建 task_id=%s, mode=%s", task_id, mode)
+
+        if mode == DownloadMode.ONE:
+            self._run_single_download(task_id, url)
+        elif mode in (DownloadMode.POST, DownloadMode.LIKE, DownloadMode.MIX, DownloadMode.COLLECTS):
+            self._run_batch_download(task_id, mode, url)
+        elif mode == DownloadMode.LIVE:
+            self._run_live_record(task_id, url)
+        elif mode == DownloadMode.MUSIC:
+            self._run_music_download(task_id, url)
+        else:
+            db.update_task_status(task_id, "error", f"未知的下载模式: {mode}")
+            logger.error("[start_download] 未知的下载模式: %s", mode)
+
+        return task_id
+
+    def _run_single_download(self, task_id: str, url: str):
+        """单视频下载（后台线程）"""
+        import threading
+
+        def _run():
+            try:
+                result = self.handler.handle_one_video(url)
+                if result.get("success"):
+                    from core import db
+                    detail = result.get("detail", {})
+                    file_path = result.get("path") or (result.get("paths", [None])[0] if result.get("paths") else None)
+                    aweme_id = detail.get("aweme_id", "")
+                    db.create_task_item(task_id, aweme_id=aweme_id, title=detail.get("desc"),
+                                        author_nickname=detail.get("author_nickname"))
+                    file_size = 0
+                    if file_path:
+                        from pathlib import Path
+                        try:
+                            file_size = Path(file_path).stat().st_size
+                        except (OSError, ValueError):
+                            pass
+                    db.update_task_item_status(task_id, aweme_id, "completed", file_path, file_size)
+                    db.update_task_status(task_id, "completed")
+                    self.broadcast_task_update_sync(task_id, {
+                        "task_id": task_id, "mode": "one", "status": "completed",
+                        "total": 1, "completed": 1, "skipped": 0, "failed": 0,
+                    }, "batch")
+                else:
+                    from core import db
+                    db.update_task_status(task_id, "error", result.get("error", "下载失败"))
+                    self.broadcast_task_update_sync(task_id, {
+                        "task_id": task_id, "mode": "one", "status": "error",
+                        "error": result.get("error"),
+                    }, "batch")
+            except Exception as e:
+                from core import db
+                db.update_task_status(task_id, "error", str(e))
+                logger.error("[_run_single_download] 异常: %s", e, exc_info=True)
+
+        thread = threading.Thread(target=_run, daemon=True)
+        thread.start()
+
+    def _run_batch_download(self, task_id: str, mode: str, url: str):
+        """批量下载（后台线程，委托给 BatchManager）"""
+        # 映射 mode 到旧的 download_type
+        mode_to_type = {"post": "user_post", "like": "user_like", "mix": "mix", "collects": "collects"}
+        download_type = mode_to_type.get(mode, mode)
+        self._batch_mgr.start_batch_download(url, download_type, self.handler,
+                                              self.broadcast_task_update_sync, task_id)
+
+    def _run_live_record(self, task_id: str, url: str):
+        """直播录制（委托给 LiveRecordManager）"""
+        self._live_mgr.start_live_record(url, self.handler, self.broadcast_task_update_sync, task_id)
+
+    def _run_music_download(self, task_id: str, url: str):
+        """音乐批量下载（后台线程）"""
+        import threading
+
+        def _run():
+            from core import db
+            try:
+                # url 在这里实际是 sec_user_id 或 profile URL，需要先获取音乐列表
+                result = asyncio.run(self.handler.handle_user_music_collection())
+                if not result.get("success"):
+                    db.update_task_status(task_id, "error", result.get("error", "获取音乐列表失败"))
+                    return
+
+                music_list = result.get("music_list", [])
+                for music in music_list:
+                    db.create_task_item(task_id, aweme_id=music.get("music_id"),
+                                        title=music.get("title"), author_nickname=music.get("author"))
+
+                db.update_task_status(task_id, "running")
+                completed = 0
+                for music in music_list:
+                    try:
+                        dl_result = asyncio.run(self.handler.handle_download_music(
+                            music.get("play_url", ""), music.get("title", ""), music.get("author", "")))
+                        if dl_result.get("success"):
+                            file_path = dl_result.get("path", "")
+                            file_size = 0
+                            if file_path:
+                                from pathlib import Path
+                                try:
+                                    file_size = Path(file_path).stat().st_size
+                                except (OSError, ValueError):
+                                    pass
+                            db.update_task_item_status(task_id, music.get("music_id", ""), "completed",
+                                                       file_path, file_size)
+                            completed += 1
+                        else:
+                            db.update_task_item_status(task_id, music.get("music_id", ""), "failed",
+                                                       error_msg=dl_result.get("error", "下载失败"))
+                    except Exception as e:
+                        db.update_task_item_status(task_id, music.get("music_id", ""), "failed",
+                                                   error_msg=str(e))
+                        logger.error("[_run_music_download] 单曲下载失败: %s", e)
+
+                    self.broadcast_task_update_sync(task_id, {
+                        "task_id": task_id, "mode": "music", "status": "running",
+                        "total": len(music_list), "completed": completed,
+                    }, "batch")
+
+                db.update_task_status(task_id, "completed")
+                self.broadcast_task_update_sync(task_id, {
+                    "task_id": task_id, "mode": "music", "status": "completed",
+                    "total": len(music_list), "completed": completed,
+                }, "batch")
+
+            except Exception as e:
+                db.update_task_status(task_id, "error", str(e))
+                logger.error("[_run_music_download] 异常: %s", e, exc_info=True)
+
+        thread = threading.Thread(target=_run, daemon=True)
+        thread.start()
 
     # ============================================================
     # 事件广播

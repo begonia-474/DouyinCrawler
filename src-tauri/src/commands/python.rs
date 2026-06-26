@@ -40,6 +40,13 @@ pub async fn py_start_batch_download(url: String, download_type: String) -> Resu
 }
 
 #[tauri::command(rename_all = "snake_case")]
+pub async fn py_start_download(mode: String, url: String) -> Result<Value, String> {
+    run_python_blocking("start_download", move || {
+        crate::python::start_download(&mode, &url)
+    }).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
 pub async fn py_get_user_profile(url: String) -> Result<Value, String> {
     run_python_blocking("get_user_profile", move || {
         crate::python::get_user_profile(&url)

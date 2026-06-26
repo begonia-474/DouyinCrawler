@@ -36,6 +36,7 @@ pub fn init_config(config: &AppConfig) -> PyResult<()> {
         kwargs.set_item("max_connections", config.max_connections)?;
         kwargs.set_item("max_retries", config.max_retries)?;
         kwargs.set_item("max_tasks", config.max_tasks)?;
+        kwargs.set_item("save", false)?;
 
         task_manager.call_method("update_config", (), Some(&kwargs))?;
 

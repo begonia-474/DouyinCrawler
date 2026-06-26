@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { getDownloadStats, getDownloads, getLiveRecordCount, getLiveRecords, getMusicCollectionCountFromDB, getMusicCollectionFromDB, getUserCount, getUserStats, getUsers, getVideoCount, getVideos, getVideoStats } from "@/lib/api";
+import { getDownloadStats, getDownloads, getLiveRecordCount, getLiveRecords, getMusicCollectionCountFromDB, getMusicCollectionFromDB, getUserCount, getUserStats, getUsers, getVideoCount, getVideos, getVideoStats, getDownloadTasks, getDownloadTaskDetail, getDownloadTaskItems, getDownloadTaskItemCounts } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 
 export function useDownloadsQuery(params: {
@@ -110,5 +110,36 @@ export function useUserCountQuery(params?: { keyword?: string }) {
   return useQuery({
     queryKey: queryKeys.userCount(params ?? {}),
     queryFn: () => getUserCount(params),
+  });
+}
+
+export function useDownloadTasksQuery(params?: { limit?: number; status?: string; mode?: string }) {
+  return useQuery({
+    queryKey: queryKeys.downloadTasks(params ?? {}),
+    queryFn: () => getDownloadTasks(params?.limit, 0, params?.status, params?.mode),
+  });
+}
+
+export function useDownloadTaskDetailQuery(taskId: string) {
+  return useQuery({
+    queryKey: queryKeys.downloadTaskDetail(taskId),
+    queryFn: () => getDownloadTaskDetail(taskId),
+    enabled: !!taskId,
+  });
+}
+
+export function useDownloadTaskItemsQuery(taskId: string, status?: string) {
+  return useQuery({
+    queryKey: queryKeys.downloadTaskItems(taskId, status),
+    queryFn: () => getDownloadTaskItems(taskId, status),
+    enabled: !!taskId,
+  });
+}
+
+export function useDownloadTaskItemCountsQuery(taskId: string) {
+  return useQuery({
+    queryKey: queryKeys.downloadTaskItemCounts(taskId),
+    queryFn: () => getDownloadTaskItemCounts(taskId),
+    enabled: !!taskId,
   });
 }

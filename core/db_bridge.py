@@ -20,6 +20,12 @@ _save_user_info = None
 _save_live_record = None
 _has_user = None
 
+# 任务管理（同样由 Rust 注入）
+_create_task = None
+_update_task_status = None
+_create_task_item = None
+_update_task_item_status = None
+
 
 def save_download_record(data: dict) -> bool:
     """保存下载记录（通过 Rust）"""
@@ -82,4 +88,66 @@ def has_user(sec_user_id: str) -> bool:
         return _has_user(sec_user_id)
     except Exception as e:
         logger.error("[db_bridge] has_user 失败: %s", e)
+        return False
+
+
+# ============================================================
+# 任务管理桥接
+# ============================================================
+
+def create_task(task_id: str, mode: str, url: str, title: str = None) -> bool:
+    """在数据库创建下载任务记录"""
+    if _create_task is None:
+        logger.error("[db_bridge] _create_task 未注册")
+        return False
+    try:
+        _create_task({"id": task_id, "mode": mode, "url": url, "title": title})
+        return True
+    except Exception as e:
+        logger.error("[db_bridge] create_task 失败: %s", e)
+        return False
+
+
+def update_task_status(task_id: str, status: str, error_msg: str = None) -> bool:
+    """更新任务状态"""
+    if _update_task_status is None:
+        logger.error("[db_bridge] _update_task_status 未注册")
+        return False
+    try:
+        _update_task_status(task_id, status, error_msg)
+        return True
+    except Exception as e:
+        logger.error("[db_bridge] update_task_status 失败: %s", e)
+        return False
+
+
+def create_task_item(task_id: str, aweme_id: str = None, title: str = None,
+                     author_nickname: str = None, cover_url: str = None) -> bool:
+    """创建任务子项"""
+    if _create_task_item is None:
+        logger.error("[db_bridge] _create_task_item 未注册")
+        return False
+    try:
+        _create_task_item({
+            "task_id": task_id, "aweme_id": aweme_id, "title": title,
+            "author_nickname": author_nickname, "cover_url": cover_url,
+        })
+        return True
+    except Exception as e:
+        logger.error("[db_bridge] create_task_item 失败: %s", e)
+        return False
+
+
+def update_task_item_status(task_id: str, aweme_id: str, status: str,
+                            file_path: str = None, file_size: int = 0,
+                            error_msg: str = None) -> bool:
+    """更新子项状态（completed / skipped / failed）"""
+    if _update_task_item_status is None:
+        logger.error("[db_bridge] _update_task_item_status 未注册")
+        return False
+    try:
+        _update_task_item_status(task_id, aweme_id, status, file_path, file_size, error_msg)
+        return True
+    except Exception as e:
+        logger.error("[db_bridge] update_task_item_status 失败: %s", e)
         return False

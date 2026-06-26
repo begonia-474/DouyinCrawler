@@ -13,4 +13,8 @@ export const queryKeys = {
   musicCount: (params: QueryParams = {}) => ["music-count", params] as const,
   users: (params: QueryParams = {}) => ["users", params] as const,
   userCount: (params: QueryParams = {}) => ["user-count", params] as const,
+  downloadTasks: (params: QueryParams = {}) => ["download-tasks", params] as const,
+  downloadTaskDetail: (taskId: string) => ["download-task-detail", taskId] as const,
+  downloadTaskItems: (taskId: string, status?: string) => ["download-task-items", taskId, status] as const,
+  downloadTaskItemCounts: (taskId: string) => ["download-task-item-counts", taskId] as const,
 };

@@ -21,9 +21,11 @@ class LiveRecordManager:
         url: str,
         handler,
         broadcast_fn: Callable[[str, dict, str], None],
+        task_id: str = None,
     ) -> str:
         """启动直播录制，返回 task_id（同步版本，使用线程后台执行）"""
-        task_id = str(uuid.uuid4())[:8]
+        if task_id is None:
+            task_id = str(uuid.uuid4())[:8]
         stop_event = threading.Event()
         self._live_tasks[task_id] = {
             "task_id": task_id,
