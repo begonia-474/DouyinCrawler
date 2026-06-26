@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Bezel } from "@/components/shared/bezel";
 import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 import { useTaskStore } from "@/stores/task-store";
-import { Loader2, CheckCircle2, XCircle } from "lucide-react";
+import { Loader2, CheckCircle2, XCircle, AlertTriangle } from "lucide-react";
 
 export function DownloadStatusCard() {
   const navigate = useNavigate();
@@ -44,34 +45,89 @@ export function DownloadStatusCard() {
   const task = activeTask || recentCompletedTask;
   if (!task) return null;
 
+  const isRunning = task.status === "running" || task.status === "starting" || task.status === "recording" || task.status === "stopping";
+  const total = task.total ?? 0;
+  const completed = task.completed ?? 0;
+  const failed = task.failed ?? 0;
+  const skipped = task.skipped ?? 0;
+  const progressPercent = total > 0 ? Math.round(((completed + skipped) / total) * 100) : 0;
+
   return (
     <div className="fixed bottom-4 right-4 z-50 animate-in slide-in-from-bottom-4">
       <Bezel radius="xl">
-        <div className="p-4 flex items-center gap-3 min-w-[200px]">
-          {task.status === "running" || task.status === "starting" ? (
-            <Loader2 className="h-4 w-4 animate-spin text-primary" />
-          ) : task.status === "completed" ? (
-            <CheckCircle2 className="h-4 w-4 text-success" />
-          ) : (
-            <XCircle className="h-4 w-4 text-destructive" />
+        <div className="p-4 min-w-[280px] space-y-2.5">
+          {/* 头部：图标 + 状态文字 + 操作按钮 */}
+          <div className="flex items-center gap-3">
+            {isRunning ? (
+              <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
+            ) : task.status === "completed" ? (
+              <CheckCircle2 className="h-4 w-4 text-success shrink-0" />
+            ) : (
+              <XCircle className="h-4 w-4 text-destructive shrink-0" />
+            )}
+
+            <span className="text-sm font-medium flex-1">
+              {isRunning
+                ? task.status === "recording" ? "录制中" : task.status === "stopping" ? "停止中" : "下载中"
+                : task.status === "completed"
+                ? "任务完成"
+                : "任务失败"}
+            </span>
+
+            {(task.status === "completed" || task.status === "error") && (
+              <Button
+                size="sm"
+                variant="capsule"
+                onClick={() => navigate("/downloads")}
+              >
+                查看记录
+              </Button>
+            )}
+          </div>
+
+          {/* 进度条 + 计数（batch 任务运行中） */}
+          {task.task_type === "batch" && (isRunning || total > 0) && (
+            <div className="space-y-1.5">
+              <Progress value={isRunning ? progressPercent : 100} className="h-1.5" />
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span className="flex items-center gap-2">
+                  <span className="font-mono tabular-nums">{completed + skipped}/{total}</span>
+                  {skipped > 0 && (
+                    <span className="text-muted-foreground/70">跳{skipped}</span>
+                  )}
+                  {failed > 0 && (
+                    <span className="flex items-center gap-0.5 text-destructive">
+                      <AlertTriangle className="h-3 w-3" />
+                      {failed}
+                    </span>
+                  )}
+                </span>
+                {isRunning && total > 0 && (
+                  <span className="font-mono tabular-nums">{progressPercent}%</span>
+                )}
+              </div>
+            </div>
           )}
 
-          <span className="text-sm">
-            {task.status === "running" || task.status === "starting" || task.status === "recording" || task.status === "stopping"
-              ? "正在执行..."
-              : task.status === "completed"
-              ? "任务完成"
-              : "任务失败"}
-          </span>
+          {/* 当前下载项（运行中时显示） */}
+          {isRunning && task.current_item && (
+            <p className="text-xs text-muted-foreground truncate" title={task.current_item}>
+              {task.current_item}
+            </p>
+          )}
 
-          {(task.status === "completed" || task.status === "error") && (
-            <Button
-              size="sm"
-              variant="capsule"
-              onClick={() => navigate("/downloads")}
-            >
-              查看记录
-            </Button>
+          {/* 完成/失败的摘要 */}
+          {!isRunning && total > 0 && (
+            <p className="text-xs text-muted-foreground">
+              {completed} 完成
+              {skipped > 0 && ` · ${skipped} 跳过`}
+              {failed > 0 && ` · ${failed} 失败`}
+            </p>
+          )}
+
+          {/* 错误信息 */}
+          {task.status === "error" && task.error && (
+            <p className="text-xs text-destructive truncate">{task.error}</p>
           )}
         </div>
       </Bezel>

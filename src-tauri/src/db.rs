@@ -215,6 +215,10 @@ const MIGRATE_V6_LIVE_UNIQUE: &[&str] = &[
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_live_unique ON live_records(room_id, started_at)",
 ];
 
+const MIGRATE_V8_TASK_AUTHOR: &[&str] = &[
+    "ALTER TABLE download_tasks ADD COLUMN author_nickname TEXT",
+];
+
 const MIGRATE_V7_TASK_TABLES: &[&str] = &[
     "CREATE TABLE IF NOT EXISTS download_tasks (
         id TEXT PRIMARY KEY,
@@ -348,6 +352,7 @@ pub struct DownloadTask {
     pub mode: String,
     pub url: String,
     pub title: Option<String>,
+    pub author_nickname: Option<String>,
     pub status: String,
     pub total: i64,
     pub completed: i64,
@@ -364,6 +369,7 @@ pub struct NewDownloadTask {
     pub mode: String,
     pub url: String,
     pub title: Option<String>,
+    pub author_nickname: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -1221,13 +1227,17 @@ impl Database {
             info!("[DB] 迁移 v7: 新增 download_tasks / download_task_items 表");
             Self::run_migration_sql(conn, MIGRATE_V7_TASK_TABLES)?;
         }
+        if version < 8 {
+            info!("[DB] 迁移 v8: download_tasks 添加 author_nickname");
+            Self::run_migration_sql(conn, MIGRATE_V8_TASK_AUTHOR)?;
+        }
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
         conn.execute(
-            "INSERT OR REPLACE INTO _metadata (name, value) VALUES ('schema_version', '7')",
+            "INSERT OR REPLACE INTO _metadata (name, value) VALUES ('schema_version', '8')",
             [],
         )?;
         conn.execute(
@@ -1645,9 +1655,9 @@ impl Database {
             .as_secs() as i64;
         conn.execute(
             "INSERT OR IGNORE INTO download_tasks \
-             (id, mode, url, title, status, total, completed, skipped, failed, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, 'running', 0, 0, 0, 0, ?5, ?5)",
-            rusqlite::params![task.id, task.mode, task.url, task.title, now],
+             (id, mode, url, title, author_nickname, status, total, completed, skipped, failed, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, 'running', 0, 0, 0, 0, ?6, ?6)",
+            rusqlite::params![task.id, task.mode, task.url, task.title, task.author_nickname, now],
         )?;
         Ok(())
     }
@@ -1693,7 +1703,7 @@ impl Database {
     ) -> Result<Vec<DownloadTask>> {
         let conn = lock_conn!(self);
         let mut sql = String::from(
-            "SELECT id, mode, url, title, status, total, completed, skipped, failed, error_msg, created_at, updated_at \
+            "SELECT id, mode, url, title, author_nickname, status, total, completed, skipped, failed, error_msg, created_at, updated_at \
              FROM download_tasks"
         );
         let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -1728,6 +1738,7 @@ impl Database {
                 mode: row.get("mode")?,
                 url: row.get("url")?,
                 title: row.get("title")?,
+                author_nickname: row.get("author_nickname")?,
                 status: row.get("status")?,
                 total: row.get("total")?,
                 completed: row.get("completed")?,
@@ -1749,7 +1760,7 @@ impl Database {
     pub fn get_task_by_id(&self, task_id: &str) -> Result<Option<DownloadTask>> {
         let conn = lock_conn!(self);
         let mut stmt = conn.prepare(
-            "SELECT id, mode, url, title, status, total, completed, skipped, failed, error_msg, created_at, updated_at \
+            "SELECT id, mode, url, title, author_nickname, status, total, completed, skipped, failed, error_msg, created_at, updated_at \
              FROM download_tasks WHERE id = ?1"
         )?;
         let mut rows = stmt.query_map(rusqlite::params![task_id], |row| {
@@ -1758,6 +1769,7 @@ impl Database {
                 mode: row.get("mode")?,
                 url: row.get("url")?,
                 title: row.get("title")?,
+                author_nickname: row.get("author_nickname")?,
                 status: row.get("status")?,
                 total: row.get("total")?,
                 completed: row.get("completed")?,

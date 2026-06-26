@@ -153,6 +153,7 @@ export interface DownloadTask {
   mode: DownloadMode;
   url: string;
   title: string | null;
+  author_nickname: string | null;
   status: "running" | "starting" | "completed" | "error" | "cancelled" | "recording" | "stopping";
   total: number;
   completed: number;

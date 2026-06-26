@@ -108,6 +108,7 @@ export async function startBatchDownload(download_type: string, url: string): Pr
         total: 0,
         completed: 0,
         failed: 0,
+        skipped: 0,
         current_item: "",
         error: "",
       });
@@ -140,6 +141,7 @@ export async function startDownload(mode: DownloadMode, url: string): Promise<Ap
         total: 0,
         completed: 0,
         failed: 0,
+        skipped: 0,
         current_item: "",
         error: "",
       });

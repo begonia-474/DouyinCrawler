@@ -256,9 +256,10 @@ pub fn register_db_bridge() {
                 let mode: String = data.get_item("mode")?.extract()?;
                 let url: String = data.get_item("url")?.extract()?;
                 let title: Option<String> = data.get_item("title").ok().and_then(|v| v.extract().ok());
+                let author_nickname: Option<String> = data.get_item("author_nickname").ok().and_then(|v| v.extract().ok());
 
                 let db = app_handle.state::<crate::db::Database>();
-                let task = crate::db::NewDownloadTask { id, mode, url, title };
+                let task = crate::db::NewDownloadTask { id, mode, url, title, author_nickname };
                 db.create_task(&task)
                     .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("创建任务失败: {}", e)))?;
                 Ok(())

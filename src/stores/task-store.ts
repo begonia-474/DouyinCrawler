@@ -12,6 +12,7 @@ export interface UnifiedTask {
   total?: number;
   completed?: number;
   failed?: number;
+  skipped?: number;
   current_item?: string;
   // live 字段
   title?: string;
@@ -99,6 +100,7 @@ export const useTaskStore = create<TaskState>((set) => ({
         total: data.total as number | undefined,
         completed: data.completed as number | undefined,
         failed: data.failed as number | undefined,
+        skipped: data.skipped as number | undefined,
         current_item: data.current_item as string | undefined,
         title: data.title as string | undefined,
         nickname: data.nickname as string | undefined,

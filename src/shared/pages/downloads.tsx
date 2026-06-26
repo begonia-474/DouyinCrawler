@@ -12,36 +12,23 @@ import {
   CheckCircle2,
   Loader2,
   FolderOpen,
-  Video,
-  Image,
   Radio,
-  Music,
   Trash2,
 } from "lucide-react";
-import { deleteDownloadRecord, deleteLiveRecord, deleteDownloadTask } from "@/lib/api";
+import { deleteLiveRecord, deleteDownloadTask } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
-import { useDownloadsQuery, useLiveRecordsQuery, useDownloadTasksQuery } from "@/lib/queries";
+import { useLiveRecordsQuery, useDownloadTasksQuery } from "@/lib/queries";
 import { useTaskStore } from "@/stores/task-store";
-import type { DownloadRecord, LiveRecord } from "@/lib/tauri-types";
+import type { LiveRecord } from "@/lib/tauri-types";
 import type { DownloadTask } from "@/lib/api-types";
-import { formatFileSize, formatTimestamp } from "@/lib/utils";
-
-const typeIcons: Record<string, typeof Video> = {
-  video: Video,
-  images: Image,
-  live: Radio,
-  music: Music,
-};
+import { formatFileSize } from "@/lib/utils";
 
 export default function DownloadsPage() {
   const queryClient = useQueryClient();
-  const downloadsQuery = useDownloadsQuery({ limit: 50, status: "completed" });
   const liveRecordsQuery = useLiveRecordsQuery({ limit: 50 });
   const dbTasksQuery = useDownloadTasksQuery({ limit: 100 });
-  const downloads = downloadsQuery.data ?? [];
   const liveRecords = liveRecordsQuery.data ?? [];
   const dbTasks = dbTasksQuery.data ?? [];
-  const loading = downloadsQuery.isLoading || liveRecordsQuery.isLoading;
   const { tasks: liveTasks, connect, clearCompleted, removeTask } = useTaskStore();
 
   useEffect(() => {
@@ -51,19 +38,6 @@ export default function DownloadsPage() {
   const askDeleteFile = (filePath: string | null) => {
     if (!filePath) return false;
     return window.confirm("是否同时删除这条记录对应的本地文件？\n\n取消则只删除记录。");
-  };
-
-  const handleDeleteDownload = async (item: DownloadRecord) => {
-    if (!window.confirm("确定删除这条下载记录？")) return;
-    try {
-      await deleteDownloadRecord(item.id, askDeleteFile(item.file_path));
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.downloads() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.downloadStats() }),
-      ]);
-    } catch (err) {
-      window.alert(err instanceof Error ? err.message : "删除失败");
-    }
   };
 
   const handleDeleteLiveRecord = async (item: LiveRecord) => {
@@ -86,7 +60,8 @@ export default function DownloadsPage() {
     }
   };
 
-  const completedDownloads = downloads.filter((d) => d.status === "completed");
+  // 已完成的任务（用于"已完成" tab）
+  const completedTasks = dbTasks.filter((t) => t.status === "completed" || t.status === "error");
 
   // 合并 DB 任务和实时任务：实时状态覆盖 DB 数据
   const mergedTasks = useMemo(() => {
@@ -117,6 +92,7 @@ export default function DownloadsPage() {
           mode: (live.type as DownloadTask["mode"]) ?? "one",
           url: live.url,
           title: live.title ?? live.nickname ?? null,
+          author_nickname: live.nickname ?? null,
           status: (live.status as DownloadTask["status"]) ?? "running",
           total: live.total ?? 0,
           completed: live.completed ?? 0,
@@ -171,9 +147,9 @@ export default function DownloadsPage() {
           </TabsTrigger>
           <TabsTrigger value="completed">
             已完成
-            {completedDownloads.length > 0 && (
+            {completedTasks.length > 0 && (
               <Badge variant="secondary" className="ml-1.5 text-[10px]">
-                {completedDownloads.length}
+                {completedTasks.length}
               </Badge>
             )}
           </TabsTrigger>
@@ -213,11 +189,11 @@ export default function DownloadsPage() {
         </TabsContent>
 
         <TabsContent value="completed" className="mt-8 space-y-2">
-          {loading ? (
+          {dbTasksQuery.isLoading ? (
             <div className="flex justify-center py-16">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
-          ) : completedDownloads.length === 0 ? (
+          ) : completedTasks.length === 0 ? (
             <Bezel radius="xl">
               <div className="p-12 text-center text-muted-foreground">
                 <CheckCircle2 className="h-10 w-10 mx-auto mb-4 opacity-30" />
@@ -225,60 +201,19 @@ export default function DownloadsPage() {
               </div>
             </Bezel>
           ) : (
-            completedDownloads.map((item, i) => {
-              const Icon = typeIcons[item.download_type] || Download;
-              return (
-                <AnimateEntry key={item.id} delay={i * 30}>
-                  <Bezel radius="lg" padding="sm">
-                    <div className="flex items-center gap-4 p-4 bg-card hover:bg-foreground/[0.02] transition-all duration-300">
-                      <div className="h-9 w-9 rounded-xl bg-foreground/[0.04] ring-1 ring-foreground/[0.06] flex items-center justify-center shrink-0">
-                        <Icon className="h-4 w-4 text-muted-foreground" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">
-                          {item.file_path || item.title || "未知文件"}
-                        </p>
-                        <div className="flex items-center gap-3 mt-1">
-                          {item.file_size > 0 && (
-                            <span className="text-[11px] text-muted-foreground font-mono tabular-nums">
-                              {formatFileSize(item.file_size)}
-                            </span>
-                          )}
-                          <span className="text-[11px] text-muted-foreground">
-                            {formatTimestamp(item.created_at)}
-                          </span>
-                          {item.author_nickname && (
-                            <span className="text-[11px] text-muted-foreground">
-                              {item.author_nickname}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {item.file_path && (
-                          <Button variant="ghost" size="icon-sm" title="打开文件所在文件夹">
-                            <FolderOpen className="h-4 w-4" />
-                          </Button>
-                        )}
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          title="删除记录"
-                          onClick={() => handleDeleteDownload(item)}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      </div>
-                    </div>
-                  </Bezel>
-                </AnimateEntry>
-              );
-            })
+            completedTasks.map((task, i) => (
+              <AnimateEntry key={task.id} delay={i * 30}>
+                <TaskCard
+                  task={task}
+                  onRemove={() => handleRemoveTask(task.id)}
+                />
+              </AnimateEntry>
+            ))
           )}
         </TabsContent>
 
         <TabsContent value="live" className="mt-8 space-y-2">
-          {loading ? (
+          {liveRecordsQuery.isLoading ? (
             <div className="flex justify-center py-16">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>

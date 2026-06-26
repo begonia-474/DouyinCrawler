@@ -95,13 +95,13 @@ def has_user(sec_user_id: str) -> bool:
 # 任务管理桥接
 # ============================================================
 
-def create_task(task_id: str, mode: str, url: str, title: str = None) -> bool:
+def create_task(task_id: str, mode: str, url: str, title: str = None, author_nickname: str = None) -> bool:
     """在数据库创建下载任务记录"""
     if _create_task is None:
         logger.error("[db_bridge] _create_task 未注册")
         return False
     try:
-        _create_task({"id": task_id, "mode": mode, "url": url, "title": title})
+        _create_task({"id": task_id, "mode": mode, "url": url, "title": title, "author_nickname": author_nickname})
         return True
     except Exception as e:
         logger.error("[db_bridge] create_task 失败: %s", e)

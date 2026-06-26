@@ -32,7 +32,7 @@ export function TaskItemRow({ item }: { item: TaskItem }) {
       />
       <div className="flex-1 min-w-0">
         <p className="text-xs truncate">
-          {item.title || item.file_path || `#${item.id}`}
+          {item.title || ""}
         </p>
         {item.error_msg && (
           <p className="text-[11px] text-destructive truncate mt-0.5">

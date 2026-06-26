@@ -116,10 +116,12 @@ export function TaskCard({ task, liveState, onRemove }: TaskCardProps) {
                 )}
               </div>
 
-              {/* 标题 + URL */}
+              {/* 标题 + 作者 + URL */}
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium truncate">
-                  {task.title || `${label}下载`}
+                  {task.author_nickname
+                    ? `${task.author_nickname} · ${label}`
+                    : task.title || `${label}下载`}
                 </p>
                 <p className="text-xs text-muted-foreground truncate mt-0.5">
                   {task.url}

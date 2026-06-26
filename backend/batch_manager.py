@@ -1,8 +1,10 @@
 """批量下载任务管理"""
 
 import asyncio
+import time
 import uuid
 import threading
+from pathlib import Path as P
 from typing import Callable
 from backend.logger import get_logger
 
@@ -34,6 +36,7 @@ class BatchManager:
             "total": 0,
             "completed": 0,
             "failed": 0,
+            "skipped": 0,
             "current_item": "",
             "error": "",
             "results": [],
@@ -42,6 +45,7 @@ class BatchManager:
         def _run():
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
+            start_time = time.time()
             logger.info("[batch_download] 线程启动 task_id=%s", task_id)
             try:
                 async def _do():
@@ -67,6 +71,18 @@ class BatchManager:
                         count = result.get("count", 0)
                         results = result.get("results", [])
 
+                        # 从结果中提取作者昵称，在 DB 创建任务记录
+                        _type_to_mode = {"user_post": "post", "user_like": "like", "mix": "mix", "collects": "collects"}
+                        author_nickname = None
+                        if results:
+                            author_nickname = results[0].get("detail", {}).get("author_nickname")
+                        try:
+                            from core import db
+                            db.create_task(task_id, _type_to_mode.get(download_type, download_type), url,
+                                           author_nickname=author_nickname)
+                        except Exception as e:
+                            logger.error("[batch_download] create_task 失败: %s", e)
+
                         # 直接写入数据库（不经过前端）
                         try:
                             from core.db import save_batch_results
@@ -75,7 +91,8 @@ class BatchManager:
                         except Exception as e:
                             logger.error("[batch_download] 数据库写入失败: %s", e, exc_info=True)
 
-                        # 写入任务子项记录
+                        # 写入任务子项记录，通过文件修改时间判断是否跳过
+                        skipped_count = 0
                         try:
                             from core import db
                             for item in results:
@@ -84,16 +101,25 @@ class BatchManager:
                                 aweme_id = detail.get("aweme_id", "")
                                 file_size = 0
                                 if file_path:
-                                    from pathlib import Path as P
                                     try:
                                         file_size = P(file_path).stat().st_size
                                     except (OSError, ValueError):
                                         pass
+                                # 文件修改时间早于任务启动 → 文件早已存在，跳过
+                                is_skipped = False
+                                if file_path and file_size > 0:
+                                    try:
+                                        is_skipped = P(file_path).stat().st_mtime < start_time
+                                    except (OSError, ValueError):
+                                        pass
+                                if is_skipped:
+                                    skipped_count += 1
                                 db.create_task_item(task_id, aweme_id=aweme_id,
                                                     title=detail.get("desc"),
                                                     author_nickname=detail.get("author_nickname"),
                                                     cover_url=detail.get("cover_url"))
-                                db.update_task_item_status(task_id, aweme_id, "completed",
+                                db.update_task_item_status(task_id, aweme_id,
+                                                           "skipped" if is_skipped else "completed",
                                                            file_path, file_size)
                             db.update_task_status(task_id, "completed")
                         except Exception as e:
@@ -102,9 +128,11 @@ class BatchManager:
                         self._batch_tasks[task_id].update({
                             "status": "completed",
                             "total": count,
-                            "completed": count,
+                            "completed": count - skipped_count,
+                            "skipped": skipped_count,
                         })
-                        logger.info("[batch_download] 任务状态已更新为 completed task_id=%s", task_id)
+                        logger.info("[batch_download] 任务状态已更新为 completed task_id=%s, total=%d, completed=%d, skipped=%d",
+                                   task_id, count, count - skipped_count, skipped_count)
                     else:
                         self._batch_tasks[task_id]["status"] = "error"
                         self._batch_tasks[task_id]["error"] = result.get("error", "未知错误")

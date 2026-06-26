@@ -81,9 +81,9 @@ def save_live_record(record: dict) -> bool:
 # 下载任务管理
 # ============================================================
 
-def create_task(task_id: str, mode: str, url: str, title: str = None) -> bool:
+def create_task(task_id: str, mode: str, url: str, title: str = None, author_nickname: str = None) -> bool:
     """创建下载任务记录（通过 Rust 桥接）"""
-    return db_bridge.create_task(task_id, mode, url, title)
+    return db_bridge.create_task(task_id, mode, url, title, author_nickname)
 
 
 def update_task_status(task_id: str, status: str, error_msg: str = None) -> bool:
