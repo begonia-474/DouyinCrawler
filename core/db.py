@@ -14,6 +14,8 @@
 """
 
 import logging
+from pathlib import Path
+
 from core import db_bridge
 
 logger = logging.getLogger(__name__)
@@ -87,10 +89,19 @@ def save_batch_results(results: list, download_type: str = "batch") -> dict:
     """
     saved = 0
     failed = 0
+    seen_users = set()  # 问题3修复：避免同一用户重复 upsert
 
     for item in results:
         detail = item.get("detail", {})
         file_path = item.get("path")
+
+        # 问题2修复：从文件获取实际大小
+        file_size = 0
+        if file_path:
+            try:
+                file_size = Path(file_path).stat().st_size
+            except (OSError, ValueError):
+                pass
 
         # 1. 保存下载记录
         if save_download_record(
@@ -100,6 +111,7 @@ def save_batch_results(results: list, download_type: str = "batch") -> dict:
             author_nickname=detail.get("author_nickname"),
             author_sec_uid=detail.get("author_sec_uid"),
             file_path=file_path,
+            file_size=file_size,
             cover_url=detail.get("cover_url"),
             status="completed",
         ):
@@ -111,9 +123,12 @@ def save_batch_results(results: list, download_type: str = "batch") -> dict:
         if detail.get("aweme_id"):
             save_video_info(detail)
 
-        # 3. 保存用户信息
-        if detail.get("author_sec_uid") is not None:
-            save_user_info(detail)
+        # 3. 保存用户信息（问题1+3修复：去重 + has_user 检查，避免不完整数据覆盖）
+        sec_uid = detail.get("author_sec_uid")
+        if sec_uid and sec_uid not in seen_users:
+            seen_users.add(sec_uid)
+            if not db_bridge.has_user(sec_uid):
+                save_user_info(detail)
 
     logger.info("[db] 批量保存完成: 成功=%d, 失败=%d, 总计=%d", saved, failed, len(results))
     return {"saved": saved, "failed": failed}

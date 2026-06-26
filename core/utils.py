@@ -1,7 +1,8 @@
-"""工具类 — URL ID 提取、文件名格式化、M3U8 解析"""
+"""工具类 — URL ID 提取、文件名格式化、M3U8 解析、文本清洗"""
 
 import re
 import time
+import datetime
 import httpx
 import m3u8
 
@@ -143,13 +144,58 @@ def detect_url_type(url: str) -> str:
     return "one"
 
 
-def sanitize_filename(name: str, max_len: int = 80) -> str:
-    """清理文件名"""
+# ============================================================
+# 文本清洗与时间格式化（移植自 f2）
+# ============================================================
+
+_REPLACE_T_RE = re.compile(r"[^一-龥a-zA-Z0-9#]")
+
+
+def replaceT(obj):
+    """替换文案非法字符，保留中文、英文、数字、#。
+
+    用于文件名安全和前端展示。支持 str 和 list 输入。
+    """
+    if isinstance(obj, list):
+        return [re.sub(_REPLACE_T_RE, "_", i) if isinstance(i, str) else i or "" for i in obj]
+    if isinstance(obj, str):
+        return re.sub(_REPLACE_T_RE, "_", obj)
+    return obj
+
+
+def timestamp_2_str(timestamp, format: str = "%Y-%m-%d %H-%M-%S") -> str:
+    """将 UNIX 时间戳转换为东八区北京时间格式化字符串。
+
+    Args:
+        timestamp: 秒或毫秒级 UNIX 时间戳（str/int/float）
+        format: 日期格式
+
+    Returns:
+        格式化字符串，无效输入返回空字符串
+    """
+    if timestamp in (None, "None", "", 0, "0"):
+        return ""
+    try:
+        ts = float(timestamp)
+        if ts > 1e10:
+            ts /= 1000
+        tz = datetime.timezone(datetime.timedelta(hours=8))
+        return datetime.datetime.fromtimestamp(ts, tz=tz).strftime(format)
+    except (ValueError, TypeError, OSError):
+        return ""
+
+
+def sanitize_filename(name: str, max_len: int = 200) -> str:
+    """清理文件名，移除非法字符和 emoji，按字节截断"""
     name = re.sub(r'[\\/:*?"<>|\n\r\t]', '_', name)
+    # 过滤 emoji（SMP 平面 U+10000 以上）
+    name = re.sub(r'[\U00010000-\U0010ffff]+', '', name)
     name = name.strip('. ')
-    if len(name) > max_len:
-        name = name[:max_len]
-    return name or "untitled"
+    # 按字节截断，避免中文截断产生乱码
+    encoded = name.encode('utf-8')
+    if len(encoded) > max_len:
+        name = encoded[:max_len].decode('utf-8', errors='ignore')
+    return name
 
 
 def format_filename(template: str, data: dict) -> str:
@@ -159,10 +205,15 @@ def format_filename(template: str, data: dict) -> str:
     支持变量: {create}, {desc}, {caption}, {nickname}, {aweme_id}, {uid}
     """
     create_ts = data.get("create_time", 0)
-    create_str = time.strftime("%Y-%m-%d_%H%M%S", time.localtime(create_ts)) if create_ts else "unknown"
+    if isinstance(create_ts, str) and "-" in create_ts:
+        # 已经是格式化字符串（如 "2024-06-25 16-00-00"），直接用
+        create_str = create_ts.replace(" ", "_").replace(":", "").replace("-", "-", 2)
+    else:
+        create_str = time.strftime("%Y-%m-%d_%H%M%S", time.localtime(create_ts)) if create_ts else "unknown"
 
     # desc 和 caption 都指向 desc 字段（f2 兼容）
-    desc = sanitize_filename(data.get("desc", ""))
+    # strip 尾部下划线，避免空 desc 时模板展开产生多余连接符
+    desc = sanitize_filename(data.get("desc", "")).strip('_ ')
 
     result = template.format(
         create=create_str,
@@ -172,7 +223,7 @@ def format_filename(template: str, data: dict) -> str:
         aweme_id=data.get("aweme_id", ""),
         uid=data.get("author_uid", ""),
     )
-    return sanitize_filename(result)
+    return sanitize_filename(result).rstrip('_')
 
 
 # ============================================================

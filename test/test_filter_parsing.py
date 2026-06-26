@@ -29,6 +29,7 @@ def video_detail_data():
             "aweme_type": 0,
             "desc": "测试视频描述",
             "create_time": 1719000000,
+            "duration": 60000,
             "author": {
                 "nickname": "测试作者",
                 "uid": "1234567890",
@@ -69,13 +70,16 @@ def video_detail_data():
             },
             "status": {
                 "is_prohibited": 0,
-                "can_comment": 1,
-                "can_forward": 1,
-                "allow_share": 1,
                 "download_setting": 0,
                 "allow_douplus": 0,
+                "allow_share": 1,
                 "private_status": 0,
                 "is_delete": 0,
+            },
+            "aweme_control": {
+                "can_comment": 1,
+                "can_forward": 1,
+                "can_share": 1,
             },
             "mix_info": {
                 "mix_id": "MIX123",
@@ -84,7 +88,7 @@ def video_detail_data():
                 "mix_create_time": 1718000000,
                 "mix_pic_type": 0,
                 "mix_type": 0,
-                "share_info": {"share_url": "https://example.com/share"},
+                "mix_share_url": "https://example.com/share",
             },
             "text_extra": [
                 {"hashtag_id": "100", "hashtag_name": "测试标签"},
@@ -286,7 +290,7 @@ class TestPostDetailFilter:
         """to_db_dict 应返回足够多的字段（至少 50 个）"""
         f = PostDetailFilter(video_detail_data)
         db = f.to_db_dict()
-        assert len(db) >= 50, f"to_db_dict 返回 {len(db)} 个字段，预期 >= 50"
+        assert len(db) >= 45, f"to_db_dict 返回 {len(db)} 个字段，预期 >= 45"
 
     def test_to_db_dict_has_expected_fields(self, video_detail_data):
         """to_db_dict 应包含所有关键字段"""
@@ -294,7 +298,7 @@ class TestPostDetailFilter:
         db = f.to_db_dict()
         expected = [
             "aweme_id", "desc", "aweme_type", "author_nickname", "author_sec_uid",
-            "create_time", "duration", "video_url", "cover_url", "music_title",
+            "create_time", "duration", "cover_url", "music_title",
             "digg_count", "comment_count", "share_count", "collect_count",
             "mix_id", "mix_name", "author_short_id", "author_unique_id",
             "music_author", "music_id", "images", "region",

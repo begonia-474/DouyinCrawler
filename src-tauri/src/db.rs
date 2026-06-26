@@ -211,6 +211,10 @@ const MIGRATE_V5_DOWNLOAD_UNIQUE: &[&str] = &[
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_download_unique ON download_history(aweme_id, file_path)",
 ];
 
+const MIGRATE_V6_LIVE_UNIQUE: &[&str] = &[
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_live_unique ON live_records(room_id, started_at)",
+];
+
 pub struct Database {
     conn: Mutex<Connection>,
 }
@@ -1107,13 +1111,17 @@ impl Database {
             info!("[DB] 迁移 v5: download_history 添加唯一索引");
             Self::run_migration_sql(conn, MIGRATE_V5_DOWNLOAD_UNIQUE)?;
         }
+        if version < 6 {
+            info!("[DB] 迁移 v6: live_records 添加唯一索引 (room_id + started_at)");
+            Self::run_migration_sql(conn, MIGRATE_V6_LIVE_UNIQUE)?;
+        }
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
         conn.execute(
-            "INSERT OR REPLACE INTO _metadata (name, value) VALUES ('schema_version', '5')",
+            "INSERT OR REPLACE INTO _metadata (name, value) VALUES ('schema_version', '6')",
             [],
         )?;
         conn.execute(
@@ -1181,7 +1189,7 @@ impl Database {
             .unwrap()
             .as_secs() as i64;
         conn.execute(
-            "INSERT INTO live_records \
+            "INSERT OR IGNORE INTO live_records \
              (room_id, web_rid, title, nickname, sec_user_id, \
               file_path, file_size, duration_sec, status, started_at, ended_at, cover_url) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",

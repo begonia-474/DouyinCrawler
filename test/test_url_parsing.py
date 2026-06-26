@@ -73,12 +73,22 @@ class TestSanitizeFilename:
         assert sanitize_filename('file:name*test?"<>|') == "file_name_test_____"
 
     def test_max_length(self):
-        result = sanitize_filename("a" * 200, max_len=80)
+        result = sanitize_filename("a" * 300, max_len=80)
         assert len(result) == 80
 
+    def test_byte_truncation(self):
+        """中文按字节截断，不产生乱码"""
+        result = sanitize_filename("中" * 10, max_len=20)
+        assert result == "中" * 6
+
     def test_empty(self):
-        assert sanitize_filename("") == "untitled"
-        assert sanitize_filename("...") == "untitled"
+        """空字符串返回空串，不强行补 untitled"""
+        assert sanitize_filename("") == ""
+        assert sanitize_filename("...") == ""
+
+    def test_emoji_filtered(self):
+        assert sanitize_filename("视频🔥标题") == "视频标题"
+        assert sanitize_filename("🎮game") == "game"
 
     def test_newlines(self):
         assert sanitize_filename("file\nname\r") == "file_name_"
@@ -123,7 +133,14 @@ class TestFormatFilename:
 
     def test_empty_data(self):
         result = format_filename("{desc}_{aweme_id}", {})
-        assert "untitled" in result or result  # 不应崩溃
+        assert "untitled" not in result
+
+    def test_default_template_empty_desc(self):
+        """默认模板 + 空 desc：时间戳后无多余下划线"""
+        data = {"create_time": 1719000000, "desc": "", "author": "", "aweme_id": "123", "author_uid": ""}
+        result = format_filename("{create}_{desc}", data)
+        assert "untitled" not in result
+        assert not result.endswith('_')
 
 
 # ============================================================

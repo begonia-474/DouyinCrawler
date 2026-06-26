@@ -4,6 +4,7 @@ gmssl>=3.2
 aiofiles>=24.0
 pyyaml>=6.0
 m3u8>=4.0
+jsonpath-ng>=1.6
 
 # 测试依赖
 pytest>=8.0

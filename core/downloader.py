@@ -119,6 +119,13 @@ class Downloader:
         save_path.mkdir(parents=True, exist_ok=True)
 
         task = DownloadTask(url=video_url, save_path=save_path, filename=filename)
+
+        # 文件已存在则跳过下载
+        if task.full_path.exists():
+            logger.info("[download] 文件已存在，跳过: %s", task.full_path.name)
+            task.status = "completed"
+            return task.full_path
+
         tid = task_id or filename
         self._tasks[tid] = task
 
@@ -239,6 +246,13 @@ class Downloader:
         save_path.mkdir(parents=True, exist_ok=True)
 
         task = DownloadTask(url=music_url, save_path=save_path, filename=filename, suffix=".mp3")
+
+        # 文件已存在则跳过下载
+        if task.full_path.exists():
+            logger.info("[download] 音乐文件已存在，跳过: %s", task.full_path.name)
+            task.status = "completed"
+            return task.full_path
+
         tid = task_id or filename
         self._tasks[tid] = task
 

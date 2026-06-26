@@ -29,7 +29,7 @@ class MusicService(BaseService):
         if not play_url:
             return {"success": False, "error": "音乐播放地址为空"}
 
-        filename = sanitize_filename(f"{author} - {title}" if author else title)
+        filename = sanitize_filename(f"{author} - {title}" if author else title) or "unknown"
         nickname = sanitize_filename(author) if author else "unknown"
         save_dir = self.download_path / self.app_name / "music" / nickname
         save_dir.mkdir(parents=True, exist_ok=True)

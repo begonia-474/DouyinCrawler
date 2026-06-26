@@ -1,7 +1,73 @@
-"""响应数据过滤 — 从 API JSON 中提取关键字段"""
+"""响应数据过滤 — 从 API JSON 中提取关键字段
+
+基于 JSONModel (JSONPath) 实现，移植自 f2 项目的 filter 架构。
+每个 Filter 类包装原始 API 响应，通过 @property 懒加载提取字段。
+
+保留 get_nested() 供非 Filter 场景使用。
+"""
 
 import json
 
+from jsonpath_ng import parse
+from core.utils import replaceT, timestamp_2_str
+
+
+# ============================================================
+# JSONModel 基类（移植自 f2/utils/json_filter.py）
+# ============================================================
+
+class JSONModel:
+    """JSONPath 驱动的数据提取基类。
+
+    子类通过 @property + _get_attr_value("$.path.xxx") 声明式提取字段。
+    JSONPath 表达式自动缓存，避免重复解析。
+    """
+
+    def __init__(self, data):
+        self._data = data
+        self._cache = {}
+
+    def _parse_expression(self, jsonpath_expr: str):
+        if jsonpath_expr not in self._cache:
+            self._cache[jsonpath_expr] = parse(jsonpath_expr)
+        return self._cache[jsonpath_expr]
+
+    def _get_attr_value(self, jsonpath_expr: str):
+        """根据 JSONPath 获取单一属性值。无匹配返回 None。"""
+        expr = self._parse_expression(jsonpath_expr)
+        matches = expr.find(self._data)
+        if not matches:
+            return None
+        return matches[0].value if len(matches) == 1 else [m.value for m in matches]
+
+    def _get_list_attr_value(self, jsonpath_expr: str, as_json: bool = False):
+        """获取列表属性值，缺失字段补 None 保证列表对齐。"""
+        if "[*]" in jsonpath_expr:
+            idx = jsonpath_expr.find("[*]")
+            parent_str = jsonpath_expr[:idx + 3]
+            child_str = jsonpath_expr[idx + 3:]
+        else:
+            parent_str = jsonpath_expr
+            child_str = ""
+
+        parent_expr = self._parse_expression(parent_str)
+        parent_matches = parent_expr.find(self._data)
+
+        values = []
+        if child_str:
+            child_expr = self._parse_expression(f"$.{child_str.lstrip('.')}")
+            for match in parent_matches:
+                child_matches = child_expr.find(match.value)
+                values.append(child_matches[0].value if child_matches else None)
+        else:
+            values = [m.value for m in parent_matches]
+
+        return json.dumps(values, ensure_ascii=False) if as_json else values
+
+
+# ============================================================
+# 兼容工具（非 Filter 场景仍可用）
+# ============================================================
 
 def get_nested(data: dict, *keys, default=None):
     """安全地从嵌套字典中取值"""
@@ -19,123 +85,151 @@ def get_nested(data: dict, *keys, default=None):
 
 
 # ============================================================
+# 辅助：安全取值（None → 默认值）
+# ============================================================
+
+def _str(val, default="") -> str:
+    return str(val) if val is not None else default
+
+
+def _int(val, default=0) -> int:
+    if val is None:
+        return default
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return default
+
+
+def _bool_int(val, default=0) -> int:
+    """布尔/数字 → int (0/1)"""
+    if val is None:
+        return default
+    return int(bool(val))
+
+
+# ============================================================
 # 用户相关
 # ============================================================
 
-class UserProfileFilter:
+class UserProfileFilter(JSONModel):
     """用户资料过滤器"""
-
-    def __init__(self, data: dict):
-        self._user = get_nested(data, "user", default={})
 
     @property
     def nickname(self) -> str:
-        return self._user.get("nickname", "")
+        return replaceT(_str(self._get_attr_value("$.user.nickname")))
+
+    @property
+    def nickname_raw(self) -> str:
+        return _str(self._get_attr_value("$.user.nickname"))
 
     @property
     def uid(self) -> str:
-        return str(self._user.get("uid", ""))
+        return _str(self._get_attr_value("$.user.uid"))
 
     @property
     def sec_user_id(self) -> str:
-        return self._user.get("sec_uid", "")
+        return _str(self._get_attr_value("$.user.sec_uid"))
 
     @property
     def avatar_url(self) -> str:
-        return get_nested(self._user, "avatar_larger", "url_list", 0, default="")
+        return _str(self._get_attr_value("$.user.avatar_larger.url_list[0]"))
 
     @property
     def aweme_count(self) -> int:
-        return self._user.get("aweme_count", 0)
+        return _int(self._get_attr_value("$.user.aweme_count"))
 
     @property
     def follower_count(self) -> int:
-        return self._user.get("follower_count", 0)
+        return _int(self._get_attr_value("$.user.follower_count"))
 
     @property
     def following_count(self) -> int:
-        return self._user.get("following_count", 0)
+        return _int(self._get_attr_value("$.user.following_count"))
 
     @property
     def total_favorited(self) -> int:
-        return self._user.get("total_favorited", 0)
+        return _int(self._get_attr_value("$.user.total_favorited"))
 
     @property
     def signature(self) -> str:
-        return self._user.get("signature", "")
+        return replaceT(_str(self._get_attr_value("$.user.signature")))
+
+    @property
+    def signature_raw(self) -> str:
+        return _str(self._get_attr_value("$.user.signature"))
 
     @property
     def ip_location(self) -> str:
-        return self._user.get("ip_location", "")
+        return _str(self._get_attr_value("$.user.ip_location"))
 
     @property
     def city(self) -> str:
-        return self._user.get("city", "")
+        return _str(self._get_attr_value("$.user.city"))
 
     @property
     def country(self) -> str:
-        return self._user.get("country", "")
+        return _str(self._get_attr_value("$.user.country"))
 
     @property
     def favoriting_count(self) -> int:
-        return self._user.get("favoriting_count", 0)
+        return _int(self._get_attr_value("$.user.favoriting_count"))
 
     @property
     def gender(self) -> int:
-        return self._user.get("gender", 0)
+        return _int(self._get_attr_value("$.user.gender"))
 
     @property
     def is_ban(self) -> int:
-        return int(get_nested(self._user, "status", "is_ban", default=0))
+        return _bool_int(self._get_attr_value("$.user.is_ban"))
 
     @property
     def is_block(self) -> int:
-        return int(get_nested(self._user, "status", "is_block", default=0))
+        return _bool_int(self._get_attr_value("$.user.is_block"))
 
     @property
     def is_blocked(self) -> int:
-        return int(get_nested(self._user, "status", "is_blocked", default=0))
+        return _bool_int(self._get_attr_value("$.user.is_blocked"))
 
     @property
     def is_star(self) -> int:
-        return int(get_nested(self._user, "status", "is_star", default=0))
+        return _bool_int(self._get_attr_value("$.user.is_star"))
 
     @property
     def mix_count(self) -> int:
-        return self._user.get("mix_count", 0)
+        return _int(self._get_attr_value("$.user.mix_count"))
 
     @property
     def mplatform_followers_count(self) -> int:
-        return self._user.get("mplatform_followers_count", 0)
+        return _int(self._get_attr_value("$.user.mplatform_followers_count"))
 
     @property
     def school_name(self) -> str:
-        return self._user.get("school_name", "")
+        return _str(self._get_attr_value("$.user.school_name"))
 
     @property
     def short_id(self) -> str:
-        return self._user.get("short_id", "")
+        return _str(self._get_attr_value("$.user.short_id"))
 
     @property
     def user_age(self) -> int:
-        return self._user.get("user_age", 0)
+        return _int(self._get_attr_value("$.user.user_age"))
 
     @property
     def custom_verify(self) -> str:
-        return self._user.get("custom_verify", "")
+        return _str(self._get_attr_value("$.user.custom_verify"))
 
     @property
     def unique_id(self) -> str:
-        return self._user.get("unique_id", "")
+        return _str(self._get_attr_value("$.user.unique_id"))
 
     @property
     def live_status(self) -> int:
-        val = self._user.get("live_status", 0)
-        return int(val) if val else 0
+        return _int(self._get_attr_value("$.user.live_status"))
 
     @property
     def room_id(self) -> str:
-        return str(self._user.get("room_id", ""))
+        return _str(self._get_attr_value("$.user.room_id"))
 
     def to_dict(self) -> dict:
         return {
@@ -151,33 +245,35 @@ class UserProfileFilter:
             "is_ban": self.is_ban, "is_block": self.is_block,
             "is_blocked": self.is_blocked, "is_star": self.is_star,
             "mix_count": self.mix_count, "mplatform_followers_count": self.mplatform_followers_count,
-            "nickname_raw": self.nickname, "school_name": self.school_name,
-            "short_id": self.short_id, "signature_raw": self.signature,
+            "nickname_raw": self.nickname_raw, "school_name": self.school_name,
+            "short_id": self.short_id, "signature_raw": self.signature_raw,
             "user_age": self.user_age, "custom_verify": self.custom_verify,
             "unique_id": self.unique_id, "live_status": self.live_status,
             "room_id": self.room_id,
         }
 
 
-class UserPostFilter:
+# ============================================================
+# 视频列表相关
+# ============================================================
+
+class UserPostFilter(JSONModel):
     """用户视频列表过滤器"""
-
-    def __init__(self, data: dict):
-        self._data = data
-
-    @property
-    def aweme_list(self) -> list[dict]:
-        return self._data.get("aweme_list", [])
-
-    @property
-    def max_cursor(self) -> int:
-        return self._data.get("max_cursor", 0)
 
     @property
     def has_more(self) -> bool:
-        return bool(self._data.get("has_more", 0))
+        return bool(self._get_attr_value("$.has_more"))
 
-    def get_video_list(self) -> list["PostDetailFilter"]:
+    @property
+    def max_cursor(self) -> int:
+        return _int(self._get_attr_value("$.max_cursor"))
+
+    @property
+    def aweme_list(self) -> list:
+        return self._data.get("aweme_list", [])
+
+    def get_video_list(self) -> list:
+        """将列表数据包装为 PostDetailFilter 实例列表"""
         result = []
         for aweme in self.aweme_list:
             result.append(PostDetailFilter({"aweme_detail": aweme}))
@@ -187,23 +283,20 @@ class UserPostFilter:
         return [v.to_dict() for v in self.get_video_list()]
 
 
-class UserCollectsFilter:
+class UserCollectsFilter(JSONModel):
     """收藏夹列表过滤器"""
-
-    def __init__(self, data: dict):
-        self._data = data
-
-    @property
-    def collects_list(self) -> list[dict]:
-        return self._data.get("collects_list", [])
 
     @property
     def has_more(self) -> bool:
-        return bool(self._data.get("has_more", 0))
+        return bool(self._get_attr_value("$.has_more"))
 
     @property
     def cursor(self) -> int:
-        return self._data.get("cursor", 0)
+        return _int(self._get_attr_value("$.cursor"))
+
+    @property
+    def collects_list(self) -> list:
+        return self._data.get("collects_list", [])
 
     def to_list(self) -> list[dict]:
         result = []
@@ -216,23 +309,20 @@ class UserCollectsFilter:
         return result
 
 
-class UserMusicCollectionFilter:
+class UserMusicCollectionFilter(JSONModel):
     """音乐收藏过滤器"""
-
-    def __init__(self, data: dict):
-        self._data = data
-
-    @property
-    def music_list(self) -> list[dict]:
-        return self._data.get("mc_list", [])
 
     @property
     def has_more(self) -> bool:
-        return bool(self._data.get("has_more", 0))
+        return bool(self._get_attr_value("$.has_more"))
 
     @property
     def cursor(self) -> int:
-        return self._data.get("cursor", 0)
+        return _int(self._get_attr_value("$.cursor"))
+
+    @property
+    def music_list(self) -> list:
+        return self._data.get("mc_list", [])
 
     def to_list(self) -> list[dict]:
         result = []
@@ -255,92 +345,135 @@ class UserMusicCollectionFilter:
         return result
 
 
-class UserFollowingFilter:
+class UserFollowingFilter(JSONModel):
     """关注列表过滤器"""
 
-    def __init__(self, data: dict):
-        self._data = data
+    @property
+    def has_more(self) -> bool:
+        return bool(self._get_attr_value("$.has_more"))
 
     @property
-    def followings(self) -> list[dict]:
+    def offset(self) -> int:
+        return _int(self._get_attr_value("$.offset"))
+
+    @property
+    def followings(self) -> list:
         return self._data.get("followings", [])
 
-    @property
-    def has_more(self) -> bool:
-        return bool(self._data.get("has_more", 0))
 
-    @property
-    def offset(self) -> int:
-        return self._data.get("offset", 0)
-
-
-class UserFollowerFilter:
+class UserFollowerFilter(JSONModel):
     """粉丝列表过滤器"""
 
-    def __init__(self, data: dict):
-        self._data = data
-
-    @property
-    def followers(self) -> list[dict]:
-        return self._data.get("followers", [])
-
     @property
     def has_more(self) -> bool:
-        return bool(self._data.get("has_more", 0))
+        return bool(self._get_attr_value("$.has_more"))
 
     @property
     def offset(self) -> int:
-        return self._data.get("offset", 0)
+        return _int(self._get_attr_value("$.offset"))
+
+    @property
+    def followers(self) -> list:
+        return self._data.get("followers", [])
 
 
 # ============================================================
-# 视频相关
+# 视频详情
 # ============================================================
 
-class PostDetailFilter:
+class PostDetailFilter(JSONModel):
     """视频详情过滤器"""
 
-    def __init__(self, data: dict):
-        self._data = data
-        self._aweme = get_nested(data, "aweme_detail", default=data)
+    # === 基础 ===
 
     @property
     def aweme_id(self) -> str:
-        return str(self._aweme.get("aweme_id", ""))
+        return _str(self._get_attr_value("$.aweme_detail.aweme_id"))
 
     @property
     def aweme_type(self) -> int:
-        val = self._aweme.get("aweme_type", 0)
-        return int(val) if val else 0
+        return _int(self._get_attr_value("$.aweme_detail.aweme_type"))
 
     @property
     def desc(self) -> str:
-        return self._aweme.get("desc", "")
+        return replaceT(_str(self._get_attr_value("$.aweme_detail.desc")))
 
     @property
-    def author_nickname(self) -> str:
-        return get_nested(self._aweme, "author", "nickname", default="")
-
-    @property
-    def author_uid(self) -> str:
-        return get_nested(self._aweme, "author", "uid", default="")
-
-    @property
-    def author_sec_uid(self) -> str:
-        return get_nested(self._aweme, "author", "sec_uid", default="")
+    def desc_raw(self) -> str:
+        return _str(self._get_attr_value("$.aweme_detail.desc"))
 
     @property
     def create_time(self) -> int:
-        return self._aweme.get("create_time", 0)
+        return _int(self._get_attr_value("$.aweme_detail.create_time"))
 
     @property
     def duration(self) -> int:
-        val = get_nested(self._aweme, "video", "duration", default=0)
-        return int(val) if val else 0
+        return _int(self._get_attr_value("$.aweme_detail.duration"))
+
+    @property
+    def region(self) -> str:
+        return _str(self._get_attr_value("$.aweme_detail.region"))
+
+    # === 作者 ===
+
+    @property
+    def author_nickname(self) -> str:
+        return replaceT(_str(self._get_attr_value("$.aweme_detail.author.nickname")))
+
+    @property
+    def author_nickname_raw(self) -> str:
+        return _str(self._get_attr_value("$.aweme_detail.author.nickname"))
+
+    @property
+    def author_uid(self) -> str:
+        return _str(self._get_attr_value("$.aweme_detail.author.uid"))
+
+    @property
+    def author_sec_uid(self) -> str:
+        return _str(self._get_attr_value("$.aweme_detail.author.sec_uid"))
+
+    @property
+    def author_short_id(self) -> str:
+        return _str(self._get_attr_value("$.aweme_detail.author.short_id"))
+
+    @property
+    def author_unique_id(self) -> str:
+        return _str(self._get_attr_value("$.aweme_detail.author.unique_id"))
+
+    @property
+    def author_avatar_url(self) -> str:
+        return _str(self._get_attr_value("$.aweme_detail.author.avatar_thumb.url_list[0]"))
+
+    @property
+    def author_signature(self) -> str:
+        return _str(self._get_attr_value("$.aweme_detail.author.signature"))
+
+    @property
+    def author_follower_count(self) -> int:
+        return _int(self._get_attr_value("$.aweme_detail.author.follower_count"))
+
+    @property
+    def author_aweme_count(self) -> int:
+        return _int(self._get_attr_value("$.aweme_detail.author.aweme_count"))
+
+    @property
+    def author_following_count(self) -> int:
+        return _int(self._get_attr_value("$.aweme_detail.author.following_count"))
+
+    @property
+    def author_total_favorited(self) -> int:
+        return _int(self._get_attr_value("$.aweme_detail.author.total_favorited"))
+
+    @property
+    def author_ip_location(self) -> str:
+        return _str(self._get_attr_value("$.aweme_detail.author.ip_location"))
+
+    # === 视频 URL（保留手写逻辑：去水印过滤） ===
 
     @property
     def bit_rate_list(self) -> list[dict]:
-        return get_nested(self._aweme, "video", "bit_rate", default=[])
+        val = self._get_attr_value("$.aweme_detail.video.bit_rate")
+        return val if isinstance(val, list) else []
 
     @property
     def video_url(self) -> str:
@@ -353,31 +486,47 @@ class PostDetailFilter:
                     return url
             if url_list:
                 return url_list[0]
-        url_list = get_nested(self._aweme, "video", "play_addr", "url_list", default=[])
-        for url in url_list:
-            if url and "playwm" not in url:
-                return url
-        return url_list[0] if url_list else ""
+        url_list = self._get_attr_value("$.aweme_detail.video.play_addr.url_list")
+        if isinstance(url_list, list):
+            for url in url_list:
+                if url and "playwm" not in url:
+                    return url
+            return url_list[0] if url_list else ""
+        return ""
 
     @property
     def cover_url(self) -> str:
-        return get_nested(self._aweme, "video", "origin_cover", "url_list", 0, default="")
+        return _str(self._get_attr_value("$.aweme_detail.video.origin_cover.url_list[0]"))
+
+    @property
+    def animated_cover(self) -> str:
+        return _str(self._get_attr_value("$.aweme_detail.video.animated_cover.url_list[0]"))
+
+    @property
+    def video_bit_rate_json(self) -> str:
+        return json.dumps(self.bit_rate_list, ensure_ascii=False) if self.bit_rate_list else ""
+
+    # === 图集（保留手写逻辑：条件过滤） ===
 
     @property
     def images(self) -> list[str]:
-        """图集 URL 列表"""
-        imgs = self._aweme.get("images") or []
+        """图集静态图 URL 列表"""
+        imgs = self._get_attr_value("$.aweme_detail.images")
+        if not isinstance(imgs, list):
+            return []
         return [get_nested(img, "url_list", 0, default="") for img in imgs if img]
 
     @property
     def images_video(self) -> list[str]:
         """图集动图/实况 URL 列表"""
-        imgs = self._aweme.get("images") or []
+        imgs = self._get_attr_value("$.aweme_detail.images")
+        if not isinstance(imgs, list):
+            return []
         result = []
         for img in imgs:
             if img:
-                video_url = get_nested(img, "video", "play_addr", "url_list", 0, default="")
-                result.append(video_url)
+                vu = get_nested(img, "video", "play_addr", "url_list", 0, default="")
+                result.append(vu)
         return result
 
     @property
@@ -385,263 +534,214 @@ class PostDetailFilter:
         return self.aweme_type == 68
 
     @property
+    def images_json(self) -> str:
+        return json.dumps(self.images, ensure_ascii=False) if self.images else ""
+
+    # === 音乐 ===
+
+    @property
     def music_title(self) -> str:
-        return get_nested(self._aweme, "music", "title", default="")
+        return replaceT(_str(self._get_attr_value("$.aweme_detail.music.title")))
 
     @property
     def music_url(self) -> str:
-        return get_nested(self._aweme, "music", "play_url", "url_list", 0, default="")
-
-    @property
-    def statistics(self) -> dict:
-        return self._aweme.get("statistics") or {}
-
-    @property
-    def digg_count(self) -> int:
-        val = self.statistics.get("digg_count", 0)
-        return int(val) if val else 0
-
-    @property
-    def comment_count(self) -> int:
-        val = self.statistics.get("comment_count", 0)
-        return int(val) if val else 0
-
-    @property
-    def share_count(self) -> int:
-        val = self.statistics.get("share_count", 0)
-        return int(val) if val else 0
-
-    @property
-    def collect_count(self) -> int:
-        val = self.statistics.get("collect_count", 0)
-        return int(val) if val else 0
-
-    @property
-    def mix_id(self) -> str:
-        return get_nested(self._aweme, "mix_info", "mix_id", default="")
-
-    @property
-    def mix_name(self) -> str:
-        return get_nested(self._aweme, "mix_info", "mix_name", default="")
-
-    @property
-    def is_prohibited(self) -> bool:
-        return bool(get_nested(self._aweme, "status", "is_prohibited", default=0))
-
-    # === f2 对齐字段 - 作者 ===
-
-    @property
-    def author_short_id(self) -> str:
-        return get_nested(self._aweme, "author", "short_id", default="")
-
-    @property
-    def author_unique_id(self) -> str:
-        return get_nested(self._aweme, "author", "unique_id", default="")
-
-    @property
-    def author_avatar_url(self) -> str:
-        return get_nested(self._aweme, "author", "avatar_thumb", "url_list", 0, default="")
-
-    @property
-    def author_signature(self) -> str:
-        return get_nested(self._aweme, "author", "signature", default="")
-
-    @property
-    def author_follower_count(self) -> int:
-        return get_nested(self._aweme, "author", "follower_count", default=0)
-
-    @property
-    def author_aweme_count(self) -> int:
-        return get_nested(self._aweme, "author", "aweme_count", default=0)
-
-    @property
-    def author_following_count(self) -> int:
-        return get_nested(self._aweme, "author", "following_count", default=0)
-
-    @property
-    def author_total_favorited(self) -> int:
-        return get_nested(self._aweme, "author", "total_favorited", default=0)
-
-    @property
-    def author_ip_location(self) -> str:
-        return get_nested(self._aweme, "author", "ip_location", default="")
-
-    # === f2 对齐字段 - 内容 ===
-
-    @property
-    def desc_raw(self) -> str:
-        return self._aweme.get("desc", "")
-
-    @property
-    def is_ads(self) -> int:
-        val = self._aweme.get("is_ads", 0)
-        return int(val) if val else 0
-
-    @property
-    def is_story(self) -> int:
-        return 1 if self._aweme.get("story_info") else 0
-
-    @property
-    def is_top(self) -> int:
-        val = self._aweme.get("is_top", 0)
-        return int(val) if val else 0
-
-    @property
-    def is_long_video(self) -> int:
-        val = self._aweme.get("is_long_video", 0)
-        return int(val) if val else 0
-
-    # === f2 对齐字段 - 视频 ===
-
-    @property
-    def video_bit_rate_json(self) -> str:
-        return json.dumps(self.bit_rate_list, ensure_ascii=False) if self.bit_rate_list else ""
-
-    @property
-    def animated_cover(self) -> str:
-        return get_nested(self._aweme, "video", "animated_cover", "url_list", 0, default="")
-
-    @property
-    def private_status(self) -> int:
-        return get_nested(self._aweme, "status", "private_status", default=0)
-
-    @property
-    def is_delete(self) -> int:
-        return int(get_nested(self._aweme, "status", "is_delete", default=0))
-
-    # === f2 对齐字段 - 音乐 ===
+        return _str(self._get_attr_value("$.aweme_detail.music.play_url.url_list[0]"))
 
     @property
     def music_author(self) -> str:
-        return get_nested(self._aweme, "music", "author", default="")
+        return replaceT(_str(self._get_attr_value("$.aweme_detail.music.author")))
 
     @property
     def music_author_raw(self) -> str:
-        return get_nested(self._aweme, "music", "author_original", default="")
+        return _str(self._get_attr_value("$.aweme_detail.music.author"))
 
     @property
     def music_duration(self) -> int:
-        return get_nested(self._aweme, "music", "duration", default=0)
+        return _int(self._get_attr_value("$.aweme_detail.music.duration"))
 
     @property
     def music_id(self) -> str:
-        return str(get_nested(self._aweme, "music", "id", default=""))
+        return _str(self._get_attr_value("$.aweme_detail.music.id"))
 
     @property
     def music_mid(self) -> str:
-        return get_nested(self._aweme, "music", "mid", default="")
+        return _str(self._get_attr_value("$.aweme_detail.music.mid"))
 
     @property
     def pgc_author(self) -> str:
-        return get_nested(self._aweme, "music", "pgc_author", default="")
+        return replaceT(_str(self._get_attr_value(
+            "$.aweme_detail.music.matched_pgc_sound.pgc_author"
+        )))
 
     @property
     def pgc_author_title(self) -> str:
-        return get_nested(self._aweme, "music", "pgc_author_title", default="")
+        return replaceT(_str(self._get_attr_value(
+            "$.aweme_detail.music.matched_pgc_sound.pgc_author_title"
+        )))
 
     @property
     def pgc_music_type(self) -> int:
-        return get_nested(self._aweme, "music", "pgc_music_type", default=0)
+        return _int(self._get_attr_value(
+            "$.aweme_detail.music.matched_pgc_sound.pgc_music_type"
+        ))
 
     @property
     def music_status(self) -> int:
-        return get_nested(self._aweme, "music", "status", default=0)
+        return _int(self._get_attr_value("$.aweme_detail.music.status"))
 
     @property
     def music_owner_handle(self) -> str:
-        return get_nested(self._aweme, "music", "owner_handle", default="")
+        return _str(self._get_attr_value("$.aweme_detail.music.owner_handle"))
 
     @property
     def music_owner_id(self) -> str:
-        return get_nested(self._aweme, "music", "owner_id", default="")
+        return _str(self._get_attr_value("$.aweme_detail.music.owner_id"))
 
     @property
     def music_owner_nickname(self) -> str:
-        return get_nested(self._aweme, "music", "owner_nickname", default="")
+        return replaceT(_str(self._get_attr_value("$.aweme_detail.music.owner_nickname")))
 
     @property
     def music_play_url(self) -> str:
-        return get_nested(self._aweme, "music", "play_url", "url_list", 0, default="")
+        return _str(self._get_attr_value("$.aweme_detail.music.play_url.url_list[0]"))
 
     @property
     def is_commerce_music(self) -> int:
-        return int(get_nested(self._aweme, "music", "is_commerce_music", default=0))
+        return _bool_int(self._get_attr_value("$.aweme_detail.music.is_commerce_music"))
 
-    # === f2 对齐字段 - 合集 ===
-
-    @property
-    def mix_desc(self) -> str:
-        return get_nested(self._aweme, "mix_info", "mix_desc", default="")
+    # === 统计 ===
 
     @property
-    def mix_create_time(self) -> int:
-        return get_nested(self._aweme, "mix_info", "mix_create_time", default=0)
+    def statistics(self) -> dict:
+        val = self._get_attr_value("$.aweme_detail.statistics")
+        return val if isinstance(val, dict) else {}
 
     @property
-    def mix_pic_type(self) -> int:
-        return get_nested(self._aweme, "mix_info", "mix_pic_type", default=0)
+    def digg_count(self) -> int:
+        return _int(self.statistics.get("digg_count"))
 
     @property
-    def mix_type(self) -> int:
-        return get_nested(self._aweme, "mix_info", "mix_type", default=0)
+    def comment_count(self) -> int:
+        return _int(self.statistics.get("comment_count"))
 
     @property
-    def mix_share_url(self) -> str:
-        return get_nested(self._aweme, "mix_info", "share_info", "share_url", default="")
-
-    # === f2 对齐字段 - 权限 ===
+    def share_count(self) -> int:
+        return _int(self.statistics.get("share_count"))
 
     @property
-    def can_comment(self) -> int:
-        return int(get_nested(self._aweme, "status", "can_comment", default=1))
-
-    @property
-    def can_forward(self) -> int:
-        return int(get_nested(self._aweme, "status", "can_forward", default=1))
-
-    @property
-    def can_share(self) -> int:
-        return int(get_nested(self._aweme, "status", "allow_share", default=1))
-
-    @property
-    def download_setting(self) -> int:
-        return get_nested(self._aweme, "status", "download_setting", default=0)
-
-    @property
-    def allow_douplus(self) -> int:
-        return int(get_nested(self._aweme, "status", "allow_douplus", default=0))
-
-    @property
-    def allow_share(self) -> int:
-        return int(get_nested(self._aweme, "status", "allow_share", default=1))
-
-    # === f2 对齐字段 - 统计/标签/其他 ===
+    def collect_count(self) -> int:
+        return _int(self.statistics.get("collect_count"))
 
     @property
     def admire_count(self) -> int:
-        return self.statistics.get("admire_count", 0)
+        return _int(self.statistics.get("admire_count"))
+
+    # === 合集 ===
+
+    @property
+    def mix_id(self) -> str:
+        return _str(self._get_attr_value("$.aweme_detail.mix_info.mix_id"))
+
+    @property
+    def mix_name(self) -> str:
+        return _str(self._get_attr_value("$.aweme_detail.mix_info.mix_name"))
+
+    @property
+    def mix_desc(self) -> str:
+        return replaceT(_str(self._get_attr_value("$.aweme_detail.mix_info.mix_desc")))
+
+    @property
+    def mix_create_time(self) -> int:
+        return _int(self._get_attr_value("$.aweme_detail.mix_info.mix_create_time"))
+
+    @property
+    def mix_pic_type(self) -> int:
+        return _int(self._get_attr_value("$.aweme_detail.mix_info.mix_pic_type"))
+
+    @property
+    def mix_type(self) -> int:
+        return _int(self._get_attr_value("$.aweme_detail.mix_info.mix_type"))
+
+    @property
+    def mix_share_url(self) -> str:
+        return _str(self._get_attr_value("$.aweme_detail.mix_info.mix_share_url"))
+
+    # === 状态/权限 ===
+
+    @property
+    def is_prohibited(self) -> bool:
+        return bool(_int(self._get_attr_value("$.aweme_detail.status.is_prohibited")))
+
+    @property
+    def is_ads(self) -> int:
+        return _bool_int(self._get_attr_value("$.aweme_detail.is_ads"))
+
+    @property
+    def is_story(self) -> int:
+        return _bool_int(self._get_attr_value("$.aweme_detail.is_story"))
+
+    @property
+    def is_top(self) -> int:
+        return _bool_int(self._get_attr_value("$.aweme_detail.is_top"))
+
+    @property
+    def is_long_video(self) -> int:
+        return _bool_int(self._get_attr_value("$.aweme_detail.is_long_video"))
+
+    @property
+    def private_status(self) -> int:
+        return _int(self._get_attr_value("$.aweme_detail.status.private_status"))
+
+    @property
+    def is_delete(self) -> int:
+        return _bool_int(self._get_attr_value("$.aweme_detail.status.is_delete"))
+
+    @property
+    def can_comment(self) -> int:
+        return _bool_int(self._get_attr_value("$.aweme_detail.aweme_control.can_comment"), 1)
+
+    @property
+    def can_forward(self) -> int:
+        return _bool_int(self._get_attr_value("$.aweme_detail.aweme_control.can_forward"), 1)
+
+    @property
+    def can_share(self) -> int:
+        return _bool_int(self._get_attr_value("$.aweme_detail.aweme_control.can_share"), 1)
+
+    @property
+    def download_setting(self) -> int:
+        return _int(self._get_attr_value("$.aweme_detail.status.download_setting"))
+
+    @property
+    def allow_douplus(self) -> int:
+        return _bool_int(self._get_attr_value("$.aweme_detail.status.allow_douplus"))
+
+    @property
+    def allow_share(self) -> int:
+        return _bool_int(self._get_attr_value("$.aweme_detail.status.allow_share"), 1)
+
+    # === 标签 ===
 
     @property
     def hashtag_ids(self) -> str:
-        extras = self._aweme.get("text_extra") or []
+        extras = self._get_attr_value("$.aweme_detail.text_extra")
+        if not isinstance(extras, list):
+            return ""
         ids = [str(e.get("hashtag_id", "")) for e in extras if e.get("hashtag_id")]
         return json.dumps(ids, ensure_ascii=False) if ids else ""
 
     @property
     def hashtag_names(self) -> str:
-        extras = self._aweme.get("text_extra") or []
+        extras = self._get_attr_value("$.aweme_detail.text_extra")
+        if not isinstance(extras, list):
+            return ""
         names = [e.get("hashtag_name", "") for e in extras if e.get("hashtag_name")]
         return json.dumps(names, ensure_ascii=False) if names else ""
 
-    @property
-    def images_json(self) -> str:
-        return json.dumps(self.images, ensure_ascii=False) if self.images else ""
-
-    @property
-    def region(self) -> str:
-        return self._aweme.get("region", "")
+    # === 输出 ===
 
     def to_dict(self) -> dict:
+        """前端展示 + 文件命名用（含时效 URL）"""
         return {
             "aweme_id": self.aweme_id, "aweme_type": self.aweme_type,
             "desc": self.desc, "author": self.author_nickname,
@@ -658,21 +758,20 @@ class PostDetailFilter:
         }
 
     def to_db_dict(self) -> dict:
-        """返回完整字段集，用于数据库存储"""
+        """入库用（剔除时效 CDN URL，保留稳定字段）"""
         return {
             "aweme_id": self.aweme_id, "aweme_type": self.aweme_type,
             "desc": self.desc, "author_nickname": self.author_nickname,
             "author_uid": self.author_uid, "author_sec_uid": self.author_sec_uid,
             "create_time": self.create_time, "duration": self.duration,
-            "video_url": self.video_url, "cover_url": self.cover_url,
-            "images": self.images, "images_video": self.images_video,
+            "cover_url": self.cover_url,
             "is_image_post": self.is_image_post,
-            "music_title": self.music_title, "music_url": self.music_url,
+            "music_title": self.music_title,
             "digg_count": self.digg_count, "comment_count": self.comment_count,
             "share_count": self.share_count, "collect_count": self.collect_count,
             "mix_id": self.mix_id, "mix_name": self.mix_name,
             "is_prohibited": int(self.is_prohibited),
-            "author_nickname_raw": self.author_nickname,
+            "author_nickname_raw": self.author_nickname_raw,
             "author_short_id": self.author_short_id,
             "author_unique_id": self.author_unique_id,
             "author_avatar_url": self.author_avatar_url,
@@ -685,8 +784,6 @@ class PostDetailFilter:
             "desc_raw": self.desc_raw, "is_ads": self.is_ads,
             "is_story": self.is_story, "is_top": self.is_top,
             "is_long_video": self.is_long_video,
-            "video_bit_rate": self.video_bit_rate_json,
-            "animated_cover": self.animated_cover,
             "private_status": self.private_status, "is_delete": self.is_delete,
             "music_author": self.music_author, "music_author_raw": self.music_author_raw,
             "music_duration": self.music_duration, "music_id": self.music_id,
@@ -710,23 +807,24 @@ class PostDetailFilter:
         }
 
 
-class PostCommentFilter:
+# ============================================================
+# 评论
+# ============================================================
+
+class PostCommentFilter(JSONModel):
     """评论列表过滤器"""
-
-    def __init__(self, data: dict):
-        self._data = data
-
-    @property
-    def comments(self) -> list[dict]:
-        return self._data.get("comments", [])
 
     @property
     def has_more(self) -> bool:
-        return bool(self._data.get("has_more", 0))
+        return bool(self._get_attr_value("$.has_more"))
 
     @property
     def cursor(self) -> int:
-        return self._data.get("cursor", 0)
+        return _int(self._get_attr_value("$.cursor"))
+
+    @property
+    def comments(self) -> list:
+        return self._data.get("comments", [])
 
 
 class PostRelatedFilter(UserPostFilter):
@@ -739,60 +837,55 @@ class HomePostSearchFilter(UserPostFilter):
     pass
 
 
-class SuggestWordFilter:
+class SuggestWordFilter(JSONModel):
     """搜索建议词过滤器"""
-
-    def __init__(self, data: dict):
-        self._data = data
 
     @property
     def words(self) -> list[str]:
-        word_list = get_nested(self._data, "data", 0, "words", default=[])
-        return [w.get("word", "") for w in word_list]
+        val = self._get_list_attr_value("$.data[0].words[*].word")
+        return val if isinstance(val, list) else []
 
 
 # ============================================================
 # 直播相关
 # ============================================================
 
-class UserLiveFilter:
-    """直播信息过滤器"""
-
-    def __init__(self, data: dict):
-        self._data = data
-        self._room = get_nested(data, "data", "data", 0, default={})
+class UserLiveFilter(JSONModel):
+    """直播信息过滤器（web_rid 接口）"""
 
     @property
     def room_id(self) -> str:
-        return str(self._room.get("id_str", ""))
+        return _str(self._get_attr_value("$.data.data[0].id_str"))
 
     @property
     def live_status(self) -> int:
-        return self._room.get("status", 0)
+        return _int(self._get_attr_value("$.data.data[0].status"))
 
     @property
     def live_title(self) -> str:
-        return self._room.get("title", "")
+        return replaceT(_str(self._get_attr_value("$.data.data[0].title")))
 
     @property
     def cover_url(self) -> str:
-        return get_nested(self._room, "cover", "url_list", 0, default="")
+        return _str(self._get_attr_value("$.data.data[0].cover.url_list[0]"))
 
     @property
     def user_count(self) -> str:
-        return get_nested(self._room, "stats", "user_count_str", default="0")
+        return _str(self._get_attr_value("$.data.data[0].stats.user_count_str"), "0")
 
     @property
     def flv_pull_url(self) -> dict:
-        return get_nested(self._room, "stream_url", "flv_pull_url", default={})
+        val = self._get_attr_value("$.data.data[0].stream_url.flv_pull_url")
+        return val if isinstance(val, dict) else {}
 
     @property
     def m3u8_pull_url(self) -> dict:
-        return get_nested(self._room, "stream_url", "hls_pull_url_map", default={})
+        val = self._get_attr_value("$.data.data[0].stream_url.hls_pull_url_map")
+        return val if isinstance(val, dict) else {}
 
     @property
     def nickname(self) -> str:
-        return get_nested(self._room, "owner", "nickname", default="")
+        return replaceT(_str(self._get_attr_value("$.data.data[0].owner.nickname")))
 
     @property
     def is_live(self) -> bool:
@@ -808,127 +901,115 @@ class UserLiveFilter:
         }
 
 
-class UserLive2Filter:
+class UserLive2Filter(JSONModel):
     """直播信息过滤器（room_id 接口）"""
-
-    def __init__(self, data: dict):
-        self._room = get_nested(data, "data", "room", default={})
 
     @property
     def room_id(self) -> str:
-        return str(self._room.get("id", ""))
+        return _str(self._get_attr_value("$.data.room.id"))
 
     @property
     def live_status(self) -> int:
-        return self._room.get("status", 0)
+        return _int(self._get_attr_value("$.data.room.status"))
 
     @property
     def live_title(self) -> str:
-        return self._room.get("title", "")
+        return replaceT(_str(self._get_attr_value("$.data.room.title")))
 
     @property
     def flv_pull_url(self) -> dict:
-        return get_nested(self._room, "stream_url", "flv_pull_url", default={})
+        val = self._get_attr_value("$.data.room.stream_url.flv_pull_url")
+        return val if isinstance(val, dict) else {}
 
     @property
     def m3u8_pull_url(self) -> dict:
-        return get_nested(self._room, "stream_url", "hls_pull_url_map", default={})
+        val = self._get_attr_value("$.data.room.stream_url.hls_pull_url_map")
+        return val if isinstance(val, dict) else {}
 
     @property
     def nickname(self) -> str:
-        return get_nested(self._room, "owner", "nickname", default="")
+        return replaceT(_str(self._get_attr_value("$.data.room.owner.nickname")))
 
     @property
     def is_live(self) -> bool:
         return self.live_status == 2
 
 
-class UserLiveStatusFilter:
+class UserLiveStatusFilter(JSONModel):
     """用户直播状态过滤器"""
-
-    def __init__(self, data: dict):
-        self._data = data
 
     @property
     def live_status(self) -> int:
-        return get_nested(self._data, "data", 0, "user_live", 0, "status", default=0)
+        return _int(self._get_attr_value("$.data[0].user_live[0].live_status"))
 
     @property
     def room_id(self) -> str:
-        return str(get_nested(self._data, "data", 0, "user_live", 0, "room_id", default=""))
+        return _str(self._get_attr_value("$.data[0].user_live[0].room_id"))
 
 
-class FollowingUserLiveFilter:
+class FollowingUserLiveFilter(JSONModel):
     """关注用户直播过滤器"""
 
-    def __init__(self, data: dict):
-        self._data = data
-
     @property
-    def live_rooms(self) -> list[dict]:
-        return get_nested(self._data, "data", "data", default=[])
+    def live_rooms(self) -> list:
+        val = self._get_attr_value("$.data.data")
+        return val if isinstance(val, list) else []
 
 
-class LiveImFetchFilter:
+class LiveImFetchFilter(JSONModel):
     """直播弹幕初始化过滤器"""
-
-    def __init__(self, data: dict):
-        self._data = data
 
     @property
     def cursor(self) -> str:
-        return str(get_nested(self._data, "data", 0, "cursor", default=""))
+        return _str(self._get_attr_value("$.extra.cursor"))
 
     @property
     def internal_ext(self) -> str:
-        return get_nested(self._data, "data", 0, "internal_ext", default="")
+        return _str(self._get_attr_value("$.internal_ext"))
 
 
-class QueryUserFilter:
+class QueryUserFilter(JSONModel):
     """用户查询结果过滤器"""
-
-    def __init__(self, data: dict):
-        self._data = data
 
     @property
     def status_code(self) -> int:
-        return self._data.get("status_code")
+        return _int(self._get_attr_value("$.status_code"))
 
     @property
     def status_msg(self) -> str:
-        return self._data.get("status_msg", "")
+        return _str(self._get_attr_value("$.status_msg"))
 
     @property
     def browser_name(self) -> str:
-        return self._data.get("browser_name", "")
+        return _str(self._get_attr_value("$.browser_name"))
 
     @property
     def create_time(self) -> str:
-        return str(self._data.get("create_time", ""))
+        return _str(self._get_attr_value("$.create_time"))
 
     @property
     def firebase_instance_id(self) -> str:
-        return self._data.get("firebase_instance_id", "")
+        return _str(self._get_attr_value("$.firebase_instance_id"))
 
     @property
     def user_unique_id(self) -> str:
-        return str(self._data.get("id", ""))
+        return _str(self._get_attr_value("$.id"))
 
     @property
     def last_time(self) -> str:
-        return str(self._data.get("last_time", ""))
+        return _str(self._get_attr_value("$.last_time"))
 
     @property
     def user_agent(self) -> str:
-        return self._data.get("user_agent", "")
+        return _str(self._get_attr_value("$.user_agent"))
 
     @property
     def user_uid(self) -> str:
-        return str(self._data.get("user_uid", ""))
+        return _str(self._get_attr_value("$.user_uid"))
 
     @property
     def user_uid_type(self) -> int:
-        return self._data.get("user_uid_type", 0)
+        return _int(self._get_attr_value("$.user_uid_type"))
 
     def to_dict(self) -> dict:
         return {
@@ -945,19 +1026,16 @@ class QueryUserFilter:
         }
 
 
-class PostStatsFilter:
+class PostStatsFilter(JSONModel):
     """作品统计过滤器"""
-
-    def __init__(self, data: dict):
-        self._data = data
 
     @property
     def status_code(self) -> int:
-        return self._data.get("status_code", -1)
+        return _int(self._get_attr_value("$.status_code"), -1)
 
     @property
     def status_msg(self) -> str:
-        return self._data.get("status_msg", "")
+        return _str(self._get_attr_value("$.status_msg"))
 
     def to_dict(self) -> dict:
         return {

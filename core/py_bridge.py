@@ -71,8 +71,15 @@ def download_video(url: str) -> dict:
     if result.get("success"):
         from core.db import save_download_record, save_video_info, save_user_info
         from core.filter import UserProfileFilter
+        from pathlib import Path as P
         detail = result.get("detail", {})
         file_path = result.get("path") or (result.get("paths", [None])[0] if result.get("paths") else None)
+        file_size = 0
+        if file_path:
+            try:
+                file_size = P(file_path).stat().st_size
+            except (OSError, ValueError):
+                pass
         save_download_record(
             aweme_id=detail.get("aweme_id"),
             download_type="video",
@@ -80,6 +87,7 @@ def download_video(url: str) -> dict:
             author_nickname=detail.get("author_nickname"),
             author_sec_uid=detail.get("author_sec_uid"),
             file_path=file_path,
+            file_size=file_size,
             cover_url=detail.get("cover_url"),
             status="completed",
         )
