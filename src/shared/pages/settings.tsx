@@ -63,7 +63,7 @@ function SettingItem({
           )}
         </div>
       </div>
-      <div className="shrink-0 ml-6">{children}</div>
+      <div className="min-w-0 ml-6">{children}</div>
     </div>
   );
 }
@@ -167,7 +167,7 @@ export default function SettingsPage() {
   };
 
   return (
-    <>
+    <div className="max-w-3xl mx-auto">
       <AnimateEntry>
         <Header title="设置" description="配置 Cookie、下载路径、代理等参数">
           <div className="flex items-center gap-2">
@@ -199,13 +199,13 @@ export default function SettingsPage() {
                   title="Cookie"
                   description="从浏览器开发者工具中复制"
                 >
-                  <div className="w-full max-w-sm">
+                  <div className="w-96 max-w-full">
                     <Textarea
                       value={cookie}
                       onChange={(e) => setCookie(e.target.value)}
                       placeholder="粘贴浏览器 Cookie..."
                       rows={3}
-                      className="text-xs rounded-xl border-foreground/[0.08] bg-foreground/[0.03]"
+                      className="field-sizing-fixed text-xs rounded-xl border-foreground/[0.08] bg-foreground/[0.03]"
                     />
                   </div>
                 </SettingItem>
@@ -462,6 +462,6 @@ export default function SettingsPage() {
           </div>
         </AnimateEntry>
       </div>
-    </>
+    </div>
   );
 }

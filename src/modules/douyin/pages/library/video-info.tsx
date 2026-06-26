@@ -74,7 +74,7 @@ export default function LibraryVideoInfoPage() {
       </AnimateEntry>
 
       <div className="space-y-6">
-        <AnimateEntry delay={50}>
+        <AnimateEntry delay={50} className="relative z-20">
           <div className="flex gap-2">
             <div className="relative flex-1">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
