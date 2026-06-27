@@ -2,7 +2,7 @@ use rusqlite::{Connection, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use parking_lot::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use log::{info, debug};
 
@@ -618,12 +618,10 @@ pub struct NewMusicCollection {
     pub play_url: Option<String>,
 }
 
-/// Mutex poisoning 时返回错误而非 panic
+/// 获取数据库连接锁（parking_lot 无 poisoning 概念）
 macro_rules! lock_conn {
     ($self:expr) => {
-        $self.conn.lock().map_err(|_| {
-            rusqlite::Error::InvalidParameterName("数据库连接锁已中毒".to_string())
-        })?
+        $self.conn.lock()
     };
 }
 
@@ -633,9 +631,7 @@ impl Database {
     where
         F: FnOnce(&rusqlite::Transaction) -> Result<R>,
     {
-        let mut conn = self.conn.lock().map_err(|_| {
-            rusqlite::Error::InvalidParameterName("数据库连接锁已中毒".to_string())
-        })?;
+        let mut conn = self.conn.lock();
         let tx = conn.transaction()?;
         let result = f(&tx)?;
         tx.commit()?;

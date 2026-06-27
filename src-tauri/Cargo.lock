@@ -811,6 +811,7 @@ version = "0.1.0"
 dependencies = [
  "env_logger",
  "log",
+ "parking_lot",
  "pyo3",
  "reqwest 0.12.28",
  "rusqlite",

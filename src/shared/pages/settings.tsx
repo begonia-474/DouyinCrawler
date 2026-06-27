@@ -1,4 +1,6 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
+import { useForm, Controller } from "react-hook-form";
+import { z } from "zod/v4";
 import { Header } from "@/components/layout/header";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
@@ -39,6 +41,28 @@ import {
   Activity,
 } from "lucide-react";
 
+const settingsSchema = z.object({
+  cookie: z.string(),
+  downloadPath: z.string(),
+  naming: z.string(),
+  encryption: z.string(),
+  proxy: z.string(),
+  maxConnections: z.string(),
+  reqTimeout: z.string(),
+  maxRetries: z.string(),
+  pageCounts: z.string(),
+  maxCounts: z.string(),
+  maxTasks: z.string(),
+  appName: z.string(),
+  folderize: z.boolean(),
+  music: z.boolean(),
+  cover: z.boolean(),
+  desc: z.boolean(),
+  interval: z.string(),
+});
+
+type SettingsForm = z.infer<typeof settingsSchema>;
+
 function SettingItem({
   icon: Icon,
   title,
@@ -69,101 +93,104 @@ function SettingItem({
 }
 
 export default function SettingsPage() {
-  const [cookie, setCookie] = useState("");
-  const [downloadPath, setDownloadPath] = useState("Download");
-  const [naming, setNaming] = useState("{create}_{desc}");
-  const [encryption, setEncryption] = useState("ab");
-  const [proxy, setProxy] = useState("");
-  const [maxConnections, setMaxConnections] = useState("5");
-  const [reqTimeout, setReqTimeout] = useState("5");
-  const [maxRetries, setMaxRetries] = useState("5");
-  const [pageCounts, setPageCounts] = useState("20");
-  const [maxCounts, setMaxCounts] = useState("0");
-  const [maxTasks, setMaxTasks] = useState("10");
-  const [appName, setAppName] = useState("douyin");
-  const [folderize, setFolderize] = useState(false);
-  const [music, setMusic] = useState(false);
-  const [cover, setCover] = useState(false);
-  const [desc, setDesc] = useState(false);
-  const [interval, setInterval] = useState("");
+  const { register, handleSubmit, control, reset, formState: { isSubmitting } } = useForm<SettingsForm>({
+    defaultValues: {
+      cookie: "",
+      downloadPath: "Download",
+      naming: "{create}_{desc}",
+      encryption: "ab",
+      proxy: "",
+      maxConnections: "5",
+      reqTimeout: "5",
+      maxRetries: "5",
+      pageCounts: "20",
+      maxCounts: "0",
+      maxTasks: "10",
+      appName: "douyin",
+      folderize: false,
+      music: false,
+      cover: false,
+      desc: false,
+      interval: "",
+    },
+  });
 
   // 加载当前配置
   useEffect(() => {
     getConfig().then((cfg) => {
-      setCookie(cfg.cookie || "");
-      setDownloadPath(cfg.download_path || "Download");
-      setNaming(cfg.naming || "{create}_{desc}");
-      setEncryption(cfg.encryption || "ab");
-      setProxy(cfg.proxy || "");
-      setMaxConnections(String(cfg.max_connections ?? 5));
-      setReqTimeout(String(cfg.timeout ?? 5));
-      setMaxRetries(String(cfg.max_retries ?? 5));
-      setPageCounts(String(cfg.page_counts ?? 20));
-      setMaxCounts(String(cfg.max_counts ?? 0));
-      setMaxTasks(String(cfg.max_tasks ?? 10));
-      setAppName(cfg.app_name || "douyin");
-      setFolderize(cfg.folderize ?? false);
-      setMusic(cfg.music ?? false);
-      setCover(cfg.cover ?? false);
-      setDesc(cfg.desc ?? false);
-      setInterval(cfg.interval || "");
+      reset({
+        cookie: cfg.cookie || "",
+        downloadPath: cfg.download_path || "Download",
+        naming: cfg.naming || "{create}_{desc}",
+        encryption: cfg.encryption || "ab",
+        proxy: cfg.proxy || "",
+        maxConnections: String(cfg.max_connections ?? 5),
+        reqTimeout: String(cfg.timeout ?? 5),
+        maxRetries: String(cfg.max_retries ?? 5),
+        pageCounts: String(cfg.page_counts ?? 20),
+        maxCounts: String(cfg.max_counts ?? 0),
+        maxTasks: String(cfg.max_tasks ?? 10),
+        appName: cfg.app_name || "douyin",
+        folderize: cfg.folderize ?? false,
+        music: cfg.music ?? false,
+        cover: cfg.cover ?? false,
+        desc: cfg.desc ?? false,
+        interval: cfg.interval || "",
+      });
     }).catch(() => {});
-  }, []);
+  }, [reset]);
 
-  const handleSelectFolder = async () => {};
-
-  const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
 
-  const handleSave = async () => {
-    setSaving(true);
+  const onSubmit = async (data: SettingsForm) => {
     setSaveMsg(null);
     try {
       await setConfig({
-        cookie,
-        download_path: downloadPath,
-        naming,
-        encryption,
-        proxy,
-        app_name: appName,
-        folderize: folderize.toString(),
-        music: music.toString(),
-        cover: cover.toString(),
-        desc: desc.toString(),
-        interval,
-        page_counts: pageCounts,
-        max_counts: maxCounts,
-        timeout: reqTimeout,
-        max_connections: maxConnections,
-        max_retries: maxRetries,
-        max_tasks: maxTasks,
+        cookie: data.cookie,
+        download_path: data.downloadPath,
+        naming: data.naming,
+        encryption: data.encryption,
+        proxy: data.proxy,
+        app_name: data.appName,
+        folderize: data.folderize.toString(),
+        music: data.music.toString(),
+        cover: data.cover.toString(),
+        desc: data.desc.toString(),
+        interval: data.interval,
+        page_counts: data.pageCounts,
+        max_counts: data.maxCounts,
+        timeout: data.reqTimeout,
+        max_connections: data.maxConnections,
+        max_retries: data.maxRetries,
+        max_tasks: data.maxTasks,
       });
       setSaveMsg("保存成功");
     } catch (e) {
       setSaveMsg(e instanceof Error ? e.message : "保存失败");
     }
-    setSaving(false);
     window.setTimeout(() => setSaveMsg(null), 2000);
   };
 
   const handleReset = () => {
-    setCookie("");
-    setDownloadPath("Download");
-    setNaming("{create}_{desc}");
-    setEncryption("ab");
-    setProxy("");
-    setMaxConnections("5");
-    setReqTimeout("5");
-    setMaxRetries("5");
-    setPageCounts("20");
-    setMaxCounts("0");
-    setMaxTasks("10");
-    setAppName("douyin");
-    setFolderize(false);
-    setMusic(false);
-    setCover(false);
-    setDesc(false);
-    setInterval("");
+    reset({
+      cookie: "",
+      downloadPath: "Download",
+      naming: "{create}_{desc}",
+      encryption: "ab",
+      proxy: "",
+      maxConnections: "5",
+      reqTimeout: "5",
+      maxRetries: "5",
+      pageCounts: "20",
+      maxCounts: "0",
+      maxTasks: "10",
+      appName: "douyin",
+      folderize: false,
+      music: false,
+      cover: false,
+      desc: false,
+      interval: "",
+    });
   };
 
   return (
@@ -178,9 +205,9 @@ export default function SettingsPage() {
               <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
               重置
             </Button>
-            <Button size="sm" onClick={handleSave} disabled={saving}>
+            <Button size="sm" onClick={handleSubmit(onSubmit)} disabled={isSubmitting}>
               <Save className="h-3.5 w-3.5 mr-1.5" />
-              {saving ? "保存中..." : "保存"}
+              {isSubmitting ? "保存中..." : "保存"}
             </Button>
           </div>
         </Header>
@@ -201,8 +228,7 @@ export default function SettingsPage() {
                 >
                   <div className="w-96 max-w-full">
                     <Textarea
-                      value={cookie}
-                      onChange={(e) => setCookie(e.target.value)}
+                      {...register("cookie")}
                       placeholder="粘贴浏览器 Cookie..."
                       rows={3}
                       className="field-sizing-fixed text-xs rounded-xl border-foreground/[0.08] bg-foreground/[0.03]"
@@ -228,11 +254,10 @@ export default function SettingsPage() {
                 >
                   <div className="flex gap-2 w-full max-w-sm">
                     <Input
-                      value={downloadPath}
-                      onChange={(e) => setDownloadPath(e.target.value)}
+                      {...register("downloadPath")}
                       className="flex-1 h-9 text-sm rounded-xl border-foreground/[0.08] bg-foreground/[0.03]"
                     />
-                    <Button variant="capsule" size="icon" className="h-9 w-9 shrink-0" onClick={handleSelectFolder}>
+                    <Button variant="capsule" size="icon" className="h-9 w-9 shrink-0">
                       <FolderOpen className="h-3.5 w-3.5" />
                     </Button>
                   </div>
@@ -244,8 +269,7 @@ export default function SettingsPage() {
                   description="支持变量: {create} {desc} {caption} {nickname} {aweme_id} {uid}"
                 >
                   <Input
-                    value={naming}
-                    onChange={(e) => setNaming(e.target.value)}
+                    {...register("naming")}
                     className="w-full max-w-sm h-9 text-sm rounded-xl border-foreground/[0.08] bg-foreground/[0.03]"
                   />
                 </SettingItem>
@@ -255,9 +279,12 @@ export default function SettingsPage() {
                   title="作品独立文件夹"
                   description="为每个作品创建单独的子文件夹"
                 >
-                  <Switch
-                    checked={folderize}
-                    onCheckedChange={setFolderize}
+                  <Controller
+                    name="folderize"
+                    control={control}
+                    render={({ field }) => (
+                      <Switch checked={field.value} onCheckedChange={field.onChange} />
+                    )}
                   />
                 </SettingItem>
                 <Separator className="bg-foreground/[0.06]" />
@@ -267,8 +294,7 @@ export default function SettingsPage() {
                   description="格式: YYYY-MM-DD|YYYY-MM-DD，留空下载全部"
                 >
                   <Input
-                    value={interval}
-                    onChange={(e) => setInterval(e.target.value)}
+                    {...register("interval")}
                     placeholder="2024-01-01|2024-12-31"
                     className="w-full max-w-sm h-9 text-sm rounded-xl border-foreground/[0.08] bg-foreground/[0.03]"
                   />
@@ -290,9 +316,12 @@ export default function SettingsPage() {
                   title="下载原声"
                   description="同时保存视频的背景音乐"
                 >
-                  <Switch
-                    checked={music}
-                    onCheckedChange={setMusic}
+                  <Controller
+                    name="music"
+                    control={control}
+                    render={({ field }) => (
+                      <Switch checked={field.value} onCheckedChange={field.onChange} />
+                    )}
                   />
                 </SettingItem>
                 <Separator className="bg-foreground/[0.06]" />
@@ -301,9 +330,12 @@ export default function SettingsPage() {
                   title="下载封面"
                   description="同时保存视频封面图片"
                 >
-                  <Switch
-                    checked={cover}
-                    onCheckedChange={setCover}
+                  <Controller
+                    name="cover"
+                    control={control}
+                    render={({ field }) => (
+                      <Switch checked={field.value} onCheckedChange={field.onChange} />
+                    )}
                   />
                 </SettingItem>
                 <Separator className="bg-foreground/[0.06]" />
@@ -312,9 +344,12 @@ export default function SettingsPage() {
                   title="下载文案"
                   description="同时保存视频描述文案"
                 >
-                  <Switch
-                    checked={desc}
-                    onCheckedChange={setDesc}
+                  <Controller
+                    name="desc"
+                    control={control}
+                    render={({ field }) => (
+                      <Switch checked={field.value} onCheckedChange={field.onChange} />
+                    )}
                   />
                 </SettingItem>
               </div>
@@ -334,15 +369,21 @@ export default function SettingsPage() {
                   title="加密模式"
                   description="请求签名加密算法"
                 >
-                  <Select value={encryption} onValueChange={(v) => setEncryption(v ?? "ab")}>
-                    <SelectTrigger className="w-full max-w-sm h-9 text-sm rounded-xl border-foreground/[0.08] bg-foreground/[0.03]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="ab">ABogus</SelectItem>
-                      <SelectItem value="xb">XBogus</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <Controller
+                    name="encryption"
+                    control={control}
+                    render={({ field }) => (
+                      <Select value={field.value} onValueChange={field.onChange}>
+                        <SelectTrigger className="w-full max-w-sm h-9 text-sm rounded-xl border-foreground/[0.08] bg-foreground/[0.03]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="ab">ABogus</SelectItem>
+                          <SelectItem value="xb">XBogus</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
+                  />
                 </SettingItem>
                 <Separator className="bg-foreground/[0.06]" />
                 <SettingItem
@@ -351,8 +392,7 @@ export default function SettingsPage() {
                   description="HTTP 代理，留空则不使用"
                 >
                   <Input
-                    value={proxy}
-                    onChange={(e) => setProxy(e.target.value)}
+                    {...register("proxy")}
                     placeholder="http://127.0.0.1:7890"
                     className="w-full max-w-sm h-9 text-sm rounded-xl border-foreground/[0.08] bg-foreground/[0.03]"
                   />
@@ -376,8 +416,7 @@ export default function SettingsPage() {
                 >
                   <Input
                     type="number"
-                    value={maxConnections}
-                    onChange={(e) => setMaxConnections(e.target.value)}
+                    {...register("maxConnections")}
                     min="1"
                     max="20"
                     className="w-28 h-9 text-sm rounded-xl border-foreground/[0.08] bg-foreground/[0.03] font-mono tabular-nums"
@@ -391,8 +430,7 @@ export default function SettingsPage() {
                 >
                   <Input
                     type="number"
-                    value={reqTimeout}
-                    onChange={(e) => setReqTimeout(e.target.value)}
+                    {...register("reqTimeout")}
                     min="1"
                     max="60"
                     className="w-28 h-9 text-sm rounded-xl border-foreground/[0.08] bg-foreground/[0.03] font-mono tabular-nums"
@@ -406,8 +444,7 @@ export default function SettingsPage() {
                 >
                   <Input
                     type="number"
-                    value={maxRetries}
-                    onChange={(e) => setMaxRetries(e.target.value)}
+                    {...register("maxRetries")}
                     min="0"
                     max="10"
                     className="w-28 h-9 text-sm rounded-xl border-foreground/[0.08] bg-foreground/[0.03] font-mono tabular-nums"
@@ -421,8 +458,7 @@ export default function SettingsPage() {
                 >
                   <Input
                     type="number"
-                    value={pageCounts}
-                    onChange={(e) => setPageCounts(e.target.value)}
+                    {...register("pageCounts")}
                     min="1"
                     max="50"
                     className="w-28 h-9 text-sm rounded-xl border-foreground/[0.08] bg-foreground/[0.03] font-mono tabular-nums"
@@ -436,8 +472,7 @@ export default function SettingsPage() {
                 >
                   <Input
                     type="number"
-                    value={maxCounts}
-                    onChange={(e) => setMaxCounts(e.target.value)}
+                    {...register("maxCounts")}
                     min="0"
                     className="w-28 h-9 text-sm rounded-xl border-foreground/[0.08] bg-foreground/[0.03] font-mono tabular-nums"
                   />
@@ -450,8 +485,7 @@ export default function SettingsPage() {
                 >
                   <Input
                     type="number"
-                    value={maxTasks}
-                    onChange={(e) => setMaxTasks(e.target.value)}
+                    {...register("maxTasks")}
                     min="1"
                     max="50"
                     className="w-28 h-9 text-sm rounded-xl border-foreground/[0.08] bg-foreground/[0.03] font-mono tabular-nums"

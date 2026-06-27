@@ -61,12 +61,12 @@ class TaskManager:
                 data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
                 douyin_config = data.get("douyin", {})
                 self._cookie = douyin_config.get("cookie", "")
-                logger.info("[_load_config] 已加载 cookie (len=%d)", len(self._cookie))
+                logger.info("[_load_config] 已加载 cookie (len={})", len(self._cookie))
                 if '\n' in self._cookie or '\r' in self._cookie:
-                    logger.warning("[_load_config] cookie 中包含换行符! \\n=%d, \\r=%d, 正在清理...",
+                    logger.warning("[_load_config] cookie 中包含换行符! \\n={}, \\r={}, 正在清理...",
                                    self._cookie.count('\n'), self._cookie.count('\r'))
                     self._cookie = " ".join(self._cookie.split())
-                    logger.info("[_load_config] cookie 已清理换行符 (len=%d)", len(self._cookie))
+                    logger.info("[_load_config] cookie 已清理换行符 (len={})", len(self._cookie))
                 self._download_path = douyin_config.get("download_path", "Download")
                 self._naming = douyin_config.get("naming", "{create}_{desc}")
                 self._encryption = douyin_config.get("encryption", "ab")
@@ -83,11 +83,11 @@ class TaskManager:
                 self._max_connections = douyin_config.get("max_connections", 5)
                 self._max_retries = douyin_config.get("max_retries", 5)
                 self._max_tasks = douyin_config.get("max_tasks", 10)
-                logger.info("已加载配置: %s", CONFIG_PATH)
+                logger.info("已加载配置: {}", CONFIG_PATH)
             except Exception as e:
-                logger.error("加载配置失败: %s", e)
+                logger.error("加载配置失败: {}", e)
         else:
-            logger.warning("配置文件不存在: %s", CONFIG_PATH)
+            logger.warning("配置文件不存在: {}", CONFIG_PATH)
 
     def _save_config(self):
         """保存配置到 config/app.json"""
@@ -121,9 +121,9 @@ class TaskManager:
                 json.dumps(existing_config, ensure_ascii=False, indent=2),
                 encoding="utf-8"
             )
-            logger.info("已保存配置: %s", CONFIG_PATH)
+            logger.info("已保存配置: {}", CONFIG_PATH)
         except Exception as e:
-            logger.error("保存配置失败: %s", e)
+            logger.error("保存配置失败: {}", e)
 
     def update_config(self, cookie: str = None, download_path: str = None,
                       naming: str = None, encryption: str = None, proxy: str = None,
@@ -134,12 +134,12 @@ class TaskManager:
                       max_connections: int = None, max_retries: int = None,
                       max_tasks: int = None, save: bool = True):
         if cookie is not None:
-            logger.info("[update_config] 收到 cookie (len=%d)", len(cookie))
+            logger.info("[update_config] 收到 cookie (len={})", len(cookie))
             if '\n' in cookie or '\r' in cookie:
-                logger.warning("[update_config] cookie 中包含换行符! \\n=%d, \\r=%d",
+                logger.warning("[update_config] cookie 中包含换行符! \\n={}, \\r={}",
                                cookie.count('\n'), cookie.count('\r'))
             self._cookie = " ".join(cookie.split())
-            logger.info("[update_config] cookie 已清理 (len=%d)", len(self._cookie))
+            logger.info("[update_config] cookie 已清理 (len={})", len(self._cookie))
         if download_path is not None:
             self._download_path = download_path
         if naming is not None:
@@ -236,9 +236,9 @@ class TaskManager:
             download_path = Path(self._download_path)
             if not download_path.is_absolute():
                 download_path = PROJECT_ROOT / download_path
-            logger.info("[handler] 创建 DouyinHandler (has_cookie=%s)", bool(self._cookie))
-            logger.info("[handler] download_path=%s (原始=%s)", download_path, self._download_path)
-            logger.info("[handler] encryption=%s, max_retries=%d, timeout=%d, max_connections=%d",
+            logger.info("[handler] 创建 DouyinHandler (has_cookie={})", bool(self._cookie))
+            logger.info("[handler] download_path={} (原始={})", download_path, self._download_path)
+            logger.info("[handler] encryption={}, max_retries={}, timeout={}, max_connections={}",
                         self._encryption, self._max_retries, self._timeout, self._max_connections)
             self._handler = DouyinHandler(
                 cookie=self._cookie,
@@ -259,7 +259,7 @@ class TaskManager:
                 max_retries=self._max_retries,
                 max_tasks=self._max_tasks,
             )
-            logger.info("已创建 DouyinHandler (path=%s)", self._download_path)
+            logger.info("已创建 DouyinHandler (path={})", self._download_path)
         return self._handler
 
     # ============================================================
@@ -303,7 +303,7 @@ class TaskManager:
 
         # 在 DB 创建任务记录
         db.create_task(task_id, mode, url)
-        logger.info("[start_download] 任务已创建 task_id=%s, mode=%s", task_id, mode)
+        logger.info("[start_download] 任务已创建 task_id={}, mode={}", task_id, mode)
 
         if mode == DownloadMode.ONE:
             self._run_single_download(task_id, url)
@@ -315,7 +315,7 @@ class TaskManager:
             self._run_music_download(task_id, url)
         else:
             db.update_task_status(task_id, "error", f"未知的下载模式: {mode}")
-            logger.error("[start_download] 未知的下载模式: %s", mode)
+            logger.error("[start_download] 未知的下载模式: {}", mode)
 
         return task_id
 
@@ -356,7 +356,7 @@ class TaskManager:
             except Exception as e:
                 from core import db
                 db.update_task_status(task_id, "error", str(e))
-                logger.error("[_run_single_download] 异常: %s", e, exc_info=True)
+                logger.error("[_run_single_download] 异常: {}", e, exc_info=True)
 
         thread = threading.Thread(target=_run, daemon=True)
         thread.start()
@@ -405,7 +405,7 @@ class TaskManager:
         if detail.get("author_sec_uid") is not None:
             from core import db_bridge
             if db_bridge.has_user(detail["author_sec_uid"]):
-                logger.info("[download_single_sync] 用户 %s 已存在，跳过", detail["author_sec_uid"][:20])
+                logger.info("[download_single_sync] 用户 {} 已存在，跳过", detail["author_sec_uid"][:20])
             else:
                 try:
                     async def _fetch_profile():
@@ -415,7 +415,7 @@ class TaskManager:
                     profile = UserProfileFilter(profile_data)
                     save_user_info(profile.to_dict())
                 except Exception as e:
-                    logger.warning("[download_single_sync] 获取用户资料失败: %s", e)
+                    logger.warning("[download_single_sync] 获取用户资料失败: {}", e)
                     save_user_info(detail)
 
         return result
@@ -474,7 +474,7 @@ class TaskManager:
                     except Exception as e:
                         db.update_task_item_status(task_id, music.get("music_id", ""), "failed",
                                                    error_msg=str(e))
-                        logger.error("[_run_music_download] 单曲下载失败: %s", e)
+                        logger.error("[_run_music_download] 单曲下载失败: {}", e)
 
                     self.broadcast_task_update_sync(task_id, {
                         "task_id": task_id, "mode": "music", "status": "running",
@@ -489,7 +489,7 @@ class TaskManager:
 
             except Exception as e:
                 db.update_task_status(task_id, "error", str(e))
-                logger.error("[_run_music_download] 异常: %s", e, exc_info=True)
+                logger.error("[_run_music_download] 异常: {}", e, exc_info=True)
 
         thread = threading.Thread(target=_run, daemon=True)
         thread.start()
@@ -504,17 +504,17 @@ class TaskManager:
             import core.tauri_bridge as tb
             clean_data = {k: v for k, v in task_data.items() if not k.startswith("_")}
             emit_func = getattr(tb, '_emit_func', None)
-            logger.info("[broadcast] 广播 task_id=%s, task_type=%s, status=%s, results=%d, _emit_func=%s",
+            logger.info("[broadcast] 广播 task_id={}, task_type={}, status={}, results={}, _emit_func={}",
                        task_id, task_type, clean_data.get("status"), len(clean_data.get("results", [])),
                        "已注册" if emit_func is not None else "未注册")
             if emit_func is None:
-                logger.error("[broadcast] _emit_func 为 None，无法广播！模块属性: %s", dir(tb))
+                logger.error("[broadcast] _emit_func 为 None，无法广播！模块属性: {}", dir(tb))
                 return
             logger.info("[broadcast] 调用 emit 函数...")
             tb.emit(task_id, task_type, clean_data)
             logger.info("[broadcast] emit 调用完成")
         except Exception as e:
-            logger.error("[broadcast] Tauri 事件发射失败: %s", e, exc_info=True)
+            logger.error("[broadcast] Tauri 事件发射失败: {}", e, exc_info=True)
 
     async def broadcast_task_update(self, task_id: str, task_data: dict, task_type: str = "unknown"):
         """广播任务状态更新到前端（异步版本，兼容）"""

@@ -1,44 +1,66 @@
-"""日志配置"""
+"""日志配置 — 基于 loguru，自动捕获 stdlib logging 输出"""
 
-import logging
 import sys
 from pathlib import Path
+from loguru import logger
 
 LOG_DIR = Path(__file__).parent / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 
-LOG_FORMAT = "%(asctime)s | %(levelname)-7s | %(name)s | %(message)s"
-DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+# 移除 loguru 默认 handler
+logger.remove()
+
+LOG_FORMAT = (
+    "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
+    "<level>{level: <7}</level> | "
+    "<cyan>{name}</cyan> | "
+    "<level>{message}</level>"
+)
+
+# 控制台输出
+logger.add(sys.stdout, format=LOG_FORMAT, level="INFO", colorize=True)
+
+# 文件输出 — 按级别分文件，自动轮转
+logger.add(
+    LOG_DIR / "app.log",
+    format=LOG_FORMAT,
+    level="INFO",
+    rotation="10 MB",
+    retention="7 days",
+    encoding="utf-8",
+)
+logger.add(
+    LOG_DIR / "error.log",
+    format=LOG_FORMAT,
+    level="ERROR",
+    rotation="10 MB",
+    retention="30 days",
+    encoding="utf-8",
+)
+
+# 拦截 stdlib logging — core/ 模块的 logging.getLogger(__name__) 输出也会被 loguru 接管
+import logging
+
+
+class InterceptHandler(logging.Handler):
+    """将 stdlib logging 转发到 loguru"""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            level = logger.level(record.levelname).name
+        except ValueError:
+            level = record.levelno
+        logger.opt(depth=6, exception=record.exc_info).log(level, record.getMessage())
 
 
 def setup_logging(level: int = logging.INFO):
-    """配置全局日志"""
+    """配置全局日志，拦截 stdlib logging"""
     root = logging.getLogger()
-    root.setLevel(level)
-
-    # 清除已有 handler（避免重复）
     root.handlers.clear()
-
-    # 控制台 — 实时刷新
-    console = logging.StreamHandler(sys.stdout)
-    console.setLevel(level)
-    console.setFormatter(logging.Formatter(LOG_FORMAT, DATE_FORMAT))
-    console.stream.reconfigure(line_buffering=True) if hasattr(console.stream, 'reconfigure') else None
-    root.addHandler(console)
-
-    # 文件 - 按级别分文件，实时刷新
-    for lvl, filename in [(logging.INFO, "app.log"), (logging.ERROR, "error.log")]:
-        fh = logging.FileHandler(LOG_DIR / filename, encoding="utf-8", mode="a")
-        fh.setLevel(lvl)
-        fh.setFormatter(logging.Formatter(LOG_FORMAT, DATE_FORMAT))
-        # 每次写入后立即刷新
-        fh.stream.reconfigure(line_buffering=True) if hasattr(fh.stream, 'reconfigure') else None
-        root.addHandler(fh)
-
-    # 确保所有日志立即刷新
-    import atexit
-    atexit.register(logging.shutdown)
+    root.setLevel(level)
+    root.addHandler(InterceptHandler())
 
 
-def get_logger(name: str) -> logging.Logger:
-    return logging.getLogger(name)
+def get_logger(name: str):
+    """兼容接口 — 直接返回 loguru logger"""
+    return logger

@@ -46,14 +46,14 @@ class BatchManager:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             start_time = time.time()
-            logger.info("[batch_download] 线程启动 task_id=%s", task_id)
+            logger.info("[batch_download] 线程启动 task_id={}", task_id)
             try:
                 async def _do():
                     self._batch_tasks[task_id]["status"] = "running"
-                    logger.info("[batch_download] 状态改为 running, 开始广播 task_id=%s", task_id)
+                    logger.info("[batch_download] 状态改为 running, 开始广播 task_id={}", task_id)
                     broadcast_fn(task_id, self._batch_tasks[task_id], "batch")
 
-                    logger.info("[batch_download] 开始下载 task_id=%s, type=%s, url=%s", task_id, download_type, url)
+                    logger.info("[batch_download] 开始下载 task_id={}, type={}, url={}", task_id, download_type, url)
                     if download_type == "user_post":
                         result = await handler.handle_user_post(url)
                     elif download_type == "user_like":
@@ -65,7 +65,7 @@ class BatchManager:
                     else:
                         result = {"success": False, "error": f"未知的下载类型: {download_type}"}
 
-                    logger.info("[batch_download] handler 返回 task_id=%s, success=%s, count=%s, results=%d",
+                    logger.info("[batch_download] handler 返回 task_id={}, success={}, count={}, results={}",
                                task_id, result.get("success"), result.get("count"), len(result.get("results", [])))
                     if result.get("success"):
                         count = result.get("count", 0)
@@ -81,15 +81,15 @@ class BatchManager:
                             db.create_task(task_id, _type_to_mode.get(download_type, download_type), url,
                                            author_nickname=author_nickname)
                         except Exception as e:
-                            logger.error("[batch_download] create_task 失败: %s", e)
+                            logger.error("[batch_download] create_task 失败: {}", e)
 
                         # 直接写入数据库（不经过前端）
                         try:
                             from core.db import save_batch_results
                             db_result = save_batch_results(results, download_type)
-                            logger.info("[batch_download] 数据库写入完成: %s", db_result)
+                            logger.info("[batch_download] 数据库写入完成: {}", db_result)
                         except Exception as e:
-                            logger.error("[batch_download] 数据库写入失败: %s", e, exc_info=True)
+                            logger.error("[batch_download] 数据库写入失败: {}", e, exc_info=True)
 
                         # 写入任务子项记录，通过文件修改时间判断是否跳过
                         skipped_count = 0
@@ -123,7 +123,7 @@ class BatchManager:
                                                            file_path, file_size)
                             db.update_task_status(task_id, "completed")
                         except Exception as e:
-                            logger.error("[batch_download] 任务子项写入失败: %s", e, exc_info=True)
+                            logger.error("[batch_download] 任务子项写入失败: {}", e, exc_info=True)
 
                         self._batch_tasks[task_id].update({
                             "status": "completed",
@@ -131,7 +131,7 @@ class BatchManager:
                             "completed": count - skipped_count,
                             "skipped": skipped_count,
                         })
-                        logger.info("[batch_download] 任务状态已更新为 completed task_id=%s, total=%d, completed=%d, skipped=%d",
+                        logger.info("[batch_download] 任务状态已更新为 completed task_id={}, total={}, completed={}, skipped={}",
                                    task_id, count, count - skipped_count, skipped_count)
                     else:
                         self._batch_tasks[task_id]["status"] = "error"
@@ -141,7 +141,7 @@ class BatchManager:
                             db.update_task_status(task_id, "error", result.get("error", "未知错误"))
                         except Exception:
                             pass
-                        logger.error("[batch_download] 下载失败 task_id=%s, error=%s", task_id, result.get("error"))
+                        logger.error("[batch_download] 下载失败 task_id={}, error={}", task_id, result.get("error"))
 
                 loop.run_until_complete(_do())
             except Exception as e:
@@ -152,19 +152,19 @@ class BatchManager:
                     db.update_task_status(task_id, "error", str(e))
                 except Exception:
                     pass
-                logger.error("[batch_download] 线程异常: %s", e, exc_info=True)
+                logger.error("[batch_download] 线程异常: {}", e, exc_info=True)
             finally:
-                logger.info("[batch_download] finally: 准备广播最终状态 task_id=%s, status=%s",
+                logger.info("[batch_download] finally: 准备广播最终状态 task_id={}, status={}",
                            task_id, self._batch_tasks[task_id].get("status"))
                 broadcast_fn(task_id, self._batch_tasks[task_id], "batch")
                 loop.close()
                 # 释放内存：下载记录已通过 db_bridge 持久化到 SQLite，前端从 DB 读历史
                 self._batch_tasks.pop(task_id, None)
-                logger.info("[batch_download] 线程结束 task_id=%s", task_id)
+                logger.info("[batch_download] 线程结束 task_id={}", task_id)
 
         thread = threading.Thread(target=_run, daemon=True)
         thread.start()
-        logger.info("[batch_download] 批量下载已启动, task_id=%s, type=%s", task_id, download_type)
+        logger.info("[batch_download] 批量下载已启动, task_id={}, type={}", task_id, download_type)
         return task_id
 
     def get_batch_status(self) -> dict[str, dict]:

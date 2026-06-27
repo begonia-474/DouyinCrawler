@@ -2,6 +2,8 @@ import { create } from "zustand";
 
 type Theme = "light" | "dark" | "system";
 
+const IS_LINUX = navigator.userAgent.toLowerCase().includes("linux");
+
 async function applyTheme(theme: Theme) {
   const root = document.documentElement;
   root.classList.remove("light", "dark");
@@ -13,14 +15,22 @@ async function applyTheme(theme: Theme) {
 
   try {
     const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-    const { Effect, EffectState } = await import("@tauri-apps/api/window");
     const win = getCurrentWebviewWindow();
-    await win.setEffects({
-      effects: [Effect.Mica],
-      state: EffectState.Active,
-    });
+
+    if (IS_LINUX) {
+      // Linux: 设置不透明背景色（WebKitGTK 不支持 Mica/透明效果）
+      const bg: [number, number, number, number] =
+        resolved === "dark" ? [24, 24, 24, 255] : [247, 247, 248, 255];
+      await win.setBackgroundColor(bg);
+    } else {
+      const { Effect, EffectState } = await import("@tauri-apps/api/window");
+      await win.setEffects({
+        effects: [Effect.Mica],
+        state: EffectState.Active,
+      });
+    }
   } catch {
-    // Win10 or non-Tauri environment
+    // 非 Tauri 环境
   }
 }
 

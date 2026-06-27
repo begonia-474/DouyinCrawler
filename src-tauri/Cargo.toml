@@ -28,3 +28,4 @@ tokio = { version = "1", features = ["full"] }
 pyo3 = { version = "0.22", features = ["auto-initialize"] }
 log = "0.4"
 env_logger = "0.10"
+parking_lot = "0.12"

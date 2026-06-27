@@ -7,7 +7,8 @@ use config::{AppConfig, ConfigManager};
 use python::PythonBridge;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
+use parking_lot::Mutex;
 use tauri::Manager;
 use log::{info, warn, error};
 
@@ -20,7 +21,7 @@ static APP_HANDLE: OnceLock<tauri::AppHandle> = OnceLock::new();
 
 #[tauri::command(rename_all = "snake_case")]
 fn get_config(config_manager: tauri::State<'_, Arc<Mutex<ConfigManager>>>) -> Result<AppConfig, String> {
-    let manager = config_manager.lock().map_err(|e| e.to_string())?;
+    let manager = config_manager.lock();
     Ok(manager.get_douyin_config())
 }
 
@@ -50,7 +51,7 @@ fn set_config(
     }
 
     // 1. 更新配置文件
-    let mut manager = config_manager.lock().map_err(|e| e.to_string())?;
+    let mut manager = config_manager.lock();
     manager.update_douyin_config(&updates)?;
 
     // 2. 同步到 Python
@@ -147,7 +148,7 @@ pub fn run() {
             app.manage(python_bridge);
 
             // 同步配置到 Python
-            let config = config_manager.lock().unwrap().get_douyin_config();
+            let config = config_manager.lock().get_douyin_config();
             if let Err(e) = python::init_config(&config) {
                 warn!("同步配置到 Python 失败: {}", e);
             }

@@ -79,9 +79,9 @@ class LiveRecordManager:
                                 "ended_at": result.get("ended_at"),
                                 "cover_url": result.get("cover_url"),
                             })
-                            logger.info("[live_record] 直播记录已保存到 DB, task_id=%s", task_id)
+                            logger.info("[live_record] 直播记录已保存到 DB, task_id={}", task_id)
                         except Exception as save_err:
-                            logger.error("[live_record] 保存直播记录到 DB 失败: %s", save_err)
+                            logger.error("[live_record] 保存直播记录到 DB 失败: {}", save_err)
                     else:
                         self._live_tasks[task_id]["status"] = "error"
                         self._live_tasks[task_id]["error"] = result.get("error", "未知错误")
@@ -90,7 +90,7 @@ class LiveRecordManager:
             except Exception as e:
                 self._live_tasks[task_id]["status"] = "error"
                 self._live_tasks[task_id]["error"] = str(e)
-                logger.error("[live_record] 异常: %s", e, exc_info=True)
+                logger.error("[live_record] 异常: {}", e, exc_info=True)
             finally:
                 broadcast_fn(task_id, self._live_tasks[task_id], "live")
                 loop.close()
@@ -99,7 +99,7 @@ class LiveRecordManager:
 
         thread = threading.Thread(target=_run, daemon=True)
         thread.start()
-        logger.info("[live_record] 直播录制已启动, task_id=%s", task_id)
+        logger.info("[live_record] 直播录制已启动, task_id={}", task_id)
         return task_id
 
     def stop_live_record(self, task_id: str) -> bool:
