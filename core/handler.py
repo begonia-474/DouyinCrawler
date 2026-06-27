@@ -24,7 +24,7 @@ class DouyinHandler:
 
     def __init__(self, cookie: str, download_path: str = "Download",
                  naming: str = "{create}_{desc}", max_counts: int = 0,
-                 page_counts: int = 20, timeout: int = 5,
+                 page_counts: int = 20, timeout: int = 10,
                  encryption: str = "ab", proxies: dict = None,
                  app_name: str = "douyin", folderize: bool = False,
                  music: bool = False, cover: bool = False, desc: bool = False,

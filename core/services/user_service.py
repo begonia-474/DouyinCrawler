@@ -220,9 +220,9 @@ class UserService(BaseService):
 
             if detail.is_image_post and (detail.images or detail.images_video):
                 image_tasks.append((detail, dir_path, filename))
-            elif detail.video_url:
+            elif detail.video_urls:
                 download_tasks.append({
-                    "url": detail.video_url,
+                    "url": detail.video_urls,
                     "dir": str(dir_path),
                     "filename": f"{filename}_video",
                     "task_id": detail.aweme_id,

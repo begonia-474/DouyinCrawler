@@ -49,8 +49,10 @@ class BaseService:
         self.max_tasks = max_tasks
 
     def _make_crawler(self) -> DouyinCrawler:
-        return DouyinCrawler(self.cookie, self.proxies, self.encryption, self.max_retries)
+        return DouyinCrawler(self.cookie, self.proxies, self.encryption, self.max_retries,
+                             max_connections=self.max_connections, timeout=self.timeout)
 
     def _make_downloader(self, progress_callback=None) -> Downloader:
         return Downloader(self.cookie, max_connections=self.max_connections,
+                          max_concurrent=self.max_tasks, max_retries=self.max_retries,
                           timeout=self.timeout, progress_callback=progress_callback)

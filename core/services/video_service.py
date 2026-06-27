@@ -83,7 +83,7 @@ class VideoService(BaseService):
                         paths.append(str(path))
                 return {"success": True, "type": "images", "paths": paths, "detail": detail.to_db_dict()}
             else:
-                if not detail.video_url:
+                if not detail.video_urls:
                     return {"success": False, "error": "无法获取视频下载链接"}
-                path = await dl.download_video(detail.video_url, save_dir, f"{filename}_video")
+                path = await dl.download_video(detail.video_urls, save_dir, f"{filename}_video")
                 return {"success": True, "type": "video", "path": str(path), "detail": detail.to_db_dict()}

@@ -477,22 +477,29 @@ class PostDetailFilter(JSONModel):
 
     @property
     def video_url(self) -> str:
-        """无水印视频 URL（优先最高码率）"""
+        """无水印视频 URL（优先最高码率，兼容旧调用）"""
+        urls = self.video_urls
+        return urls[0] if urls else ""
+
+    @property
+    def video_urls(self) -> list[str]:
+        """所有可用的无水印视频 URL（CDN 降级用，对齐 f2）"""
         bit_rate = self.bit_rate_list
         if bit_rate:
             url_list = get_nested(bit_rate[0], "play_addr", "url_list", default=[])
-            for url in url_list:
-                if url and "playwm" not in url:
-                    return url
+            urls = [u for u in url_list if u and "playwm" not in u]
+            if urls:
+                return urls
             if url_list:
-                return url_list[0]
+                return list(url_list)
         url_list = self._get_attr_value("$.aweme_detail.video.play_addr.url_list")
         if isinstance(url_list, list):
-            for url in url_list:
-                if url and "playwm" not in url:
-                    return url
-            return url_list[0] if url_list else ""
-        return ""
+            urls = [u for u in url_list if u and "playwm" not in u]
+            if urls:
+                return urls
+            if url_list:
+                return list(url_list)
+        return []
 
     @property
     def cover_url(self) -> str:

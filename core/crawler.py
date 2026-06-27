@@ -30,7 +30,8 @@ class DouyinCrawler:
     )
 
     def __init__(self, cookie: str, proxies: dict | None = None,
-                 encryption: str = "ab", max_retries: int = 5):
+                 encryption: str = "ab", max_retries: int = 5,
+                 max_connections: int = 5, timeout: int = 10):
         self.cookie = cookie
         self.encryption = encryption
         self.max_retries = max_retries
@@ -39,10 +40,9 @@ class DouyinCrawler:
             self.bogus_manager = ABogusManager
         else:
             self.bogus_manager = XBogusManager
-        timeout = 10
         client_kwargs = {
             "timeout": timeout,
-            "limits": httpx.Limits(max_connections=5, max_keepalive_connections=5),
+            "limits": httpx.Limits(max_connections=max_connections, max_keepalive_connections=max_connections),
             "headers": {"User-Agent": self.UA, "Referer": "https://www.douyin.com/"},
             "follow_redirects": True,
             "transport": httpx.AsyncHTTPTransport(retries=max_retries),

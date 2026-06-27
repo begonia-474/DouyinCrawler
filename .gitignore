@@ -73,6 +73,9 @@ test_Download/
 # CodeGraph 索引（本地生成）
 .codegraph/
 
+# Mimocode
+.mimocode/
+
 # Claude 配置
 .claude/
 .agents/
