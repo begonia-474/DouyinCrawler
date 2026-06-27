@@ -94,6 +94,8 @@ class LiveRecordManager:
             finally:
                 broadcast_fn(task_id, self._live_tasks[task_id], "live")
                 loop.close()
+                # 释放内存：录制记录已通过 db_bridge 持久化到 SQLite，前端从 DB 读历史
+                self._live_tasks.pop(task_id, None)
 
         thread = threading.Thread(target=_run, daemon=True)
         thread.start()

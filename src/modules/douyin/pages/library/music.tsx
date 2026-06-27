@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Header } from "@/components/layout/header";
@@ -7,8 +6,7 @@ import { AnimateEntry } from "@/components/shared/animate-entry";
 import { Bezel } from "@/components/shared/bezel";
 import { Pagination } from "@/components/shared/pagination";
 import { Music, Loader2, Search, Clock, Download, CheckCircle2, Trash2 } from "lucide-react";
-import { deleteMusicCollection, downloadMusic, updateMusicFilePath } from "@/lib/api";
-import { queryKeys } from "@/lib/query-keys";
+import { useDeleteMusicCollection, useDownloadMusic, useUpdateMusicFilePath } from "@/lib/mutations";
 import { useMusicCollectionQuery, useMusicCountQuery } from "@/lib/queries";
 import { usePagination } from "@/hooks/use-pagination";
 import type { MusicCollectionItem } from "@/lib/api";
@@ -18,7 +16,9 @@ export default function LibraryMusicPage() {
   const { page, pageSize, setPage, offset, resetPage } = usePagination();
   const [search, setSearch] = useState("");
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
-  const queryClient = useQueryClient();
+  const deleteMusic = useDeleteMusicCollection();
+  const dlMusic = useDownloadMusic();
+  const updatePath = useUpdateMusicFilePath();
   const itemsQuery = useMusicCollectionQuery({
     limit: pageSize,
     offset,
@@ -30,43 +30,30 @@ export default function LibraryMusicPage() {
   const total = countQuery.data ?? 0;
   const loading = itemsQuery.isLoading || countQuery.isLoading;
 
-  const handleDownload = async (item: MusicCollectionItem) => {
+  const handleDownload = (item: MusicCollectionItem) => {
     if (!item.play_url) return;
     setDownloadingId(item.music_id);
-
-    const res = await downloadMusic(item.play_url, item.title || "", item.author || "");
-    if (res.success) {
-      // 更新 music_collection 的 file_path 和 status
-      if (res.data?.path) {
-        try {
-          await updateMusicFilePath(item.music_id, res.data.path);
-        } catch (e) {
-          console.error("更新音乐文件路径失败:", e);
-        }
-      }
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.musicCollection() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.musicCount() }),
-      ]);
-    }
-
-    setDownloadingId(null);
+    dlMusic.mutate(
+      { play_url: item.play_url, title: item.title || "", author: item.author || "" },
+      {
+        onSuccess: (res) => {
+          if (res?.success && res.data?.path) {
+            updatePath.mutate({ musicId: item.music_id, filePath: res.data.path });
+          }
+        },
+        onSettled: () => setDownloadingId(null),
+      },
+    );
   };
 
-  const handleDelete = async (item: MusicCollectionItem) => {
+  const handleDelete = (item: MusicCollectionItem) => {
     if (!window.confirm("确定删除这条音乐记录？")) return;
     const deleteFile = item.file_path
       ? window.confirm("是否同时删除这条记录对应的本地文件？\n\n取消则只删除记录。")
       : false;
-    try {
-      await deleteMusicCollection(item.music_id, deleteFile);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.musicCollection() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.musicCount() }),
-      ]);
-    } catch (err) {
-      window.alert(err instanceof Error ? err.message : "删除失败");
-    }
+    deleteMusic.mutate({ musicId: item.music_id, deleteFile }, {
+      onError: (err) => window.alert(err instanceof Error ? err.message : "删除失败"),
+    });
   };
 
   const totalPages = Math.ceil(total / pageSize);

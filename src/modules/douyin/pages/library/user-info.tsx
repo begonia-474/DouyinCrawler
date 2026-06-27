@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Header } from "@/components/layout/header";
@@ -8,8 +7,7 @@ import { Bezel } from "@/components/shared/bezel";
 import { SortDropdown } from "@/components/shared/sort-dropdown";
 import { Pagination } from "@/components/shared/pagination";
 import { Users, Loader2, Search, Trash2 } from "lucide-react";
-import { deleteUserInfo } from "@/lib/api";
-import { queryKeys } from "@/lib/query-keys";
+import { useDeleteUserInfo } from "@/lib/mutations";
 import { useUsersQuery, useUserCountQuery } from "@/lib/queries";
 import { usePagination } from "@/hooks/use-pagination";
 import type { UserInfo } from "@/lib/tauri-types";
@@ -28,7 +26,7 @@ export default function LibraryUserInfoPage() {
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState("updated_at");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
-  const queryClient = useQueryClient();
+  const deleteUser = useDeleteUserInfo();
 
   const itemsQuery = useUsersQuery({
     limit: pageSize,
@@ -47,18 +45,11 @@ export default function LibraryUserInfoPage() {
     resetPage();
   };
 
-  const handleDelete = async (item: UserInfo) => {
+  const handleDelete = (item: UserInfo) => {
     if (!window.confirm("确定删除这条用户记录？")) return;
-    try {
-      await deleteUserInfo(item.sec_user_id);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.users() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.userCount() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.userStats() }),
-      ]);
-    } catch (err) {
-      window.alert(err instanceof Error ? err.message : "删除失败");
-    }
+    deleteUser.mutate(item.sec_user_id, {
+      onError: (err) => window.alert(err instanceof Error ? err.message : "删除失败"),
+    });
   };
 
   return (

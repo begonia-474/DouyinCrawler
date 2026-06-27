@@ -258,6 +258,7 @@ const MIGRATE_V7_TASK_TABLES: &[&str] = &[
 
 pub struct Database {
     conn: Mutex<Connection>,
+    db_path: PathBuf,
 }
 
 #[derive(Serialize, Clone)]
@@ -627,6 +628,20 @@ macro_rules! lock_conn {
 }
 
 impl Database {
+    /// 在事务中执行闭包，失败自动回滚
+    pub fn with_transaction<F, R>(&self, f: F) -> Result<R>
+    where
+        F: FnOnce(&rusqlite::Transaction) -> Result<R>,
+    {
+        let mut conn = self.conn.lock().map_err(|_| {
+            rusqlite::Error::InvalidParameterName("数据库连接锁已中毒".to_string())
+        })?;
+        let tx = conn.transaction()?;
+        let result = f(&tx)?;
+        tx.commit()?;
+        Ok(result)
+    }
+
     pub fn open(path: &PathBuf) -> Result<Self> {
         // 确保父目录存在（失败时 Connection::open 也会失败，无需包装错误）
         if let Some(parent) = path.parent() {
@@ -650,6 +665,7 @@ impl Database {
         info!("[DB] 数据库打开成功，download_history 表有 {} 条记录", count);
         Ok(Database {
             conn: Mutex::new(conn),
+            db_path: path.clone(),
         })
     }
 
@@ -1285,7 +1301,7 @@ impl Database {
     }
 
     /// 数据库健康检查：各表记录数 + 数据库文件大小
-    pub fn db_health_check(&self, db_path: &str) -> Result<DbHealth> {
+    pub fn db_health_check(&self) -> Result<DbHealth> {
         let conn = lock_conn!(self);
 
         let count = |table: &str| -> Result<i64> {
@@ -1295,7 +1311,7 @@ impl Database {
             Ok(c)
         };
 
-        let db_size = std::fs::metadata(db_path)
+        let db_size = std::fs::metadata(&self.db_path)
             .map(|m| m.len() as i64)
             .unwrap_or(0);
 
@@ -1395,35 +1411,29 @@ impl Database {
 
     // === 写入方法 ===
 
-    pub fn save_download(&self, record: &NewDownloadRecord) -> Result<i64> {
-        let conn = lock_conn!(self);
+    fn save_download_inner(conn: &Connection, record: &NewDownloadRecord) -> Result<i64> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
-        debug!("[DB] save_download: aweme_id={:?}, file_path={:?}", record.aweme_id, record.file_path);
-
-        // 使用 INSERT OR IGNORE 避免重复记录（基于 aweme_id + file_path）
         conn.execute(
             "INSERT OR IGNORE INTO download_history \
              (aweme_id, download_type, title, author_nickname, author_sec_uid, \
               file_path, file_size, cover_url, status, error_msg, created_at) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             rusqlite::params![
-                record.aweme_id,
-                record.download_type,
-                record.title,
-                record.author_nickname,
-                record.author_sec_uid,
-                record.file_path,
-                record.file_size,
-                record.cover_url,
-                record.status,
-                record.error_msg,
-                now,
+                record.aweme_id, record.download_type, record.title,
+                record.author_nickname, record.author_sec_uid, record.file_path,
+                record.file_size, record.cover_url, record.status, record.error_msg, now,
             ],
         )?;
-        let id = conn.last_insert_rowid();
+        Ok(conn.last_insert_rowid())
+    }
+
+    pub fn save_download(&self, record: &NewDownloadRecord) -> Result<i64> {
+        let conn = lock_conn!(self);
+        debug!("[DB] save_download: aweme_id={:?}, file_path={:?}", record.aweme_id, record.file_path);
+        let id = Self::save_download_inner(&conn, record)?;
         debug!("[DB] save_download 成功, id={}", id);
         Ok(id)
     }
@@ -1489,8 +1499,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn save_user(&self, user: &UserInfo) -> Result<()> {
-        let conn = lock_conn!(self);
+    fn save_user_inner(conn: &Connection, user: &UserInfo) -> Result<()> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -1528,14 +1537,18 @@ impl Database {
         Ok(())
     }
 
+    pub fn save_user(&self, user: &UserInfo) -> Result<()> {
+        let conn = lock_conn!(self);
+        Self::save_user_inner(&conn, user)
+    }
+
     pub fn delete_user(&self, sec_user_id: &str) -> Result<()> {
         let conn = lock_conn!(self);
         conn.execute("DELETE FROM user_info WHERE sec_user_id = ?1", rusqlite::params![sec_user_id])?;
         Ok(())
     }
 
-    pub fn save_video(&self, video: &VideoInfo) -> Result<()> {
-        let conn = lock_conn!(self);
+    fn save_video_inner(conn: &Connection, video: &VideoInfo) -> Result<()> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -1592,6 +1605,37 @@ impl Database {
             ],
         )?;
         Ok(())
+    }
+
+    pub fn save_video(&self, video: &VideoInfo) -> Result<()> {
+        let conn = lock_conn!(self);
+        Self::save_video_inner(&conn, video)
+    }
+
+    /// 批量保存下载结果（单次事务：download_history + video_info + user_info）
+    ///
+    /// items 中每个元素包含:
+    /// - `download`: NewDownloadRecord
+    /// - `video`: Option<VideoInfo>
+    /// - `user`: Option<UserInfo>
+    pub fn save_batch_results(
+        &self,
+        downloads: &[NewDownloadRecord],
+        videos: &[VideoInfo],
+        users: &[UserInfo],
+    ) -> Result<()> {
+        self.with_transaction(|tx| {
+            for record in downloads {
+                Self::save_download_inner(tx, record)?;
+            }
+            for video in videos {
+                Self::save_video_inner(tx, video)?;
+            }
+            for user in users {
+                Self::save_user_inner(tx, user)?;
+            }
+            Ok(())
+        })
     }
 
     pub fn delete_video(&self, aweme_id: &str) -> Result<()> {
@@ -1933,11 +1977,11 @@ impl Database {
     }
 
     pub fn delete_task(&self, task_id: &str) -> Result<()> {
-        let conn = lock_conn!(self);
-        // CASCADE 会自动删除子项
-        conn.execute("DELETE FROM download_task_items WHERE task_id = ?1", rusqlite::params![task_id])?;
-        conn.execute("DELETE FROM download_tasks WHERE id = ?1", rusqlite::params![task_id])?;
-        Ok(())
+        self.with_transaction(|tx| {
+            tx.execute("DELETE FROM download_task_items WHERE task_id = ?1", rusqlite::params![task_id])?;
+            tx.execute("DELETE FROM download_tasks WHERE id = ?1", rusqlite::params![task_id])?;
+            Ok(())
+        })
     }
 
     // === 下载任务子项 (download_task_items) ===
@@ -1977,6 +2021,42 @@ impl Database {
             rusqlite::params![status, file_path, file_size, error_msg, task_id, aweme_id],
         )?;
         Ok(())
+    }
+
+    /// 原子操作：更新任务子项状态 + 重新计算任务计数（单次事务）
+    pub fn update_task_item_and_counts(
+        &self,
+        task_id: &str,
+        aweme_id: &str,
+        status: &str,
+        file_path: Option<&str>,
+        file_size: i64,
+        error_msg: Option<&str>,
+    ) -> Result<()> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        self.with_transaction(|tx| {
+            tx.execute(
+                "UPDATE download_task_items SET status = ?1, file_path = COALESCE(?2, file_path), \
+                 file_size = CASE WHEN ?3 > 0 THEN ?3 ELSE file_size END, \
+                 error_msg = ?4 \
+                 WHERE task_id = ?5 AND aweme_id = ?6",
+                rusqlite::params![status, file_path, file_size, error_msg, task_id, aweme_id],
+            )?;
+            tx.execute(
+                "UPDATE download_tasks SET \
+                 completed = (SELECT COUNT(*) FROM download_task_items WHERE task_id = ?1 AND status = 'completed'), \
+                 skipped = (SELECT COUNT(*) FROM download_task_items WHERE task_id = ?1 AND status = 'skipped'), \
+                 failed = (SELECT COUNT(*) FROM download_task_items WHERE task_id = ?1 AND status = 'failed'), \
+                 total = (SELECT COUNT(*) FROM download_task_items WHERE task_id = ?1), \
+                 updated_at = ?2 \
+                 WHERE id = ?1",
+                rusqlite::params![task_id, now],
+            )?;
+            Ok(())
+        })
     }
 
     pub fn get_task_items(&self, task_id: &str, status: Option<String>) -> Result<Vec<TaskItem>> {

@@ -158,6 +158,8 @@ class BatchManager:
                            task_id, self._batch_tasks[task_id].get("status"))
                 broadcast_fn(task_id, self._batch_tasks[task_id], "batch")
                 loop.close()
+                # 释放内存：下载记录已通过 db_bridge 持久化到 SQLite，前端从 DB 读历史
+                self._batch_tasks.pop(task_id, None)
                 logger.info("[batch_download] 线程结束 task_id=%s", task_id)
 
         thread = threading.Thread(target=_run, daemon=True)

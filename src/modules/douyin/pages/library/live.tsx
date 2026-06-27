@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -8,17 +7,16 @@ import { AnimateEntry } from "@/components/shared/animate-entry";
 import { Bezel } from "@/components/shared/bezel";
 import { Pagination } from "@/components/shared/pagination";
 import { Radio, Loader2, FolderOpen, Clock, Search, Trash2 } from "lucide-react";
-import { deleteLiveRecord } from "@/lib/api";
-import { queryKeys } from "@/lib/query-keys";
+import { useDeleteLiveRecord } from "@/lib/mutations";
 import { useLiveRecordsQuery } from "@/lib/queries";
 import { usePagination } from "@/hooks/use-pagination";
 import type { LiveRecord } from "@/lib/tauri-types";
 import { formatFileSize, formatTimestamp, formatDuration } from "@/lib/utils";
 
 export default function LibraryLivePage() {
-  const queryClient = useQueryClient();
   const { page, pageSize, setPage, offset } = usePagination();
   const [search, setSearch] = useState("");
+  const deleteLive = useDeleteLiveRecord();
   const liveRecordsQuery = useLiveRecordsQuery({ limit: pageSize, offset });
   const items = liveRecordsQuery.data ?? [];
   const loading = liveRecordsQuery.isLoading;
@@ -31,17 +29,14 @@ export default function LibraryLivePage() {
       )
     : items;
 
-  const handleDelete = async (item: LiveRecord) => {
+  const handleDelete = (item: LiveRecord) => {
     if (!window.confirm("确定删除这条直播录制记录？")) return;
     const deleteFile = item.file_path
       ? window.confirm("是否同时删除这条记录对应的本地文件？\n\n取消则只删除记录。")
       : false;
-    try {
-      await deleteLiveRecord(item.id, deleteFile);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.liveRecords() });
-    } catch (err) {
-      window.alert(err instanceof Error ? err.message : "删除失败");
-    }
+    deleteLive.mutate({ id: item.id, deleteFile }, {
+      onError: (err) => window.alert(err instanceof Error ? err.message : "删除失败"),
+    });
   };
 
   return (

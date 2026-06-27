@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { getDownloadStats, getDownloads, getLiveRecordCount, getLiveRecords, getMusicCollectionCountFromDB, getMusicCollectionFromDB, getUserCount, getUserStats, getUsers, getVideoCount, getVideos, getVideoStats, getDownloadTasks, getDownloadTaskDetail, getDownloadTaskItems, getDownloadTaskItemCounts, getDownloadTrend, getTopAuthors, getStorageAnalysis, dbHealthCheck, getDbPath } from "@/lib/api";
+import { getDownloadStats, getDownloads, getLiveRecordCount, getLiveRecords, getMusicCollectionCountFromDB, getMusicCollectionFromDB, getUserCount, getUserStats, getUsers, getVideoCount, getVideos, getVideoStats, getDownloadTasks, getDownloadTaskDetail, getDownloadTaskItems, getDownloadTaskItemCounts, getDownloadTrend, getTopAuthors, getStorageAnalysis, dbHealthCheck } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 
 export function useDownloadsQuery(params: {
@@ -168,9 +168,6 @@ export function useStorageAnalysisQuery() {
 export function useDbHealthQuery() {
   return useQuery({
     queryKey: queryKeys.dbHealth(),
-    queryFn: async () => {
-      const dbPath = await getDbPath();
-      return dbHealthCheck(dbPath);
-    },
+    queryFn: () => dbHealthCheck(),
   });
 }

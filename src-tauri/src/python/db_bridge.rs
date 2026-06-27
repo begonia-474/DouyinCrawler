@@ -310,7 +310,7 @@ pub fn register_db_bridge() {
             },
         ).expect("创建 create_task_item 闭包失败");
 
-        // 注册 update_task_item_status
+        // 注册 update_task_item_status（原子操作：更新子项状态 + 刷新任务计数）
         let update_task_item_status_fn = pyo3::types::PyCFunction::new_closure_bound(
             py,
             None,
@@ -327,11 +327,8 @@ pub fn register_db_bridge() {
                     .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("AppHandle 未初始化"))?;
 
                 let db = app_handle.state::<crate::db::Database>();
-                db.update_task_item_status(&task_id, &aweme_id, &status, file_path.as_deref(), file_size, error_msg.as_deref())
+                db.update_task_item_and_counts(&task_id, &aweme_id, &status, file_path.as_deref(), file_size, error_msg.as_deref())
                     .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("更新子项状态失败: {}", e)))?;
-                // 自动刷新任务聚合计数
-                db.update_task_counts(&task_id)
-                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("更新任务计数失败: {}", e)))?;
                 Ok(())
             },
         ).expect("创建 update_task_item_status 闭包失败");

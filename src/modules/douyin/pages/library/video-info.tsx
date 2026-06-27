@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Header } from "@/components/layout/header";
@@ -11,8 +10,7 @@ import {
   Film, Loader2, Search, Clock, Heart, MessageCircle,
   Share2, Bookmark, Trash2,
 } from "lucide-react";
-import { deleteVideoInfo } from "@/lib/api";
-import { queryKeys } from "@/lib/query-keys";
+import { useDeleteVideoInfo } from "@/lib/mutations";
 import { useVideoCountQuery, useVideosQuery } from "@/lib/queries";
 import { usePagination } from "@/hooks/use-pagination";
 import type { VideoInfo } from "@/lib/tauri-types";
@@ -32,7 +30,7 @@ export default function LibraryVideoInfoPage() {
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState("updated_at");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
-  const queryClient = useQueryClient();
+  const deleteVideo = useDeleteVideoInfo();
 
   const itemsQuery = useVideosQuery({
     limit: pageSize,
@@ -52,19 +50,11 @@ export default function LibraryVideoInfoPage() {
     resetPage();
   };
 
-  const handleDelete = async (item: VideoInfo) => {
+  const handleDelete = (item: VideoInfo) => {
     if (!window.confirm("确定删除这条视频记录？")) return;
-    try {
-      await deleteVideoInfo(item.aweme_id);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.videos() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.videoCount() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.videoStats() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.userStats() }),
-      ]);
-    } catch (err) {
-      window.alert(err instanceof Error ? err.message : "删除失败");
-    }
+    deleteVideo.mutate(item.aweme_id, {
+      onError: (err) => window.alert(err instanceof Error ? err.message : "删除失败"),
+    });
   };
 
   return (

@@ -111,6 +111,92 @@ class Downloader:
         except (PermissionError, OSError):
             shutil.move(str(src), str(dst))
 
+    async def _download_stream(
+        self,
+        url: str,
+        task: DownloadTask,
+        *,
+        task_id: str | None = None,
+        max_retries: int = 3,
+        validate_size: bool = False,
+        use_jitter: bool = False,
+    ) -> Path:
+        """
+        核心下载方法：断点续传 + 流式写入 + 重试 backoff。
+
+        公开方法（download_video 等）构造 DownloadTask 后调用此方法。
+        """
+        tid = task_id or task.filename
+        self._tasks[tid] = task
+
+        last_error = None
+        for attempt in range(max_retries):
+            headers = self._get_headers(task)
+            existing_size = 0
+            if task.temp_path.exists():
+                existing_size = task.temp_path.stat().st_size
+                headers["Range"] = f"bytes={existing_size}-"
+
+            try:
+                task.status = "downloading"
+                async with self._client.stream("GET", url, headers=headers) as resp:
+                    resp.raise_for_status()
+                    content_length = int(resp.headers.get("content-length", 0))
+                    if resp.status_code == 206:
+                        task.total_size = existing_size + content_length
+                        task.downloaded = existing_size
+                    else:
+                        task.total_size = content_length
+                        existing_size = 0
+
+                    chunk_size = get_chunk_size(task.total_size) if task.total_size > 0 else self.CHUNK_SIZE
+                    mode = "ab" if existing_size > 0 and resp.status_code == 206 else "wb"
+                    async with aiofiles.open(task.temp_path, mode) as f:
+                        async for chunk in resp.aiter_bytes(chunk_size):
+                            await f.write(chunk)
+                            task.downloaded += len(chunk)
+                            if self.progress_callback:
+                                self.progress_callback(tid, task.downloaded, task.total_size)
+
+                # 文件大小校验
+                if validate_size and task.total_size > 0:
+                    actual_size = task.temp_path.stat().st_size
+                    if actual_size != task.total_size:
+                        logger.warning("[download] 文件大小不匹配: 期望 %d, 实际 %d, URL: %s", task.total_size, actual_size, url)
+                        continue
+
+                self._safe_rename(task.temp_path, task.full_path)
+                task.status = "completed"
+                return task.full_path
+
+            except (httpx.RemoteProtocolError, httpx.ReadTimeout, httpx.ConnectTimeout) as e:
+                last_error = e
+                jitter = random.uniform(0, 1) if use_jitter else 0
+                wait = (attempt + 1) * 2 + jitter
+                logger.warning("下载异常 (%s)，等待 %.1f 秒后重试 (%d/%d)", type(e).__name__, wait, attempt + 1, max_retries)
+                await asyncio.sleep(wait)
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code in (429, 500, 502, 503):
+                    last_error = e
+                    jitter = random.uniform(0, 2) if use_jitter else 0
+                    wait = (attempt + 1) * 3 + jitter
+                    logger.warning("下载 HTTP 错误 (%d)，等待 %.1f 秒后重试 (%d/%d)", e.response.status_code, wait, attempt + 1, max_retries)
+                    await asyncio.sleep(wait)
+                    continue
+                task.status = "error"
+                task.error_msg = str(e)
+                raise
+            except Exception as e:
+                last_error = e
+                jitter = random.uniform(0, 1) if use_jitter else 0
+                wait = (attempt + 1) * 2 + jitter
+                logger.warning("下载未知异常 (%s)，等待 %.1f 秒后重试 (%d/%d)", type(e).__name__, wait, attempt + 1, max_retries)
+                await asyncio.sleep(wait)
+
+        task.status = "error"
+        task.error_msg = f"下载失败，已重试 {max_retries} 次: {last_error}"
+        raise last_error
+
     async def download_video(
         self,
         video_url: Union[str, list[str]],
@@ -120,7 +206,7 @@ class Downloader:
         max_retries: int | None = None,
     ) -> Path:
         """
-        下载视频文件（多 URL CDN 降级 + 断点续传 + 自适应分块 + 大小校验）
+        下载视频文件（多 URL CDN 降级 + 断点续传 + 大小校验）
 
         Args:
             video_url: 视频 URL 或 URL 列表（CDN 降级用）
@@ -143,93 +229,24 @@ class Downloader:
 
             task = DownloadTask(url=urls[0], save_path=save_path, filename=filename)
 
-            # 文件已存在则跳过下载
             if task.full_path.exists():
                 logger.info("[download] 文件已存在，跳过: %s", task.full_path.name)
                 task.status = "completed"
                 return task.full_path
 
-            tid = task_id or filename
-            self._tasks[tid] = task
-
+            # CDN 降级：逐个 URL 尝试
             last_error = None
             for link in urls:
-                for attempt in range(max_retries):
-                    headers = self._get_headers(task)
+                task.url = link
+                try:
+                    return await self._download_stream(
+                        link, task, task_id=task_id,
+                        max_retries=max_retries, validate_size=True, use_jitter=True,
+                    )
+                except Exception as e:
+                    last_error = e
+                    logger.warning("[download] URL 失败，尝试下一个: %s", link)
 
-                    # 断点续传：检查已下载的部分
-                    existing_size = 0
-                    if task.temp_path.exists():
-                        existing_size = task.temp_path.stat().st_size
-                        headers["Range"] = f"bytes={existing_size}-"
-
-                    try:
-                        task.status = "downloading"
-                        async with self._client.stream("GET", link, headers=headers) as resp:
-                            resp.raise_for_status()
-
-                            # 获取总大小
-                            content_length = int(resp.headers.get("content-length", 0))
-                            if resp.status_code == 206:
-                                task.total_size = existing_size + content_length
-                                task.downloaded = existing_size
-                            else:
-                                task.total_size = content_length
-                                existing_size = 0
-
-                            # 自适应分块
-                            chunk_size = get_chunk_size(task.total_size) if task.total_size > 0 else self.CHUNK_SIZE
-
-                            # 写入文件
-                            mode = "ab" if existing_size > 0 and resp.status_code == 206 else "wb"
-                            async with aiofiles.open(task.temp_path, mode) as f:
-                                async for chunk in resp.aiter_bytes(chunk_size):
-                                    await f.write(chunk)
-                                    task.downloaded += len(chunk)
-                                    if self.progress_callback:
-                                        self.progress_callback(tid, task.downloaded, task.total_size)
-
-                        # 文件大小校验（对齐 f2）
-                        if task.total_size > 0:
-                            actual_size = task.temp_path.stat().st_size
-                            if actual_size != task.total_size:
-                                logger.warning(
-                                    "[download] 文件大小不匹配: 期望 %d, 实际 %d, URL: %s",
-                                    task.total_size, actual_size, link,
-                                )
-                                continue  # 保留 .tmp，尝试下一个 URL
-
-                        # 重命名（Windows 兼容）
-                        self._safe_rename(task.temp_path, task.full_path)
-                        task.status = "completed"
-                        return task.full_path
-
-                    except (httpx.RemoteProtocolError, httpx.ReadTimeout, httpx.ConnectTimeout) as e:
-                        last_error = e
-                        wait = (attempt + 1) * 2 + random.uniform(0, 1)
-                        logger.warning("下载异常 (%s)，等待 %.1f 秒后重试 (%d/%d)", type(e).__name__, wait, attempt + 1, max_retries)
-                        await asyncio.sleep(wait)
-                    except httpx.HTTPStatusError as e:
-                        if e.response.status_code in (429, 500, 502, 503):
-                            last_error = e
-                            wait = (attempt + 1) * 3 + random.uniform(0, 2)
-                            logger.warning("下载 HTTP 错误 (%d)，等待 %.1f 秒后重试 (%d/%d)", e.response.status_code, wait, attempt + 1, max_retries)
-                            await asyncio.sleep(wait)
-                            continue
-                        task.status = "error"
-                        task.error_msg = str(e)
-                        raise
-                    except Exception as e:
-                        last_error = e
-                        wait = (attempt + 1) * 2 + random.uniform(0, 1)
-                        logger.warning("下载未知异常 (%s)，等待 %.1f 秒后重试 (%d/%d)", type(e).__name__, wait, attempt + 1, max_retries)
-                        await asyncio.sleep(wait)
-
-                # 当前 URL 所有重试均失败，尝试下一个 URL
-                logger.warning("[download] URL 失败，尝试下一个: %s", link)
-
-            task.status = "error"
-            task.error_msg = f"所有 URL 均下载失败: {last_error}"
             raise last_error
 
     async def download_image(
@@ -239,46 +256,15 @@ class Downloader:
         filename: str,
         max_retries: int | None = None,
     ) -> Path:
-        """下载图片（断点续传 + 重试 + 自适应分块）"""
+        """下载图片（断点续传 + 重试）"""
         max_retries = max_retries if max_retries is not None else self._max_retries
         async with self._semaphore:
             save_path = Path(save_dir)
             save_path.mkdir(parents=True, exist_ok=True)
             task = DownloadTask(url=image_url, save_path=save_path, filename=filename, suffix=".webp")
-
             if task.full_path.exists():
                 return task.full_path
-
-            last_error = None
-            for attempt in range(max_retries):
-                headers = self._get_headers(task)
-                existing_size = 0
-                if task.temp_path.exists():
-                    existing_size = task.temp_path.stat().st_size
-                    headers["Range"] = f"bytes={existing_size}-"
-                try:
-                    async with self._client.stream("GET", image_url, headers=headers) as resp:
-                        resp.raise_for_status()
-                        content_length = int(resp.headers.get("content-length", 0))
-                        if resp.status_code == 206:
-                            task.total_size = existing_size + content_length
-                        else:
-                            task.total_size = content_length
-                            existing_size = 0
-                        chunk_size = get_chunk_size(task.total_size) if task.total_size > 0 else self.CHUNK_SIZE
-                        mode = "ab" if existing_size > 0 and resp.status_code == 206 else "wb"
-                        async with aiofiles.open(task.temp_path, mode) as f:
-                            async for chunk in resp.aiter_bytes(chunk_size):
-                                await f.write(chunk)
-                    self._safe_rename(task.temp_path, task.full_path)
-                    return task.full_path
-                except (httpx.RemoteProtocolError, httpx.ReadTimeout, httpx.ConnectTimeout) as e:
-                    last_error = e
-                    await asyncio.sleep((attempt + 1) * 2)
-                except Exception as e:
-                    last_error = e
-                    await asyncio.sleep((attempt + 1) * 2)
-            raise last_error
+            return await self._download_stream(image_url, task, max_retries=max_retries)
 
     async def download_live_image(
         self,
@@ -287,46 +273,15 @@ class Downloader:
         filename: str,
         max_retries: int | None = None,
     ) -> Path:
-        """下载动图/实况（断点续传 + 重试 + 自适应分块）"""
+        """下载动图/实况（断点续传 + 重试）"""
         max_retries = max_retries if max_retries is not None else self._max_retries
         async with self._semaphore:
             save_path = Path(save_dir)
             save_path.mkdir(parents=True, exist_ok=True)
             task = DownloadTask(url=video_url, save_path=save_path, filename=filename, suffix=".mp4")
-
             if task.full_path.exists():
                 return task.full_path
-
-            last_error = None
-            for attempt in range(max_retries):
-                headers = self._get_headers(task)
-                existing_size = 0
-                if task.temp_path.exists():
-                    existing_size = task.temp_path.stat().st_size
-                    headers["Range"] = f"bytes={existing_size}-"
-                try:
-                    async with self._client.stream("GET", video_url, headers=headers) as resp:
-                        resp.raise_for_status()
-                        content_length = int(resp.headers.get("content-length", 0))
-                        if resp.status_code == 206:
-                            task.total_size = existing_size + content_length
-                        else:
-                            task.total_size = content_length
-                            existing_size = 0
-                        chunk_size = get_chunk_size(task.total_size) if task.total_size > 0 else self.CHUNK_SIZE
-                        mode = "ab" if existing_size > 0 and resp.status_code == 206 else "wb"
-                        async with aiofiles.open(task.temp_path, mode) as f:
-                            async for chunk in resp.aiter_bytes(chunk_size):
-                                await f.write(chunk)
-                    self._safe_rename(task.temp_path, task.full_path)
-                    return task.full_path
-                except (httpx.RemoteProtocolError, httpx.ReadTimeout, httpx.ConnectTimeout) as e:
-                    last_error = e
-                    await asyncio.sleep((attempt + 1) * 2)
-                except Exception as e:
-                    last_error = e
-                    await asyncio.sleep((attempt + 1) * 2)
-            raise last_error
+            return await self._download_stream(video_url, task, max_retries=max_retries)
 
     async def download_music(
         self,
@@ -336,77 +291,20 @@ class Downloader:
         task_id: str | None = None,
         max_retries: int | None = None,
     ) -> Path:
-        """下载音乐文件（自适应分块 + 大小校验 + 重试）"""
+        """下载音乐文件（大小校验 + 进度回调 + 重试）"""
         max_retries = max_retries if max_retries is not None else self._max_retries
         async with self._semaphore:
             save_path = Path(save_dir)
             save_path.mkdir(parents=True, exist_ok=True)
-
             task = DownloadTask(url=music_url, save_path=save_path, filename=filename, suffix=".mp3")
-
-            # 文件已存在则跳过下载
             if task.full_path.exists():
                 logger.info("[download] 音乐文件已存在，跳过: %s", task.full_path.name)
                 task.status = "completed"
                 return task.full_path
-
-            tid = task_id or filename
-            self._tasks[tid] = task
-
-            last_error = None
-            for attempt in range(max_retries):
-                headers = self._get_headers(task)
-                existing_size = 0
-                if task.temp_path.exists():
-                    existing_size = task.temp_path.stat().st_size
-                    headers["Range"] = f"bytes={existing_size}-"
-
-                try:
-                    task.status = "downloading"
-                    async with self._client.stream("GET", music_url, headers=headers) as resp:
-                        resp.raise_for_status()
-                        content_length = int(resp.headers.get("content-length", 0))
-                        if resp.status_code == 206:
-                            task.total_size = existing_size + content_length
-                            task.downloaded = existing_size
-                        else:
-                            task.total_size = content_length
-                            existing_size = 0
-
-                        chunk_size = get_chunk_size(task.total_size) if task.total_size > 0 else self.CHUNK_SIZE
-                        mode = "ab" if existing_size > 0 and resp.status_code == 206 else "wb"
-                        async with aiofiles.open(task.temp_path, mode) as f:
-                            async for chunk in resp.aiter_bytes(chunk_size):
-                                await f.write(chunk)
-                                task.downloaded += len(chunk)
-                                if self.progress_callback:
-                                    self.progress_callback(tid, task.downloaded, task.total_size)
-
-                    # 文件大小校验
-                    if task.total_size > 0:
-                        actual_size = task.temp_path.stat().st_size
-                        if actual_size != task.total_size:
-                            logger.warning("[download] 音乐文件大小不匹配: 期望 %d, 实际 %d", task.total_size, actual_size)
-                            continue
-
-                    self._safe_rename(task.temp_path, task.full_path)
-                    task.status = "completed"
-                    return task.full_path
-
-                except (httpx.RemoteProtocolError, httpx.ReadTimeout, httpx.ConnectTimeout) as e:
-                    last_error = e
-                    wait = (attempt + 1) * 2 + random.uniform(0, 1)
-                    logger.warning("音乐下载异常 (%s)，等待 %.1f 秒后重试 (%d/%d)", type(e).__name__, wait, attempt + 1, max_retries)
-                    await asyncio.sleep(wait)
-                except Exception as e:
-                    last_error = e
-                    wait = (attempt + 1) * 2 + random.uniform(0, 1)
-                    logger.warning("音乐下载未知异常 (%s)，等待 %.1f 秒后重试 (%d/%d)", type(e).__name__, wait, attempt + 1, max_retries)
-                    await asyncio.sleep(wait)
-
-            task.status = "error"
-            task.error_msg = f"音乐下载失败，已重试 {max_retries} 次: {last_error}"
-            raise last_error
+            return await self._download_stream(
+                music_url, task, task_id=task_id,
+                max_retries=max_retries, validate_size=True, use_jitter=True,
+            )
 
     async def batch_download(
         self,

@@ -299,9 +299,8 @@ pub fn get_storage_analysis(db: State<'_, Database>) -> Result<Vec<StorageStat>,
 #[tauri::command(rename_all = "snake_case")]
 pub fn db_health_check(
     db: State<'_, Database>,
-    db_path: String,
 ) -> Result<DbHealth, String> {
-    db.db_health_check(&db_path).map_err(|e| e.to_string())
+    db.db_health_check().map_err(|e| e.to_string())
 }
 
 // ============================================================
@@ -415,11 +414,10 @@ pub fn update_download_task_item_status(
     file_size: Option<i64>,
     error_msg: Option<String>,
 ) -> Result<(), String> {
-    db.update_task_item_status(
+    db.update_task_item_and_counts(
         &task_id, &aweme_id, &status,
         file_path.as_deref(), file_size.unwrap_or(0), error_msg.as_deref(),
-    ).map_err(|e| e.to_string())?;
-    db.update_task_counts(&task_id).map_err(|e| e.to_string())
+    ).map_err(|e| e.to_string())
 }
 
 #[tauri::command(rename_all = "snake_case")]

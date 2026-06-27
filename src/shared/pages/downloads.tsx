@@ -1,5 +1,4 @@
 import { useEffect, useMemo } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { Header } from "@/components/layout/header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -22,8 +21,8 @@ import {
   Trash2,
   DownloadCloud,
 } from "lucide-react";
-import { deleteLiveRecord, deleteDownloadTask, openFolder, getConfig, exportData } from "@/lib/api";
-import { queryKeys } from "@/lib/query-keys";
+import { openFolder, getConfig, exportData } from "@/lib/api";
+import { useDeleteLiveRecord, useDeleteDownloadTask } from "@/lib/mutations";
 import { useLiveRecordsQuery, useDownloadTasksQuery } from "@/lib/queries";
 import { useTaskStore } from "@/stores/task-store";
 import type { LiveRecord } from "@/lib/tauri-types";
@@ -31,12 +30,13 @@ import type { DownloadTask } from "@/lib/api-types";
 import { formatFileSize } from "@/lib/utils";
 
 export default function DownloadsPage() {
-  const queryClient = useQueryClient();
   const liveRecordsQuery = useLiveRecordsQuery({ limit: 50 });
   const dbTasksQuery = useDownloadTasksQuery({ limit: 100 });
   const liveRecords = liveRecordsQuery.data ?? [];
   const dbTasks = dbTasksQuery.data ?? [];
   const { tasks: liveTasks, connect, clearCompleted, removeTask } = useTaskStore();
+  const deleteLive = useDeleteLiveRecord();
+  const deleteTask = useDeleteDownloadTask();
 
   useEffect(() => {
     connect();
@@ -76,24 +76,16 @@ export default function DownloadsPage() {
     return window.confirm("是否同时删除这条记录对应的本地文件？\n\n取消则只删除记录。");
   };
 
-  const handleDeleteLiveRecord = async (item: LiveRecord) => {
+  const handleDeleteLiveRecord = (item: LiveRecord) => {
     if (!window.confirm("确定删除这条直播录制记录？")) return;
-    try {
-      await deleteLiveRecord(item.id, askDeleteFile(item.file_path));
-      await queryClient.invalidateQueries({ queryKey: queryKeys.liveRecords() });
-    } catch (err) {
-      window.alert(err instanceof Error ? err.message : "删除失败");
-    }
+    deleteLive.mutate({ id: item.id, deleteFile: askDeleteFile(item.file_path) }, {
+      onError: (err) => window.alert(err instanceof Error ? err.message : "删除失败"),
+    });
   };
 
-  const handleRemoveTask = async (taskId: string) => {
+  const handleRemoveTask = (taskId: string) => {
     removeTask(taskId);
-    try {
-      await deleteDownloadTask(taskId);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.downloadTasks() });
-    } catch {
-      // DB 删除失败不影响 UI 移除
-    }
+    deleteTask.mutate(taskId);
   };
 
   // 已完成的任务（用于"已完成" tab）

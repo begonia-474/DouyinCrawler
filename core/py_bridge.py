@@ -64,52 +64,9 @@ def parse_video(url: str) -> dict:
 
 @_safe_call
 def download_video(url: str) -> dict:
-    """下载单个视频"""
-    handler = _get_task_manager().handler
-    result = _run_async(handler.handle_one_video(url))
-    # 下载成功后写入数据库
-    if result.get("success"):
-        from core.db import save_download_record, save_video_info, save_user_info
-        from core.filter import UserProfileFilter
-        from pathlib import Path as P
-        detail = result.get("detail", {})
-        file_path = result.get("path") or (result.get("paths", [None])[0] if result.get("paths") else None)
-        file_size = 0
-        if file_path:
-            try:
-                file_size = P(file_path).stat().st_size
-            except (OSError, ValueError):
-                pass
-        save_download_record(
-            aweme_id=detail.get("aweme_id"),
-            download_type="video",
-            title=detail.get("desc"),
-            author_nickname=detail.get("author_nickname"),
-            author_sec_uid=detail.get("author_sec_uid"),
-            file_path=file_path,
-            file_size=file_size,
-            cover_url=detail.get("cover_url"),
-            status="completed",
-        )
-        if detail.get("aweme_id"):
-            save_video_info(detail)
-        if detail.get("author_sec_uid") is not None:
-            from core import db_bridge
-            if db_bridge.has_user(detail["author_sec_uid"]):
-                logger.info("[py_bridge] 用户 %s 已存在，跳过资料获取", detail["author_sec_uid"][:20])
-            else:
-                # 额外调用用户资料 API 获取完整数据（post_detail 的 author 字段不完整）
-                try:
-                    async def _fetch_profile():
-                        async with handler._make_crawler() as crawler:
-                            return await crawler.fetch_user_profile(detail["author_sec_uid"])
-                    profile_data = _run_async(_fetch_profile())
-                    profile = UserProfileFilter(profile_data)
-                    save_user_info(profile.to_dict())
-                except Exception as e:
-                    logger.warning("[py_bridge] 获取用户资料失败，使用视频详情数据: %s", e)
-                    save_user_info(detail)
-    return result
+    """下载单个视频（业务逻辑委托给 task_manager.download_single_sync）"""
+    tm = _get_task_manager()
+    return tm.download_single_sync(url)
 
 
 @_safe_call
