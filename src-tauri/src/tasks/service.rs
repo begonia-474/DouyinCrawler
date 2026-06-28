@@ -14,7 +14,6 @@
 
 use log::{error, info, warn};
 use serde_json::Value;
-use std::collections::HashSet;
 use uuid::Uuid;
 
 use crate::db::{Database, NewDownloadRecord, NewTaskItem, UserInfo, VideoInfo};
@@ -36,11 +35,10 @@ fn cleaned_json(value: &Value) -> Value {
     value
 }
 
-fn user_sec_uid(value: &Value) -> Option<&str> {
-    value
-        .get("author_sec_uid")
-        .or_else(|| value.get("sec_user_id"))
-        .and_then(|v| v.as_str())
+fn parse_user_info(value: &Value) -> Option<UserInfo> {
+    serde_json::from_value::<UserInfo>(cleaned_json(value))
+        .ok()
+        .filter(|user| !user.sec_user_id.trim().is_empty())
 }
 
 /// 任务应用服务
@@ -133,8 +131,9 @@ impl<'a> TaskApplicationService<'a> {
                     // 反序列化 video_info 和 user_info
                     let video_info: Option<VideoInfo> = detail
                         .and_then(|d| serde_json::from_value(cleaned_json(d)).ok());
-                    let user_info: Option<UserInfo> = detail
-                        .and_then(|d| serde_json::from_value(cleaned_json(d)).ok());
+                    let user_info: Option<UserInfo> = py_result.user_profile.as_ref()
+                        .or(detail)
+                        .and_then(parse_user_info);
 
                     // F2.1: 事务性写入 — 任何一步失败则整体回滚，不发射完成事件
                     if let Err(e) = self.db.complete_single_download(
@@ -360,7 +359,15 @@ impl<'a> TaskApplicationService<'a> {
                     let mut records = Vec::new();
                     let mut videos = Vec::new();
                     let mut users = Vec::new();
-                    let mut seen_users = HashSet::new();
+                    if matches!(mode, DownloadMode::Post | DownloadMode::Mix) {
+                        if let Some(profile) = py_result.user_profile.as_ref() {
+                            if let Some(user_info) = parse_user_info(profile) {
+                                if self.db.get_user_by_sec_uid(&user_info.sec_user_id).ok().flatten().is_none() {
+                                    users.push(user_info);
+                                }
+                            }
+                        }
+                    }
 
                     // 4. 为每个结果创建 task_item + 收集 download_record/video_info/user_info
                     let task_start_time = std::time::SystemTime::now()
@@ -447,16 +454,6 @@ impl<'a> TaskApplicationService<'a> {
                             if d.get("aweme_id").and_then(|v| v.as_str()).is_some() {
                                 if let Ok(video_info) = serde_json::from_value::<crate::db::VideoInfo>(cleaned_json(d)) {
                                     videos.push(video_info);
-                                }
-                            }
-
-                            if let Some(sec_uid) = user_sec_uid(d) {
-                                if seen_users.insert(sec_uid.to_string())
-                                    && self.db.get_user_by_sec_uid(sec_uid).ok().flatten().is_none()
-                                {
-                                    if let Ok(user_info) = serde_json::from_value::<crate::db::UserInfo>(cleaned_json(d)) {
-                                    users.push(user_info);
-                                    }
                                 }
                             }
                         }

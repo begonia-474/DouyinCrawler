@@ -6,7 +6,6 @@ import logging
 
 from core.downloader import format_filename
 from core.filter import UserPostFilter, UserProfileFilter
-from core import db
 from core.utils import (
     SecUserIdFetcher, filter_by_date_interval,
 )
@@ -54,8 +53,8 @@ class UserService(BaseService):
         async with self._make_crawler() as crawler:
             profile_data = await crawler.fetch_user_profile(sec_user_id)
             profile = UserProfileFilter(profile_data)
+            user_profile = profile.to_dict()
             nickname = profile.nickname or "unknown"
-            db.save_user_info(profile.to_dict())
 
             while downloaded < self.max_counts:
                 current_request_size = min(self.page_counts, self.max_counts - downloaded)
@@ -81,7 +80,9 @@ class UserService(BaseService):
         user_dir = self.download_path / self.app_name / "post" / nickname
         user_dir.mkdir(parents=True, exist_ok=True)
 
-        return await self._batch_download(all_details, user_dir)
+        result = await self._batch_download(all_details, user_dir)
+        result["user_profile"] = user_profile
+        return result
 
     # ============================================================
     # 用户点赞 (like)
@@ -121,7 +122,6 @@ class UserService(BaseService):
             profile_data = await crawler.fetch_user_profile(sec_user_id)
             profile = UserProfileFilter(profile_data)
             nickname = profile.nickname or "unknown"
-            db.save_user_info(profile.to_dict())
 
             while downloaded < self.max_counts:
                 current_request_size = min(self.page_counts, self.max_counts - downloaded)

@@ -5,7 +5,7 @@ import random
 import logging
 
 from core.downloader import format_filename
-from core.filter import UserPostFilter
+from core.filter import UserPostFilter, UserProfileFilter
 from core.utils import MixIdFetcher
 
 from core.services.base import BaseService
@@ -45,6 +45,7 @@ class MixService(BaseService):
         downloaded = 0
         cursor = 0
         all_details = []
+        user_profile = None
 
         async with self._make_crawler() as crawler:
             while downloaded < self.max_counts:
@@ -62,6 +63,13 @@ class MixService(BaseService):
                     break
                 cursor = video_filter.max_cursor
                 await asyncio.sleep(self.timeout + random.uniform(-2, 2))
+
+            if all_details and all_details[0].author_sec_uid:
+                try:
+                    profile_data = await crawler.fetch_user_profile(all_details[0].author_sec_uid)
+                    user_profile = UserProfileFilter(profile_data).to_dict()
+                except Exception as e:
+                    logger.warning("[handle_user_mix] 获取合集作者资料失败: %s", e)
 
         mix_name = all_details[0].mix_name if all_details else mix_id
         nickname = all_details[0].author_nickname if all_details else mix_id
@@ -103,4 +111,10 @@ class MixService(BaseService):
             else:
                 results.append({"path": str(item["path"]), "detail": {}})
 
-        return {"success": True, "count": len(results), "results": results, "mix_name": mix_name}
+        return {
+            "success": True,
+            "count": len(results),
+            "results": results,
+            "mix_name": mix_name,
+            "user_profile": user_profile,
+        }

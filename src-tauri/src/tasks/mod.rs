@@ -270,6 +270,8 @@ pub struct PythonDownloadResult {
     pub paths: Option<Vec<String>>,
     #[serde(default)]
     pub detail: Option<serde_json::Value>,
+    #[serde(default)]
+    pub user_profile: Option<serde_json::Value>,
 }
 
 
@@ -290,6 +292,8 @@ pub struct PythonBatchDownloadResult {
     pub error: Option<String>,
     #[serde(default)]
     pub results: Option<Vec<PythonBatchItem>>,
+    #[serde(default)]
+    pub user_profile: Option<serde_json::Value>,
 }
 
 /// Python 音乐批量下载单条结果
