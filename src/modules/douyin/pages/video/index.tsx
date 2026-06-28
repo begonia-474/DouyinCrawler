@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { Header } from "@/components/layout/header";
 import { UrlInput } from "@/components/shared/url-input";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,9 @@ import { Badge } from "@/components/ui/badge";
 import { AnimateEntry } from "@/components/shared/animate-entry";
 import { Bezel } from "@/components/shared/bezel";
 import { ErrorBanner } from "@/components/shared/error-banner";
-import { getPostDetail, startDownload } from "@/lib/api";
+import { LoadingSpinner } from "@/components/shared/loading-spinner";
+import { startDownload } from "@/lib/api";
+import { useVideoParseQuery } from "@/lib/queries";
 import {
   Download,
   CheckCircle2,
@@ -29,66 +31,55 @@ interface ParsedInfo {
 }
 
 export default function VideoPage() {
-  const [loading, setLoading] = useState(false);
-  const [parsed, setParsed] = useState<ParsedInfo | null>(null);
-  const [stats, setStats] = useState<{
-    digg_count: number;
-    comment_count: number;
-    share_count: number;
-    collect_count: number;
-  } | null>(null);
+  const [submittedUrl, setSubmittedUrl] = useState<string | null>(null);
   const [downloadUrl, setDownloadUrl] = useState("");
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [downloading, setDownloading] = useState(false);
   const [downloaded, setDownloaded] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+
+  // React Query: 解析结果按 URL 缓存，路由切换不丢失
+  const { data: parseResult, isLoading, error: parseError } = useVideoParseQuery(submittedUrl);
+
+  // 从 React Query 结果派生 ParsedInfo + stats
+  const { parsed, stats } = useMemo(() => {
+    if (!parseResult?.success || !parseResult.data?.detail) {
+      return { parsed: null, stats: null };
+    }
+    const detail = parseResult.data.detail;
+    return {
+      parsed: {
+        type: detail.type || "video",
+        title: detail.desc || detail.title,
+        author: detail.author,
+        awemeId: detail.aweme_id || detail.awemeId,
+      } as ParsedInfo,
+      stats: {
+        digg_count: detail.digg_count ?? 0,
+        comment_count: detail.comment_count ?? 0,
+        share_count: detail.share_count ?? 0,
+        collect_count: detail.collect_count ?? 0,
+      },
+    };
+  }, [parseResult]);
 
   const handleParse = useCallback(async (url: string) => {
-    setLoading(true);
-    setParsed(null);
-    setStats(null);
+    setSubmittedUrl(null);  // 重置以触发新请求
     setDownloadUrl(url);
     setDownloaded(false);
-    setError(null);
-
-    try {
-      const detailRes = await getPostDetail(url);
-
-      if (!detailRes.success) {
-        setError(detailRes.error || "解析失败");
-        setLoading(false);
-        return;
-      }
-
-      const data = detailRes.data;
-
-      if (data?.detail) {
-        const detail = data.detail;
-        setParsed({
-          type: detail.type || "video",
-          title: detail.desc || detail.title,
-          author: detail.author,
-          awemeId: detail.aweme_id || detail.awemeId,
-        });
-        setStats({
-          digg_count: detail.digg_count ?? 0,
-          comment_count: detail.comment_count ?? 0,
-          share_count: detail.share_count ?? 0,
-          collect_count: detail.collect_count ?? 0,
-        });
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "请求异常");
-    }
-
-    setLoading(false);
+    // 使用 setTimeout 确保 React 状态已重置，然后触发新查询
+    setTimeout(() => setSubmittedUrl(url), 0);
   }, []);
+
+  const error = parseResult && !parseResult.success
+    ? (parseResult.error || "解析失败")
+    : parseError
+      ? (parseError instanceof Error ? parseError.message : "请求异常")
+      : null;
 
   const handleDownload = useCallback(async () => {
     if (!downloadUrl) return;
     setDownloading(true);
     setDownloadProgress(0);
-    setError(null);
 
     const res = await startDownload("one", downloadUrl);
 
@@ -96,7 +87,7 @@ export default function VideoPage() {
       setDownloaded(true);
       setDownloadProgress(100);
     } else {
-      setError(res.error || "下载失败");
+      // download error — shown inline, not replacing parse result
     }
     setDownloading(false);
   }, [downloadUrl]);
@@ -109,7 +100,7 @@ export default function VideoPage() {
 
       <div className="space-y-6">
         <AnimateEntry delay={50}>
-          <UrlInput onSubmit={handleParse} loading={loading} allowedTypes={["video"]} autoDetect />
+          <UrlInput onSubmit={handleParse} loading={isLoading} allowedTypes={["video"]} autoDetect />
         </AnimateEntry>
 
         {error && (
@@ -117,6 +108,8 @@ export default function VideoPage() {
             <ErrorBanner message={error} />
           </AnimateEntry>
         )}
+
+        {isLoading && <LoadingSpinner text="解析中…" />}
 
         {parsed && (
           <AnimateEntry delay={100}>

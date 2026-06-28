@@ -89,8 +89,29 @@ from core.bridge.py_bridge import (
     get_live_status,
 )
 
-# ── 数据模型 ──
-from core.models import ServiceConfig, BaseRequestModel, BaseLiveModel
+# ── 数据模型 (models/) ──
+from core.models import (
+    ServiceConfig, BaseRequestModel, BaseLiveModel,
+    UserProfile, UserPost, UserFavorite, UserCollection,
+    UserCollects, UserCollectsVideo, UserMusicCollection,
+    UserFollowing, UserFollower,
+    PostDetail, PostComment, PostCommentReply, PostRelated,
+    PostSearch, HomePostSearch, SuggestWord,
+    TabFeed, FollowFeed, FriendFeed,
+    UserLive, UserLive2, FollowingUserLive, UserLiveStatus,
+    LiveImFetch, QueryUser, PostLocate, PostStats, UserMix,
+    DownloadMode,
+    ErrorCode, BridgeResponse,
+    VideoParseResult, UserProfileResult, UserPostsResult,
+    LiveInfoResult, MusicCollectionResult, CommentsResult,
+    FollowingListResult, FollowerListResult,
+    CollectsListResult, CollectsVideoListResult,
+    MixInfoResult, SearchResult,
+    TabFeedResult, FollowFeedResult, FriendFeedResult,
+    UserLikesResult, PostStatsResult,
+    DownloadResult, BatchDownloadResult, MusicBatchResult,
+    LiveRecordResult, LiveStatusResult, FollowingLiveResult,
+)
 
 # ── 任务管理 (task/) ──
 from core.task.task_manager import TaskManager, task_manager

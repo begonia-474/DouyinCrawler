@@ -5,11 +5,13 @@ import { queryClient } from "@/lib/query-client";
 export interface UnifiedTask {
   task_id: string;
   task_type: "batch" | "live" | "typed";
+  // TaskEvent 对齐字段（Python / Rust 统一发射）
+  event_type?: "started" | "progress" | "finished";
   // batch/typed 字段
   type?: string;       // download_type: user_post / user_like / mix / collects
   url?: string;
   status: string;      // starting | running | completed | error | recording | stopping
-  mode?: string;       // typed events carry mode
+  mode?: string;       // download mode: one / post / like / mix / collects / live / music
   total?: number;
   completed?: number;
   failed?: number;
@@ -67,6 +69,7 @@ function mergePatch(
 
   // 只覆盖 patch 中明确存在的字段（undefined 跳过）
   const fields: (keyof UnifiedTask)[] = [
+    "event_type",
     "status", "url", "type", "mode",
     "total", "completed", "failed", "skipped", "current_item",
     "title", "nickname", "room_id", "web_rid",
@@ -139,13 +142,15 @@ export const useTaskStore = create<TaskState>((set) => ({
       const taskType = msg.task_type;
       const data = msg.data ?? {};
 
-      // 处理 batch/live 事件（Python 旧路径）
+      // 处理 batch/live 事件（Python 路径，已对齐 event_type 字段）
       if (taskType === "batch" || taskType === "live") {
         const patch = {
           task_id: taskId,
+          event_type: data.event_type as string | undefined,
           status: data.status as string | undefined,
           url: data.url as string | undefined,
           type: data.type as string | undefined,
+          mode: data.mode as string | undefined,
           total: data.total as number | undefined,
           completed: data.completed as number | undefined,
           failed: data.failed as number | undefined,
@@ -173,11 +178,12 @@ export const useTaskStore = create<TaskState>((set) => ({
         }));
       }
 
-      // 处理 typed 事件（Rust 新路径，TaskPatch 通过 serde(flatten) 展开在 data 中）
+      // 处理 typed 事件（Rust 新路径，TaskEvent 通过 serde(flatten) 展开在 data 中）
       if (taskType === "typed") {
-        // TaskPatch 字段直接在 data 顶层（serde(flatten)）
+        // TaskEvent 字段直接在 data 顶层（serde(flatten) + event_type）
         const patch = {
           task_id: taskId,
+          event_type: data.event_type as string | undefined,
           status: data.status as string | undefined,
           url: data.url as string | undefined,
           mode: data.mode as string | undefined,

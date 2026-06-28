@@ -174,6 +174,75 @@ def check_py_download_video():
     print("✓ 前端代码中未发现对 py_download_video 的 invoke 调用")
     return True
 
+def check_redline_shims():
+    """检查 RED LINE 文件的 shim 是否正确（5行 sys.modules 别名模式）"""
+    # Each shim file should reference a specific module path via sys.modules alias
+    shim_files = {
+        "core/crawler.py": "crawler_engine.crawler",
+        "core/filter.py": "crawler_engine.filter",
+        "core/api.py": "crawler_engine.api",
+        "core/py_bridge.py": "bridge.py_bridge",
+        "core/handler.py": "bridge.handler",
+        "core/tauri_bridge.py": "bridge.events",
+        "core/db_bridge.py": "bridge.db_bridge",
+        "core/downloader.py": "download.downloader",
+    }
+
+    violations = []
+    for shim_path, expected_ref in shim_files.items():
+        full_path = PROJECT_ROOT / shim_path
+        if not full_path.exists():
+            violations.append(f"{shim_path} 不存在（应该是 shim 文件）")
+            continue
+
+        content = full_path.read_text(encoding="utf-8")
+        lines = content.strip().split("\n")
+
+        # Shims should be short (≤15 lines) and reference the real module
+        if len(lines) > 15:
+            violations.append(f"{shim_path} shim 过长 ({len(lines)}行)，可能不是 shim")
+        if expected_ref not in content and "import *" not in content:
+            violations.append(f"{shim_path} shim 未引用 {expected_ref}")
+
+    if violations:
+        print("✗ 架构违规：RED LINE shim 文件检查失败")
+        for v in violations:
+            print(f"  - {v}")
+        return False
+
+    print("✓ RED LINE shim 文件正确（所有旧路径均指向新位置）")
+    return True
+
+
+def check_models_split():
+    """检查 models.py 已拆分为 models/ 子包"""
+    models_dir = PROJECT_ROOT / "core" / "models"
+    models_file = PROJECT_ROOT / "core" / "models.py"
+
+    violations = []
+    if not models_dir.is_dir():
+        violations.append("core/models/ 目录不存在")
+    else:
+        required_files = ["__init__.py", "requests.py", "config.py", "download.py", "responses.py"]
+        for f in required_files:
+            if not (models_dir / f).exists():
+                violations.append(f"core/models/{f} 缺失")
+
+    if models_file.exists():
+        content = models_file.read_text(encoding="utf-8")
+        if len(content.split("\n")) > 15:
+            violations.append("core/models.py 仍存在且不是 shim（应该删除或改为短 shim）")
+
+    if violations:
+        print("✗ 架构违规：models 拆分不完整")
+        for v in violations:
+            print(f"  - {v}")
+        return False
+
+    print("✓ models/ 子包结构正确")
+    return True
+
+
 def main():
     """运行所有架构边界检查"""
     print("=" * 60)
@@ -185,6 +254,8 @@ def main():
         ("静默 DB 错误", check_silent_db_errors),
         ("批量下载回退", check_batch_download_fallback),
         ("py_download_video 引用", check_py_download_video),
+        ("RED LINE shim 文件", check_redline_shims),
+        ("models 子包拆分", check_models_split),
     ]
 
     all_passed = True

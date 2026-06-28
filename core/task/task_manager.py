@@ -225,7 +225,7 @@ class TaskManager:
         one/music/post/like/mix/collects 已迁移到 Rust TaskApplicationService，
         此函数仅保留 live 模式的兜底调用。
         """
-        from core.constants import DownloadMode
+        from core.models import DownloadMode
 
         task_id = str(uuid.uuid4())[:8]
         logger.info("[start_download] task_id={}, mode={}", task_id, mode)
@@ -246,14 +246,64 @@ class TaskManager:
     # 事件广播
     # ============================================================
 
+    # 终态状态集合（对齐 Rust TaskStatus）
+    _TERMINAL_STATUSES = {"completed", "error", "cancelled"}
+
+    # 每个 task_id 的已发射次数（用于派生 event_type: started/progress/finished）
+    _task_event_counts: dict[str, int] = {}
+
+    @classmethod
+    def _derive_event_type(cls, task_id: str, status: str) -> str:
+        """派生 event_type（对齐 Rust TaskEventType: started | progress | finished）"""
+        count = cls._task_event_counts.get(task_id, 0)
+        cls._task_event_counts[task_id] = count + 1
+
+        if count == 0:
+            return "started"
+        if status in cls._TERMINAL_STATUSES:
+            # 终态 → finished，清理计数以避免内存泄漏
+            cls._task_event_counts.pop(task_id, None)
+            return "finished"
+        return "progress"
+
     def broadcast_task_update_sync(self, task_id: str, task_data: dict, task_type: str = "unknown"):
-        """广播任务状态更新到前端（通过 Tauri 事件系统，同步版本）"""
+        """广播任务状态更新到前端（通过 Tauri 事件系统，同步版本）
+
+        发射格式对齐 Rust TaskEvent:
+            { event_type, task_id, mode, url, ...patch_fields }
+
+        event_type 派生规则:
+            - 首次发射 → "started"
+            - 中间发射 → "progress"
+            - 终态 status → "finished"
+        """
         try:
             import core.tauri_bridge as tb
             clean_data = {k: v for k, v in task_data.items() if not k.startswith("_")}
+
+            # 派生 event_type（对齐 Rust TaskEventType）
+            status = clean_data.get("status", "")
+            event_type = self._derive_event_type(task_id, status)
+
+            # 构建对齐 Rust TaskEvent 的 payload
+            # mode 从 task_type 映射（batch 事件映射到具体类型，live 事件为 "live"）
+            mode = clean_data.get("mode") or task_type
+            if task_type == "batch" and "mode" not in clean_data:
+                # batch 事件的 type 字段映射到 mode（如 user_post → post）
+                raw_type = clean_data.get("type", "")
+                if raw_type:
+                    mode = raw_type
+
+            # 注入 event_type / mode / url（对齐 TaskEvent 顶层字段）
+            clean_data["event_type"] = event_type
+            if "mode" not in clean_data:
+                clean_data["mode"] = mode
+            if "url" in task_data and "url" not in clean_data:
+                clean_data["url"] = task_data["url"]
+
             emit_func = getattr(tb, '_emit_func', None)
-            logger.info("[broadcast] 广播 task_id={}, task_type={}, status={}, results={}, _emit_func={}",
-                       task_id, task_type, clean_data.get("status"), len(clean_data.get("results", [])),
+            logger.info("[broadcast] 广播 task_id={}, task_type={}, event_type={}, status={}, results={}, _emit_func={}",
+                       task_id, task_type, event_type, status, len(clean_data.get("results", [])),
                        "已注册" if emit_func is not None else "未注册")
             if emit_func is None:
                 logger.error("[broadcast] _emit_func 为 None，无法广播！模块属性: {}", dir(tb))

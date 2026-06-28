@@ -304,3 +304,49 @@ export interface TaskEvent {
   /** 补丁字段（通过 serde(flatten) 展开） */
   patch: TaskPatch;
 }
+
+// ============================================================
+// 错误码（对齐 Rust ErrorCode 枚举）
+// ============================================================
+
+/** 错误码枚举（对齐 Rust ErrorCode） */
+export type ErrorCode =
+  // 网络层
+  | "network_timeout"
+  | "network_error"
+  | "rate_limited"
+  | "proxy_error"
+  // 认证层
+  | "cookie_expired"
+  | "cookie_invalid"
+  | "login_required"
+  // 内容层
+  | "video_not_found"
+  | "user_not_found"
+  | "content_deleted"
+  // 处理层
+  | "signature_error"
+  | "parse_error"
+  // 系统层
+  | "database_error"
+  | "file_system_error"
+  | "config_error"
+  // 未知
+  | "unknown";
+
+/** 错误码分类 */
+export type ErrorCategory = "network" | "auth" | "content" | "processing" | "system" | "unknown";
+
+/** 根据错误码判断是否可重试 */
+export function isRetryable(code: ErrorCode): boolean {
+  const retryable: ErrorCode[] = [
+    "network_timeout", "network_error", "rate_limited", "proxy_error",
+    "signature_error", "database_error", "unknown",
+  ];
+  return retryable.includes(code);
+}
+
+/** 根据错误码判断是否需要跳转设置（Cookie 配置） */
+export function needsSettingsRedirect(code: ErrorCode): boolean {
+  return code === "cookie_expired" || code === "cookie_invalid" || code === "login_required";
+}

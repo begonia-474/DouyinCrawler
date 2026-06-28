@@ -21,4 +21,5 @@ export const queryKeys = {
   downloadTaskDetail: (taskId: string) => ["download-task-detail", taskId] as const,
   downloadTaskItems: (taskId: string, status?: string) => ["download-task-items", taskId, status] as const,
   downloadTaskItemCounts: (taskId: string) => ["download-task-item-counts", taskId] as const,
+  videoParse: (url: string) => ["video-parse", url] as const,
 };

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { getDownloadStats, getDownloads, getLiveRecordCount, getLiveRecords, getMusicCollectionCountFromDB, getMusicCollectionFromDB, getUserCount, getUserStats, getUsers, getVideoCount, getVideos, getVideoStats, getDownloadTasks, getDownloadTaskDetail, getDownloadTaskItems, getDownloadTaskItemCounts, getDownloadTrend, getTopAuthors, getStorageAnalysis, dbHealthCheck } from "@/lib/api";
+import { getDownloadStats, getDownloads, getLiveRecordCount, getLiveRecords, getMusicCollectionCountFromDB, getMusicCollectionFromDB, getUserCount, getUserStats, getUsers, getVideoCount, getVideos, getVideoStats, getDownloadTasks, getDownloadTaskDetail, getDownloadTaskItems, getDownloadTaskItemCounts, getDownloadTrend, getTopAuthors, getStorageAnalysis, dbHealthCheck, getPostDetail } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 
 export function useDownloadsQuery(params: {
@@ -169,5 +169,15 @@ export function useDbHealthQuery() {
   return useQuery({
     queryKey: queryKeys.dbHealth(),
     queryFn: () => dbHealthCheck(),
+  });
+}
+
+/** 视频解析（React Query 缓存，按 URL 去重） */
+export function useVideoParseQuery(url: string | null) {
+  return useQuery({
+    queryKey: queryKeys.videoParse(url ?? ""),
+    queryFn: () => getPostDetail(url!),
+    enabled: !!url,
+    staleTime: 5 * 60 * 1000, // 5 分钟内不重新请求
   });
 }

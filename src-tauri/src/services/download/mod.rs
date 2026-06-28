@@ -3,9 +3,11 @@
 //! - `mod.rs`（本文件）：类型化 DTO 定义
 //! - `task_service.rs`：TaskApplicationService — 任务生命周期管理
 //! - `events.rs`：类型化事件发射
+//! - `python_adapter.rs`：PythonDownloadAdapter — 封装 GIL 管理
 
 pub mod events;
 pub mod task_service;
+pub mod python_adapter;
 
 use serde::{Deserialize, Serialize};
 
