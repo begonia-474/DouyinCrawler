@@ -10,6 +10,7 @@ import { useMusicCollectionQuery } from "@/lib/queries";
 import { queryKeys } from "@/lib/query-keys";
 import type { MusicItem } from "@/lib/api-types";
 import { Loader2, Download, Music, CheckCircle2, RefreshCw } from "lucide-react";
+import { DownloadAllButton } from "@/components/shared/download-all-button";
 import { ErrorBanner } from "@/components/shared/error-banner";
 import { useAsyncAction } from "@/hooks/use-async-action";
 import { formatDurationMs } from "@/lib/utils";
@@ -102,10 +103,14 @@ export default function MusicPage() {
       <AnimateEntry>
         <Header title="我的音乐" description="当前账号的音乐收藏">
           {musicList.length > 0 && (
-            <Button variant="capsule" size="sm" onClick={handleDownloadAll}>
-              <Download className="h-4 w-4 mr-1" />
-              全部下载
-            </Button>
+            <DownloadAllButton
+              downloading={false}
+              downloadedCount={0}
+              total={musicList.length}
+              onClick={handleDownloadAll}
+              variant="capsule"
+              size="sm"
+            />
           )}
           <Button variant="capsule" size="sm" onClick={fetchFromApi} disabled={fetching}>
             {fetching ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1" />}

@@ -154,16 +154,6 @@ impl PythonBridge {
         })
     }
 
-    /// 调用 Python 函数并返回 JSON Value（使用 py_to_json_value）
-    /// Phase 7: 保留供未来扩展使用
-    #[allow(dead_code)]
-    pub fn call_json(&self, module: &str, method: &str, args: impl IntoPy<Py<PyTuple>>) -> PyResult<Value> {
-        Python::with_gil(|py| {
-            let module = py.import_bound(module)?;
-            let result = module.call_method1(method, args)?;
-            py_to_json_value(&result)
-        })
-    }
 }
 
 // 线程安全：PythonBridge 可以在多线程中使用

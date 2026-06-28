@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from "react";
+import { useMergedTasks } from "@/hooks/use-merged-tasks";
 import { Header } from "@/components/layout/header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -26,7 +27,6 @@ import { useDeleteLiveRecord, useDeleteDownloadTask } from "@/lib/mutations";
 import { useLiveRecordsQuery, useDownloadTasksQuery } from "@/lib/queries";
 import { useTaskStore } from "@/stores/task-store";
 import type { LiveRecord } from "@/lib/tauri-types";
-import type { DownloadTask } from "@/lib/api-types";
 import { formatFileSize } from "@/lib/utils";
 
 export default function DownloadsPage() {
@@ -91,59 +91,7 @@ export default function DownloadsPage() {
   // 已完成的任务（用于"已完成" tab）
   const completedTasks = dbTasks.filter((t) => t.status === "completed" || t.status === "error");
 
-  // 合并 DB 任务和实时任务：实时状态覆盖 DB 数据
-  const mergedTasks = useMemo(() => {
-    const taskMap = new Map<string, DownloadTask>();
-
-    // 先放入 DB 任务
-    for (const task of dbTasks) {
-      taskMap.set(task.id, task);
-    }
-
-    // 实时任务覆盖或补充
-    for (const live of Object.values(liveTasks)) {
-      const existing = taskMap.get(live.task_id);
-      if (existing) {
-        // 覆盖实时字段
-        taskMap.set(live.task_id, {
-          ...existing,
-          status: (live.status as DownloadTask["status"]) ?? existing.status,
-          total: live.total ?? existing.total,
-          completed: live.completed ?? existing.completed,
-          failed: live.failed ?? existing.failed,
-          error_msg: live.error ?? existing.error_msg,
-        });
-      } else {
-        // 实时任务不在 DB 中（刚启动还没写入），创建临时条目
-        taskMap.set(live.task_id, {
-          id: live.task_id,
-          mode: (live.type as DownloadTask["mode"]) ?? "one",
-          url: live.url ?? "",
-          title: live.title ?? live.nickname ?? null,
-          author_nickname: live.nickname ?? null,
-          status: (live.status as DownloadTask["status"]) ?? "running",
-          total: live.total ?? 0,
-          completed: live.completed ?? 0,
-          skipped: 0,
-          failed: live.failed ?? 0,
-          error_msg: live.error ?? null,
-          created_at: 0,
-          updated_at: 0,
-        });
-      }
-    }
-
-    // 按创建时间倒序（最新在前），实时任务（created_at=0）排最前面
-    return Array.from(taskMap.values()).sort((a, b) => b.created_at - a.created_at || b.id.localeCompare(a.id));
-  }, [dbTasks, liveTasks]);
-
-  const runningCount = mergedTasks.filter(
-    (t) => t.status === "running" || t.status === "starting" || t.status === "recording" || t.status === "stopping"
-  ).length;
-
-  const hasCompletedTasks = mergedTasks.some(
-    (t) => t.status === "completed" || t.status === "error"
-  );
+  const { mergedTasks, runningCount, hasCompletedTasks } = useMergedTasks(dbTasks, liveTasks);
 
   return (
     <>

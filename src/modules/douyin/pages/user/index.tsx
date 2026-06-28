@@ -17,11 +17,14 @@ import { useTaskStore } from "@/stores/task-store";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import type { UserProfile as UserProfileType, VideoItem, FollowItem } from "@/lib/api-types";
 import {
-  Download, Users, Heart, Video, Loader2,
-  UserPlus, UserCheck, ThumbsUp,
+  Users, Heart, Video, UserPlus,
+  UserCheck, ThumbsUp,
 } from "lucide-react";
+import { DownloadAllButton } from "@/components/shared/download-all-button";
+import { DownloadProgressOverlay } from "@/components/shared/download-progress-overlay";
+import { InfiniteScrollSentinel } from "@/components/shared/infinite-scroll-sentinel";
+import { LoadingSpinner } from "@/components/shared/loading-spinner";
 import { ErrorBanner } from "@/components/shared/error-banner";
-import { Progress } from "@/components/ui/progress";
 import { formatCount, formatDurationSec } from "@/lib/utils";
 
 function FollowItemCard({ item, type }: { item: FollowItem; type: "following" | "follower" }) {
@@ -132,10 +135,12 @@ export default function UserPage() {
       <AnimateEntry>
         <Header title="用户主页" description="查看用户资料和作品" parent={{ label: "首页", path: "/douyin" }}>
           {profile && (
-            <Button onClick={handleDownloadAll} disabled={downloading}>
-              {downloading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
-              {downloading ? `下载中 ${downloadedCount}/${videos.length}` : "全部下载"}
-            </Button>
+            <DownloadAllButton
+              downloading={downloading}
+              downloadedCount={downloadedCount}
+              total={videos.length}
+              onClick={handleDownloadAll}
+            />
           )}
         </Header>
       </AnimateEntry>
@@ -145,21 +150,14 @@ export default function UserPage() {
 
         <ErrorBanner message={error} />
 
-        {loading && (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-          </div>
-        )}
+        {loading && <LoadingSpinner size={24} className="py-16" />}
 
         {downloading && (
-          <Bezel radius="xl">
-            <div className="p-5">
-              <div className="space-y-1">
-                <Progress value={downloadProgress} />
-                <p className="text-xs text-muted-foreground tracking-wide text-right">{downloadedCount} / {videos.length}</p>
-              </div>
-            </div>
-          </Bezel>
+          <DownloadProgressOverlay
+            progress={downloadProgress}
+            current={downloadedCount}
+            total={videos.length}
+          />
         )}
 
         {profile && !loading && (
@@ -224,16 +222,13 @@ export default function UserPage() {
                     />
                   ))}
                 </div>
-                {/* 无限滚动 sentinel */}
-                <div ref={sentinelRef} className="h-4" />
-                {loadingMore && (
-                  <div className="flex justify-center py-4">
-                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                  </div>
-                )}
-                {!hasMore && videos.length > 0 && (
-                  <p className="text-center text-xs text-muted-foreground py-4">已加载全部 {videos.length} 个作品</p>
-                )}
+                <InfiniteScrollSentinel
+                  sentinelRef={sentinelRef}
+                  loadingMore={loadingMore}
+                  hasMore={hasMore}
+                  total={videos.length}
+                  label="作品"
+                />
               </TabsContent>
 
               <TabsContent value="following" className="mt-6 space-y-2">

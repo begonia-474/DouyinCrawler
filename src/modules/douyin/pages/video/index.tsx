@@ -6,11 +6,11 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { AnimateEntry } from "@/components/shared/animate-entry";
 import { Bezel } from "@/components/shared/bezel";
+import { ErrorBanner } from "@/components/shared/error-banner";
 import { getPostDetail, startDownload } from "@/lib/api";
 import {
   Download,
   CheckCircle2,
-  AlertCircle,
   ThumbsUp,
   MessageSquare,
   Share2,
@@ -114,10 +114,7 @@ export default function VideoPage() {
 
         {error && (
           <AnimateEntry>
-            <div className="flex items-center gap-2.5 p-4 rounded-2xl bg-destructive/[0.06] ring-1 ring-destructive/20 text-destructive text-sm">
-              <AlertCircle className="h-4 w-4 shrink-0" />
-              <span>{error}</span>
-            </div>
+            <ErrorBanner message={error} />
           </AnimateEntry>
         )}
 

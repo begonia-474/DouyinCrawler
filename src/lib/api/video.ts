@@ -1,11 +1,11 @@
-import type { ApiResponse, PostDetailResponse } from "../api-types";
+import type { ApiResponse, VideoParseResult } from "../api-types";
 import { pyCall } from "./core";
 
 // ============================================================
 // 视频解析
 // ============================================================
 
-export async function getPostDetail(url: string): Promise<ApiResponse<PostDetailResponse>> {
+export async function getPostDetail(url: string): Promise<ApiResponse<VideoParseResult>> {
   return pyCall("py_parse_video", { url });
 }
 

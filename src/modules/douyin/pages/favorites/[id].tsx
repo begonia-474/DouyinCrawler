@@ -5,13 +5,16 @@ import { VideoCard } from "@/components/shared/video-card";
 import { Button } from "@/components/ui/button";
 import { Bezel } from "@/components/shared/bezel";
 import { DownloadStatusCard } from "@/components/shared/download-status-card";
+import { DownloadAllButton } from "@/components/shared/download-all-button";
+import { DownloadProgressOverlay } from "@/components/shared/download-progress-overlay";
+import { InfiniteScrollSentinel } from "@/components/shared/infinite-scroll-sentinel";
+import { LoadingSpinner } from "@/components/shared/loading-spinner";
 import { getCollectsVideoList, downloadCollectsVideo } from "@/lib/api";
 import { useTaskStore } from "@/stores/task-store";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import type { VideoItem } from "@/lib/api-types";
-import { Loader2, Download, ArrowLeft } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { ErrorBanner } from "@/components/shared/error-banner";
-import { Progress } from "@/components/ui/progress";
 import { formatDurationSec } from "@/lib/utils";
 
 export default function CollectsDetailPage() {
@@ -73,10 +76,13 @@ export default function CollectsDetailPage() {
             返回
           </Button>
           {videos.length > 0 && (
-            <Button size="sm" onClick={handleDownloadAll} disabled={downloading}>
-              {downloading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Download className="h-4 w-4 mr-1" />}
-              {downloading ? `下载中 ${downloadedCount}/${videos.length}` : "全部下载"}
-            </Button>
+            <DownloadAllButton
+              downloading={downloading}
+              downloadedCount={downloadedCount}
+              total={videos.length}
+              onClick={handleDownloadAll}
+              size="sm"
+            />
           )}
         </div>
       </Header>
@@ -85,21 +91,14 @@ export default function CollectsDetailPage() {
         <ErrorBanner message={error} />
 
         {downloading && (
-          <Bezel radius="xl">
-            <div className="p-5">
-              <div className="space-y-1">
-                <Progress value={downloadProgress} />
-                <p className="text-xs text-muted-foreground text-right">{downloadedCount} / {videos.length}</p>
-              </div>
-            </div>
-          </Bezel>
+          <DownloadProgressOverlay
+            progress={downloadProgress}
+            current={downloadedCount}
+            total={videos.length}
+          />
         )}
 
-        {initialLoading && (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-          </div>
-        )}
+        {initialLoading && <LoadingSpinner />}
 
         {!initialLoading && videos.length === 0 && !error && (
           <Bezel radius="xl">
@@ -124,16 +123,13 @@ export default function CollectsDetailPage() {
                 />
               ))}
             </div>
-            {/* 无限滚动 sentinel */}
-            <div ref={sentinelRef} className="h-4" />
-            {loadingMore && (
-              <div className="flex justify-center py-4">
-                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-              </div>
-            )}
-            {!hasMore && videos.length > 0 && (
-              <p className="text-center text-xs text-muted-foreground py-4">已加载全部 {videos.length} 个视频</p>
-            )}
+            <InfiniteScrollSentinel
+              sentinelRef={sentinelRef}
+              loadingMore={loadingMore}
+              hasMore={hasMore}
+              total={videos.length}
+              label="视频"
+            />
           </>
         )}
       </div>

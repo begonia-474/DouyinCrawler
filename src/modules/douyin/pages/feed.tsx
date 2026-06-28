@@ -5,9 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AnimateEntry } from "@/components/shared/animate-entry";
 import { Bezel } from "@/components/shared/bezel";
+import { ErrorBanner } from "@/components/shared/error-banner";
 import { getTabFeed, getFollowFeed, getFriendFeed } from "@/lib/api";
 import type { VideoItem } from "@/lib/api-types";
-import { RefreshCw, Loader2, Rss, AlertCircle } from "lucide-react";
+import { RefreshCw, Loader2, Rss } from "lucide-react";
 
 export default function FeedPage() {
   const [loading, setLoading] = useState(false);
@@ -88,12 +89,7 @@ export default function FeedPage() {
         <Header title="Feed" description="推荐、关注、朋友动态" />
       </AnimateEntry>
 
-      {error && (
-        <div className="flex items-center gap-2.5 p-4 rounded-2xl bg-destructive/[0.06] ring-1 ring-destructive/20 text-destructive text-sm mb-6">
-          <AlertCircle className="h-4 w-4 shrink-0" />
-          <span>{error}</span>
-        </div>
-      )}
+      <ErrorBanner message={error} className="mb-6" />
 
       <Tabs defaultValue="tab">
         <TabsList>

@@ -12,8 +12,8 @@ import json
 import uuid
 import asyncio
 from pathlib import Path
-from backend.logger import get_logger, setup_logging
-from backend.live_manager import LiveRecordManager
+from core.logger import get_logger, setup_logging
+from core.task.live_manager import LiveRecordManager
 from core.handler import DouyinHandler
 
 # 确保日志系统初始化（PyO3 路径不会经过 server.py）
@@ -62,42 +62,6 @@ class TaskManager:
         """Phase 6: 已废弃，由 Rust ConfigManager 管理配置文件。保留方法签名避免调用方报错。"""
         logger.debug("[_save_config] 已废弃，配置由 Rust 管理")
         return
-
-    def _save_config_legacy(self):
-        """旧的保存逻辑（已废弃）"""
-        try:
-            existing_config = {}
-            if CONFIG_PATH.exists():
-                existing_config = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-
-            existing_config["douyin"] = {
-                "cookie": self._cookie,
-                "download_path": self._download_path,
-                "naming": self._naming,
-                "encryption": self._encryption,
-                "proxy": self._proxy,
-                "app_name": self._app_name,
-                "folderize": self._folderize,
-                "music": self._music,
-                "cover": self._cover,
-                "desc": self._desc,
-                "interval": self._interval,
-                "page_counts": self._page_counts,
-                "max_counts": self._max_counts,
-                "timeout": self._timeout,
-                "max_connections": self._max_connections,
-                "max_retries": self._max_retries,
-                "max_tasks": self._max_tasks,
-            }
-
-            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-            CONFIG_PATH.write_text(
-                json.dumps(existing_config, ensure_ascii=False, indent=2),
-                encoding="utf-8"
-            )
-            logger.info("已保存配置: {}", CONFIG_PATH)
-        except Exception as e:
-            logger.error("保存配置失败: {}", e)
 
     def update_config(self, cookie: str = None, download_path: str = None,
                       naming: str = None, encryption: str = None, proxy: str = None,

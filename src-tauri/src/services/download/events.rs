@@ -42,13 +42,6 @@ pub fn emit_started(task_id: &str, mode: DownloadMode, url: &str) {
     emit_task_event(&event);
 }
 
-/// 发射任务进度事件
-/// Phase 7: 保留供未来逐项进度事件使用
-#[allow(dead_code)]
-pub fn emit_progress(patch: TaskPatch) {
-    let event = TaskEvent::progress(patch);
-    emit_task_event(&event);
-}
 
 /// 发射任务完成事件
 pub fn emit_finished(patch: TaskPatch) {

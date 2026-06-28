@@ -1,8 +1,11 @@
 mod db;
+mod database;
 mod python;
 mod config;
 mod commands;
-mod tasks;
+mod services;
+mod state;
+mod error;
 
 use config::{AppConfig, ConfigManager};
 use python::PythonBridge;
@@ -249,7 +252,7 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-fn resolve_db_path(_app: &tauri::App) -> PathBuf {
+fn resolve_db_path(app: &tauri::App) -> PathBuf {
     // 生产模式优先使用 app_data_dir，开发模式使用项目相对路径
     #[cfg(not(debug_assertions))]
     {

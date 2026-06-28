@@ -21,7 +21,7 @@ use crate::python;
 
 use super::{
     DownloadMode, DownloadRequest, PythonBatchDownloadResult, PythonDownloadResult,
-    PythonMusicBatchResult, TaskPatch, TaskSnapshot, TaskStatus,
+    PythonMusicBatchResult, TaskPatch, TaskStatus,
 };
 use super::events;
 
@@ -536,43 +536,4 @@ impl<'a> TaskApplicationService<'a> {
             .map_err(|e| format!("Python 返回值解析失败: {}", e))
     }
 
-    /// 调用 Python 视频解析（不下载，仅获取元数据）
-    /// Phase 7: 保留供未来 API 使用
-    #[allow(dead_code)]
-    pub fn call_python_parse(&self, url: &str) -> Result<PythonDownloadResult, String> {
-        let json_value = python::handler::parse_video(url)
-            .map_err(|e| format!("Python 调用失败: {}", e))?;
-
-        serde_json::from_value::<PythonDownloadResult>(json_value)
-            .map_err(|e| format!("Python 返回值解析失败: {}", e))
-    }
-
-    /// 从 DB 读取任务快照
-    /// Phase 7: 保留供未来 API 使用
-    #[allow(dead_code)]
-    pub fn get_task_snapshot(&self, task_id: &str) -> Result<Option<TaskSnapshot>, String> {
-        match self.db.get_task_by_id(task_id) {
-            Ok(Some(task)) => {
-                let mode = DownloadMode::from_str(&task.mode).unwrap_or(DownloadMode::One);
-                let status = TaskStatus::from_str(&task.status).unwrap_or(TaskStatus::Error);
-                Ok(Some(TaskSnapshot {
-                    id: task.id,
-                    mode,
-                    url: task.url,
-                    title: task.title,
-                    author_nickname: task.author_nickname,
-                    status,
-                    total: task.total,
-                    completed: task.completed,
-                    skipped: task.skipped,
-                    failed: task.failed,
-                    error_msg: task.error_msg,
-                    created_at: task.created_at,
-                    updated_at: task.updated_at,
-                }))
-            }
-            Ok(None) => Ok(None),
-            Err(e) => Err(format!("查询任务失败: {}", e)),
-        }
-    }
 }

@@ -167,11 +167,6 @@ impl ConfigManager {
         self.config.douyin.clone().unwrap_or_default()
     }
 
-    /// 获取 tiktok 配置
-    #[allow(dead_code)]
-    pub fn get_tiktok_config(&self) -> AppConfig {
-        self.config.tiktok.clone().unwrap_or_default()
-    }
 
     /// 更新 douyin 配置
     pub fn update_douyin_config(&mut self, updates: &HashMap<String, String>) -> Result<(), String> {

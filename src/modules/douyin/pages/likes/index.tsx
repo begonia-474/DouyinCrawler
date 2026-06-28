@@ -3,16 +3,17 @@ import { Header } from "@/components/layout/header";
 import { AnimateEntry } from "@/components/shared/animate-entry";
 import { UrlInput } from "@/components/shared/url-input";
 import { VideoCard } from "@/components/shared/video-card";
-import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Bezel } from "@/components/shared/bezel";
+import { DownloadAllButton } from "@/components/shared/download-all-button";
+import { DownloadProgressOverlay } from "@/components/shared/download-progress-overlay";
+import { InfiniteScrollSentinel } from "@/components/shared/infinite-scroll-sentinel";
+import { LoadingSpinner } from "@/components/shared/loading-spinner";
+import { ErrorBanner } from "@/components/shared/error-banner";
 import { getUserProfile, getUserLikes, downloadUserLikes } from "@/lib/api";
 import { useTaskStore } from "@/stores/task-store";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import type { UserProfile as UserProfileType, VideoItem } from "@/lib/api-types";
-import { Loader2, Download } from "lucide-react";
-import { ErrorBanner } from "@/components/shared/error-banner";
-import { Progress } from "@/components/ui/progress";
 import { formatDurationSec } from "@/lib/utils";
 
 export default function LikesPage() {
@@ -92,10 +93,14 @@ export default function LikesPage() {
       <AnimateEntry>
         <Header title="用户点赞" description="查看用户的点赞列表" parent={{ label: "首页", path: "/douyin" }}>
           {likes.length > 0 && (
-            <Button variant="capsule" size="sm" onClick={handleDownloadAll} disabled={downloading}>
-              {downloading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Download className="h-4 w-4 mr-1" />}
-              {downloading ? `下载中 ${downloadedCount}/${likes.length}` : "全部下载"}
-            </Button>
+            <DownloadAllButton
+              downloading={downloading}
+              downloadedCount={downloadedCount}
+              total={likes.length}
+              onClick={handleDownloadAll}
+              variant="capsule"
+              size="sm"
+            />
           )}
         </Header>
       </AnimateEntry>
@@ -105,21 +110,10 @@ export default function LikesPage() {
 
         <ErrorBanner message={error} />
 
-        {loading && (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-          </div>
-        )}
+        {loading && <LoadingSpinner size={24} />}
 
         {downloading && (
-          <Bezel radius="xl">
-            <div className="p-5">
-              <div className="space-y-1">
-                <Progress value={downloadProgress} />
-                <p className="text-xs text-muted-foreground tracking-wide text-right">{downloadedCount} / {likes.length}</p>
-              </div>
-            </div>
-          </Bezel>
+          <DownloadProgressOverlay progress={downloadProgress} current={downloadedCount} total={likes.length} />
         )}
 
         {profile && !loading && (
@@ -152,16 +146,13 @@ export default function LikesPage() {
                 />
               ))}
             </div>
-            {/* 无限滚动 sentinel */}
-            <div ref={sentinelRef} className="h-4" />
-            {loadingMore && (
-              <div className="flex justify-center py-4">
-                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-              </div>
-            )}
-            {!hasMore && likes.length > 0 && (
-              <p className="text-center text-xs text-muted-foreground py-4">已加载全部 {likes.length} 个点赞</p>
-            )}
+            <InfiniteScrollSentinel
+              sentinelRef={sentinelRef}
+              loadingMore={loadingMore}
+              hasMore={hasMore}
+              total={likes.length}
+              label="点赞"
+            />
           </>
         )}
       </div>

@@ -36,6 +36,78 @@ export interface VideoItem {
   create_time?: number;
 }
 
+// ============================================================
+// 领域特定响应类型（拆分自 PostDetailResponse）
+// ============================================================
+
+export interface VideoParseResult {
+  detail?: PostDetail;
+  path?: string;
+  paths?: string[];
+}
+
+export interface UserProfileResult {
+  profile?: UserProfile;
+}
+
+export interface UserPostsResult {
+  videos?: VideoItem[];
+  has_more?: boolean;
+  cursor?: number;
+  next_cursor?: number;
+}
+
+export interface MixInfoResult {
+  videos?: VideoItem[];
+  has_more?: boolean;
+  cursor?: number;
+  next_cursor?: number;
+  detail?: { desc?: string };
+}
+
+export interface CommentsResult {
+  comments?: CommentItem[];
+  has_more?: boolean;
+  cursor?: number;
+}
+
+export interface FollowingListResult {
+  followings?: FollowItem[];
+  has_more?: boolean;
+  cursor?: number;
+}
+
+export interface FollowerListResult {
+  followers?: FollowItem[];
+  has_more?: boolean;
+  cursor?: number;
+}
+
+export interface CollectsListResult {
+  collects?: CollectsFolder[];
+}
+
+export interface MusicCollectionResult {
+  music_list?: MusicItem[];
+  has_more?: boolean;
+  cursor?: number;
+}
+
+export interface TabFeedResult {
+  videos?: VideoItem[];
+  has_more?: boolean;
+  cursor?: number;
+  next_cursor?: number;
+}
+
+export interface SearchResult {
+  videos?: VideoItem[];
+  has_more?: boolean;
+  cursor?: number;
+  count?: number;
+}
+
+/** @deprecated 使用领域特定类型替代，保留用于向后兼容 */
 export interface PostDetailResponse {
   success?: boolean;
   type?: string;

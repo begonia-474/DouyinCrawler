@@ -9,8 +9,8 @@ use serde_json::Value;
 use tauri::State;
 
 use crate::db::Database;
-use crate::tasks::service::TaskApplicationService;
-use crate::tasks::{DownloadMode, DownloadRequest};
+use crate::services::download::task_service::TaskApplicationService;
+use crate::services::download::{DownloadMode, DownloadRequest};
 
 /// 统一下载入口（Rust-owned）
 ///

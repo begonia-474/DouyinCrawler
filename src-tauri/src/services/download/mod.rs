@@ -1,11 +1,11 @@
-//! 任务系统
+//! 下载服务
 //!
 //! - `mod.rs`（本文件）：类型化 DTO 定义
-//! - `service.rs`：TaskApplicationService — 任务生命周期管理
+//! - `task_service.rs`：TaskApplicationService — 任务生命周期管理
 //! - `events.rs`：类型化事件发射
 
 pub mod events;
-pub mod service;
+pub mod task_service;
 
 use serde::{Deserialize, Serialize};
 
@@ -79,7 +79,6 @@ pub enum TaskStatus {
     Cancelled,
 }
 
-#[allow(dead_code)]
 impl TaskStatus {
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
@@ -114,32 +113,6 @@ impl TaskStatus {
     }
 }
 
-/// 任务子项状态枚举（对齐 DB download_task_items.status）
-/// Phase 7: 保留供未来扩展使用
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TaskItemStatus {
-    Pending,
-    Downloading,
-    Completed,
-    Skipped,
-    Failed,
-}
-
-#[allow(dead_code)]
-impl TaskItemStatus {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Downloading => "downloading",
-            Self::Completed => "completed",
-            Self::Skipped => "skipped",
-            Self::Failed => "failed",
-        }
-    }
-}
-
 // ============================================================
 // 下载请求（前端 → Rust）
 // ============================================================
@@ -154,53 +127,6 @@ pub struct DownloadRequest {
 // ============================================================
 // 任务快照（DB → 前端）
 // ============================================================
-
-/// 任务快照（从 DB 读取的完整任务状态，用于前端展示）
-/// Phase 7: 保留供未来 API 使用
-#[allow(dead_code)]
-#[derive(Debug, Clone, Serialize)]
-pub struct TaskSnapshot {
-    pub id: String,
-    pub mode: DownloadMode,
-    pub url: String,
-    pub title: Option<String>,
-    pub author_nickname: Option<String>,
-    pub status: TaskStatus,
-    pub total: i64,
-    pub completed: i64,
-    pub skipped: i64,
-    pub failed: i64,
-    pub error_msg: Option<String>,
-    pub created_at: i64,
-    pub updated_at: i64,
-}
-
-/// 任务子项快照
-/// Phase 7: 保留供未来 API 使用
-#[allow(dead_code)]
-#[derive(Debug, Clone, Serialize)]
-pub struct TaskItemSnapshot {
-    pub id: i64,
-    pub task_id: String,
-    pub aweme_id: Option<String>,
-    pub title: Option<String>,
-    pub author_nickname: Option<String>,
-    pub cover_url: Option<String>,
-    pub file_path: Option<String>,
-    pub file_size: i64,
-    pub status: TaskItemStatus,
-    pub error_msg: Option<String>,
-    pub created_at: i64,
-}
-
-/// 任务详情（任务 + 子项列表）
-/// Phase 7: 保留供未来 API 使用
-#[allow(dead_code)]
-#[derive(Debug, Clone, Serialize)]
-pub struct TaskDetail {
-    pub task: TaskSnapshot,
-    pub items: Vec<TaskItemSnapshot>,
-}
 
 // ============================================================
 // 任务补丁（事件 → 前端 store 合并）

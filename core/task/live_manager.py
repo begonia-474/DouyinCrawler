@@ -4,7 +4,7 @@ import asyncio
 import uuid
 import threading
 from typing import Callable
-from backend.logger import get_logger
+from core.logger import get_logger
 from core import db
 
 logger = get_logger(__name__)

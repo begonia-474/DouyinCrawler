@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ApiResponse, PostDetailResponse, DownloadResult, DownloadMode } from "../api-types";
+import type { ApiResponse, MixInfoResult, DownloadResult, DownloadMode } from "../api-types";
 import { wrap, pyCall, type BackendResponse } from "./core";
 
 // ============================================================
@@ -44,7 +44,7 @@ export const downloadCollectsVideo = (collectsId: string) => startBatchDownload(
 // 合集信息
 // ============================================================
 
-export async function getMixInfo(url: string, cursor: number = 0, count: number = 20): Promise<ApiResponse<PostDetailResponse>> {
+export async function getMixInfo(url: string, cursor: number = 0, count: number = 20): Promise<ApiResponse<MixInfoResult>> {
   return pyCall("py_get_mix_info", { url, cursor, count });
 }
 

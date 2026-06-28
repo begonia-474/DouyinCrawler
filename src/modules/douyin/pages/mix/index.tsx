@@ -4,9 +4,11 @@ import { AnimateEntry } from "@/components/shared/animate-entry";
 import { UrlInput } from "@/components/shared/url-input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
 import { Bezel } from "@/components/shared/bezel";
 import { DownloadStatusCard } from "@/components/shared/download-status-card";
+import { DownloadAllButton } from "@/components/shared/download-all-button";
+import { DownloadProgressOverlay } from "@/components/shared/download-progress-overlay";
+import { InfiniteScrollSentinel } from "@/components/shared/infinite-scroll-sentinel";
 import { getMixInfo, downloadMix } from "@/lib/api";
 import { useTaskStore } from "@/stores/task-store";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
@@ -14,7 +16,6 @@ import type { VideoItem } from "@/lib/api-types";
 import {
   Download,
   Layers,
-  Loader2,
   CheckCircle2,
   ListVideo,
 } from "lucide-react";
@@ -92,10 +93,12 @@ export default function MixPage() {
       <AnimateEntry>
         <Header title="合集" description="下载整个合集/播放列表" parent={{ label: "首页", path: "/douyin" }}>
           {videos.length > 0 && (
-            <Button onClick={handleDownloadAll} disabled={downloading}>
-              {downloading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
-              {downloading ? `下载中 ${downloadedCount}/${videos.length}` : "全部下载"}
-            </Button>
+            <DownloadAllButton
+              downloading={downloading}
+              downloadedCount={downloadedCount}
+              total={videos.length}
+              onClick={handleDownloadAll}
+            />
           )}
         </Header>
       </AnimateEntry>
@@ -123,10 +126,12 @@ export default function MixPage() {
                     <Badge variant="secondary" className="rounded-full"><ListVideo className="h-3 w-3 mr-1" />合集</Badge>
                   </div>
                   {downloading && (
-                    <div className="mt-5 space-y-1">
-                      <Progress value={downloadProgress} />
-                      <p className="text-xs text-muted-foreground tracking-wide text-right">{downloadedCount} / {videos.length}</p>
-                    </div>
+                    <DownloadProgressOverlay
+                      progress={downloadProgress}
+                      current={downloadedCount}
+                      total={videos.length}
+                      className="mt-5"
+                    />
                   )}
                 </div>
               </Bezel>
@@ -162,16 +167,13 @@ export default function MixPage() {
                 </AnimateEntry>
               ))}
             </div>
-            {/* 无限滚动 sentinel */}
-            <div ref={sentinelRef} className="h-4" />
-            {loadingMore && (
-              <div className="flex justify-center py-4">
-                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-              </div>
-            )}
-            {!hasMore && videos.length > 0 && (
-              <p className="text-center text-xs text-muted-foreground py-4">已加载全部 {videos.length} 个视频</p>
-            )}
+            <InfiniteScrollSentinel
+              sentinelRef={sentinelRef}
+              loadingMore={loadingMore}
+              hasMore={hasMore}
+              total={videos.length}
+              label="视频"
+            />
           </>
         )}
       </div>
