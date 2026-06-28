@@ -273,28 +273,13 @@ pub struct PythonDownloadResult {
 }
 
 
-/// Python 批量下载单条结果中的 detail 字段
-#[derive(Debug, Clone, Deserialize)]
-pub struct PythonBatchItemDetail {
-    #[serde(default)]
-    pub aweme_id: Option<String>,
-    #[serde(default)]
-    pub desc: Option<String>,
-    #[serde(default)]
-    pub author_nickname: Option<String>,
-    #[serde(default)]
-    pub author_sec_uid: Option<String>,
-    #[serde(default)]
-    pub cover_url: Option<String>,
-}
-
 /// Python 批量下载单条结果
 #[derive(Debug, Clone, Deserialize)]
 pub struct PythonBatchItem {
     #[serde(default)]
     pub path: Option<String>,
     #[serde(default)]
-    pub detail: Option<PythonBatchItemDetail>,
+    pub detail: Option<serde_json::Value>,
 }
 
 /// Python 批量下载结果（新路径，不写 task DB 表）

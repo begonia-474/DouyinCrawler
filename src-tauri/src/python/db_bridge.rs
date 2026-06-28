@@ -23,7 +23,7 @@ use log::{info, warn};
 /// Python 的 bool 是 int 子类，json.dumps 输出 true/false，
 /// 但 Rust 的 i32/i64 无法直接反序列化 JSON bool。
 /// 此函数在 serde_json::from_value 前统一处理。
-fn bool_to_int(v: &mut Value) {
+pub(crate) fn bool_to_int(v: &mut Value) {
     match v {
         Value::Bool(b) => *v = Value::Number(serde_json::Number::from(if *b { 1i64 } else { 0i64 })),
         Value::Array(arr) => arr.iter_mut().for_each(bool_to_int),

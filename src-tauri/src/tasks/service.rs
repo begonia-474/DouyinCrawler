@@ -13,6 +13,8 @@
 //! Follow-up F1.1: 所有关键 DB 写入使用显式错误处理，不再静默忽略
 
 use log::{error, info, warn};
+use serde_json::Value;
+use std::collections::HashSet;
 use uuid::Uuid;
 
 use crate::db::{Database, NewDownloadRecord, NewTaskItem, UserInfo, VideoInfo};
@@ -23,6 +25,23 @@ use super::{
     PythonMusicBatchResult, TaskPatch, TaskSnapshot, TaskStatus,
 };
 use super::events;
+
+fn json_str(value: Option<&Value>, key: &str) -> Option<String> {
+    value.and_then(|v| v.get(key)).and_then(|v| v.as_str()).map(|s| s.to_string())
+}
+
+fn cleaned_json(value: &Value) -> Value {
+    let mut value = value.clone();
+    crate::python::db_bridge::bool_to_int(&mut value);
+    value
+}
+
+fn user_sec_uid(value: &Value) -> Option<&str> {
+    value
+        .get("author_sec_uid")
+        .or_else(|| value.get("sec_user_id"))
+        .and_then(|v| v.as_str())
+}
 
 /// 任务应用服务
 ///
@@ -113,9 +132,9 @@ impl<'a> TaskApplicationService<'a> {
 
                     // 反序列化 video_info 和 user_info
                     let video_info: Option<VideoInfo> = detail
-                        .and_then(|d| serde_json::from_value(d.clone()).ok());
+                        .and_then(|d| serde_json::from_value(cleaned_json(d)).ok());
                     let user_info: Option<UserInfo> = detail
-                        .and_then(|d| serde_json::from_value(d.clone()).ok());
+                        .and_then(|d| serde_json::from_value(cleaned_json(d)).ok());
 
                     // F2.1: 事务性写入 — 任何一步失败则整体回滚，不发射完成事件
                     if let Err(e) = self.db.complete_single_download(
@@ -341,6 +360,7 @@ impl<'a> TaskApplicationService<'a> {
                     let mut records = Vec::new();
                     let mut videos = Vec::new();
                     let mut users = Vec::new();
+                    let mut seen_users = HashSet::new();
 
                     // 4. 为每个结果创建 task_item + 收集 download_record/video_info/user_info
                     let task_start_time = std::time::SystemTime::now()
@@ -351,7 +371,8 @@ impl<'a> TaskApplicationService<'a> {
                     for item in &items {
                         let detail = item.detail.as_ref();
                         let aweme_id = detail
-                            .and_then(|d| d.aweme_id.as_deref())
+                            .and_then(|d| d.get("aweme_id"))
+                            .and_then(|v| v.as_str())
                             .unwrap_or("unknown");
                         let file_path = item.path.as_deref();
 
@@ -359,9 +380,9 @@ impl<'a> TaskApplicationService<'a> {
                         let new_item = NewTaskItem {
                             task_id: task_id.clone(),
                             aweme_id: Some(aweme_id.to_string()),
-                            title: detail.and_then(|d| d.desc.clone()),
-                            author_nickname: detail.and_then(|d| d.author_nickname.clone()),
-                            cover_url: detail.and_then(|d| d.cover_url.clone()),
+                            title: json_str(detail, "desc"),
+                            author_nickname: json_str(detail, "author_nickname"),
+                            cover_url: json_str(detail, "cover_url"),
                         };
                         if let Err(e) = self.db.create_task_item(&new_item) {
                             error!("[TaskService] 创建批量任务子项失败: task_id={}, error={}", task_id, e);
@@ -409,43 +430,33 @@ impl<'a> TaskApplicationService<'a> {
                             _ => "batch",
                         };
                         records.push(NewDownloadRecord {
-                            aweme_id: detail.and_then(|d| d.aweme_id.clone()),
+                            aweme_id: json_str(detail, "aweme_id"),
                             download_type: download_type.to_string(),
-                            title: detail.and_then(|d| d.desc.clone()),
-                            author_nickname: detail.and_then(|d| d.author_nickname.clone()),
-                            author_sec_uid: detail.and_then(|d| d.author_sec_uid.clone()),
+                            title: json_str(detail, "desc"),
+                            author_nickname: json_str(detail, "author_nickname"),
+                            author_sec_uid: json_str(detail, "author_sec_uid"),
                             file_path: file_path.map(|s| s.to_string()),
                             file_size,
-                            cover_url: detail.and_then(|d| d.cover_url.clone()),
+                            cover_url: json_str(detail, "cover_url"),
                             status: "completed".to_string(),
                             error_msg: None,
                         });
 
-                        // 收集 video_info（从 detail 中提取可用字段）
+                        // 收集完整 video_info/user_info，保持旧 Python db_bridge 的 JSON 清洗语义。
                         if let Some(d) = detail {
-                            if let Some(aweme_id_str) = &d.aweme_id {
-                                // 使用 serde_json 创建 VideoInfo，缺失字段使用默认值
-                                let video_json = serde_json::json!({
-                                    "aweme_id": aweme_id_str,
-                                    "desc": d.desc,
-                                    "author_nickname": d.author_nickname,
-                                    "author_sec_uid": d.author_sec_uid,
-                                    "cover_url": d.cover_url,
-                                });
-                                if let Ok(video_info) = serde_json::from_value::<crate::db::VideoInfo>(video_json) {
+                            if d.get("aweme_id").and_then(|v| v.as_str()).is_some() {
+                                if let Ok(video_info) = serde_json::from_value::<crate::db::VideoInfo>(cleaned_json(d)) {
                                     videos.push(video_info);
                                 }
                             }
 
-                            // 收集 user_info（从 detail 中提取可用字段）
-                            if let Some(sec_uid) = &d.author_sec_uid {
-                                // 使用 serde_json 创建 UserInfo，缺失字段使用默认值
-                                let user_json = serde_json::json!({
-                                    "sec_user_id": sec_uid,
-                                    "nickname": d.author_nickname,
-                                });
-                                if let Ok(user_info) = serde_json::from_value::<crate::db::UserInfo>(user_json) {
+                            if let Some(sec_uid) = user_sec_uid(d) {
+                                if seen_users.insert(sec_uid.to_string())
+                                    && self.db.get_user_by_sec_uid(sec_uid).ok().flatten().is_none()
+                                {
+                                    if let Ok(user_info) = serde_json::from_value::<crate::db::UserInfo>(cleaned_json(d)) {
                                     users.push(user_info);
+                                    }
                                 }
                             }
                         }
