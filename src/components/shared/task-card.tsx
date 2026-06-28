@@ -40,6 +40,30 @@ const modeIcons: Record<string, typeof Video> = {
   music: Music,
 };
 
+/** 状态 → 显示文本（未知状态不显示为"失败"） */
+const statusLabels: Record<string, string> = {
+  pending: "等待中",
+  starting: "启动中",
+  running: "下载中",
+  recording: "录制中",
+  stopping: "停止中",
+  completed: "已完成",
+  error: "失败",
+  cancelled: "已取消",
+};
+
+/** 状态 → Badge variant */
+const statusVariants: Record<string, "default" | "destructive" | "secondary"> = {
+  pending: "secondary",
+  starting: "secondary",
+  running: "secondary",
+  recording: "secondary",
+  stopping: "secondary",
+  completed: "default",
+  error: "destructive",
+  cancelled: "secondary",
+};
+
 interface TaskCardProps {
   task: DownloadTask;
   liveState?: UnifiedTask;   // 实时状态覆盖
@@ -130,17 +154,10 @@ export function TaskCard({ task, liveState, onRemove }: TaskCardProps) {
 
               {/* 状态 Badge */}
               <Badge
-                variant={
-                  status === "completed" ? "default" :
-                  status === "error" ? "destructive" :
-                  "secondary"
-                }
+                variant={statusVariants[status] ?? "secondary"}
                 className="text-[11px] rounded-full"
               >
-                {isRunning
-                  ? status === "recording" ? "录制中" : status === "stopping" ? "停止中" : "下载中"
-                  : status === "completed" ? "已完成"
-                  : "失败"}
+                {statusLabels[status] ?? status}
               </Badge>
 
               {/* 删除按钮 */}

@@ -1,66 +1,45 @@
-"""日志配置 — 基于 loguru，自动捕获 stdlib logging 输出"""
+"""日志配置 — 基于标准库 logging"""
 
 import sys
+import logging
 from pathlib import Path
-from loguru import logger
 
 LOG_DIR = Path(__file__).parent / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 
-# 移除 loguru 默认 handler
-logger.remove()
-
-LOG_FORMAT = (
-    "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
-    "<level>{level: <7}</level> | "
-    "<cyan>{name}</cyan> | "
-    "<level>{message}</level>"
-)
-
-# 控制台输出
-logger.add(sys.stdout, format=LOG_FORMAT, level="INFO", colorize=True)
-
-# 文件输出 — 按级别分文件，自动轮转
-logger.add(
-    LOG_DIR / "app.log",
-    format=LOG_FORMAT,
-    level="INFO",
-    rotation="10 MB",
-    retention="7 days",
-    encoding="utf-8",
-)
-logger.add(
-    LOG_DIR / "error.log",
-    format=LOG_FORMAT,
-    level="ERROR",
-    rotation="10 MB",
-    retention="30 days",
-    encoding="utf-8",
-)
-
-# 拦截 stdlib logging — core/ 模块的 logging.getLogger(__name__) 输出也会被 loguru 接管
-import logging
-
-
-class InterceptHandler(logging.Handler):
-    """将 stdlib logging 转发到 loguru"""
-
-    def emit(self, record: logging.LogRecord) -> None:
-        try:
-            level = logger.level(record.levelname).name
-        except ValueError:
-            level = record.levelno
-        logger.opt(depth=6, exception=record.exc_info).log(level, record.getMessage())
+LOG_FORMAT = "%(asctime)s | %(levelname)-7s | %(name)s | %(message)s"
+DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
 def setup_logging(level: int = logging.INFO):
-    """配置全局日志，拦截 stdlib logging"""
+    """配置全局日志"""
     root = logging.getLogger()
     root.handlers.clear()
     root.setLevel(level)
-    root.addHandler(InterceptHandler())
+
+    # 控制台输出
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(level)
+    console_handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=DATE_FORMAT))
+    root.addHandler(console_handler)
+
+    # 文件输出 — app.log
+    file_handler = logging.FileHandler(
+        LOG_DIR / "app.log", encoding="utf-8"
+    )
+    file_handler.setLevel(level)
+    file_handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=DATE_FORMAT))
+    root.addHandler(file_handler)
+
+    # 文件输出 — error.log
+    error_handler = logging.FileHandler(
+        LOG_DIR / "error.log", encoding="utf-8"
+    )
+    error_handler.setLevel(logging.ERROR)
+    error_handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=DATE_FORMAT))
+    root.addHandler(error_handler)
 
 
 def get_logger(name: str):
-    """兼容接口 — 直接返回 loguru logger"""
-    return logger
+    """获取 logger 实例"""
+    return logging.getLogger(name)

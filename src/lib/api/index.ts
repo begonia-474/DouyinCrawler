@@ -7,7 +7,7 @@ export type { AppConfig } from "./config";
 
 export { getPostDetail, getPostStats } from "./video";
 
-export { downloadOne, startBatchDownload, startDownload, downloadUserPosts, downloadUserLikes, downloadMix, downloadCollectsVideo, getMixInfo } from "./download";
+export { startBatchDownload, startDownload, downloadUserPosts, downloadUserLikes, downloadMix, downloadCollectsVideo, getMixInfo } from "./download";
 
 export { getDownloadTasks, getDownloadTaskDetail, getDownloadTaskItems, getDownloadTaskItemCounts, deleteDownloadTask } from "./download-task";
 

@@ -64,9 +64,14 @@ def parse_video(url: str) -> dict:
 
 @_safe_call
 def download_video(url: str) -> dict:
-    """下载单个视频（业务逻辑委托给 task_manager.download_single_sync）"""
-    tm = _get_task_manager()
-    return tm.download_single_sync(url)
+    """下载单个视频（仅下载，不写 DB，返回结果供 Rust 事务性完成）
+
+    F2.1: 不再调用 download_single_sync，DB 写入由 Rust TaskApplicationService 负责。
+    """
+    import asyncio
+    handler = _get_task_manager().handler
+    result = asyncio.run(handler.handle_one_video(url))
+    return result
 
 
 @_safe_call
@@ -80,12 +85,35 @@ def get_live_info(url: str) -> dict:
 
 
 @_safe_call
-def start_batch_download(url: str, download_type: str) -> dict:
-    """开始批量下载（通过 task_manager 管理，支持状态追踪）"""
-    logger.info("[py_bridge] start_batch_download 调用, type=%s, url=%s", download_type, url[:80])
-    task_id = _get_task_manager().start_batch_download(url, download_type)
-    logger.info("[py_bridge] 批量下载已启动, task_id=%s", task_id)
-    return {"success": True, "task_id": task_id, "message": "批量下载已启动"}
+def download_batch(mode: str, url: str) -> dict:
+    """批量下载（不写 task DB 表，返回结果供 Rust 处理）
+
+    Args:
+        mode: 下载模式 (post/like/mix/collects)
+        url: 目标 URL
+
+    Returns:
+        {"success": True, "count": N, "results": [{path, detail: {aweme_id, desc, author_nickname, ...}}, ...]}
+    """
+    import asyncio
+    handler = _get_task_manager().handler
+
+    logger.info("[py_bridge] download_batch 调用, mode=%s, url=%s", mode, url[:80])
+
+    if mode == "post":
+        result = asyncio.run(handler.handle_user_post(url))
+    elif mode == "like":
+        result = asyncio.run(handler.handle_user_like(url))
+    elif mode == "mix":
+        result = asyncio.run(handler.handle_user_mix(url))
+    elif mode == "collects":
+        result = asyncio.run(handler.handle_collects_video(url))
+    else:
+        return {"success": False, "error": f"未知的批量下载模式: {mode}"}
+
+    logger.info("[py_bridge] download_batch 返回: success=%s, count=%s",
+                result.get("success"), result.get("count"))
+    return result
 
 
 @_safe_call
@@ -161,6 +189,66 @@ def get_music_collection(cursor: int = 0, count: int = 18) -> dict:
     """获取音乐收藏"""
     handler = _get_task_manager().handler
     return _run_async(handler.handle_user_music_collection(cursor, count))
+
+
+@_safe_call
+def download_music_batch(url: str) -> dict:
+    """下载全部音乐（不写 task DB 表，返回结果供 Rust 处理）
+
+    Returns:
+        {"success": True, "music_list": [...], "results": [{music_id, title, author, path, file_size, success, error}, ...]}
+    """
+    import os
+    handler = _get_task_manager().handler
+
+    # 1. 获取音乐列表
+    collection = _run_async(handler.handle_user_music_collection())
+    if not collection.get("success"):
+        return {"success": False, "error": collection.get("error", "获取音乐列表失败")}
+
+    music_list = collection.get("music_list", [])
+    results = []
+
+    # 2. 逐首下载
+    for music in music_list:
+        music_id = music.get("music_id", "")
+        title = music.get("title", "")
+        author = music.get("author", "")
+        play_url = music.get("play_url", "")
+
+        try:
+            dl_result = _run_async(handler.handle_download_music(play_url, title, author))
+            file_path = dl_result.get("path", "") if dl_result.get("success") else ""
+            file_size = 0
+            if file_path:
+                try:
+                    file_size = os.path.getsize(file_path)
+                except OSError:
+                    pass
+            results.append({
+                "music_id": music_id,
+                "title": title,
+                "author": author,
+                "play_url": play_url,
+                "path": file_path,
+                "file_size": file_size,
+                "success": dl_result.get("success", False),
+                "error": dl_result.get("error", ""),
+            })
+        except Exception as e:
+            logger.error("[download_music_batch] 单曲下载失败: %s", e)
+            results.append({
+                "music_id": music_id,
+                "title": title,
+                "author": author,
+                "play_url": play_url,
+                "path": "",
+                "file_size": 0,
+                "success": False,
+                "error": str(e),
+            })
+
+    return {"success": True, "music_list": music_list, "results": results}
 
 
 @_safe_call

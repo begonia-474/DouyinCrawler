@@ -1164,6 +1164,7 @@ impl Database {
         }
     }
 
+    #[allow(dead_code)]
     pub fn get_videos_by_author(
         &self,
         author_sec_uid: &str,
@@ -2051,6 +2052,175 @@ impl Database {
                  WHERE id = ?1",
                 rusqlite::params![task_id, now],
             )?;
+            Ok(())
+        })
+    }
+
+    /// 原子操作：完成一个下载项的全部持久化（单次事务）
+    ///
+    /// 事务覆盖：
+    /// 1. 更新任务子项状态 (download_task_items)
+    /// 2. 保存下载记录 (download_history)
+    /// 3. 保存视频信息 (video_info) — 可选
+    /// 4. 保存用户信息 (user_info) — 可选，仅当用户不存在时
+    /// 5. 重新计算任务计数 (download_tasks)
+    ///
+    /// 任何一步失败，整个事务回滚。
+    /// Phase 7: 保留供未来全链路事务使用
+    #[allow(dead_code)]
+    pub fn complete_download_transactional(
+        &self,
+        task_id: &str,
+        aweme_id: &str,
+        item_status: &str,
+        file_path: Option<&str>,
+        file_size: i64,
+        error_msg: Option<&str>,
+        download_record: Option<&NewDownloadRecord>,
+        video_info: Option<&VideoInfo>,
+        user_info: Option<&UserInfo>,
+    ) -> Result<()> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        self.with_transaction(|tx| {
+            // 1. 更新任务子项状态
+            tx.execute(
+                "UPDATE download_task_items SET status = ?1, file_path = COALESCE(?2, file_path), \
+                 file_size = CASE WHEN ?3 > 0 THEN ?3 ELSE file_size END, \
+                 error_msg = ?4 \
+                 WHERE task_id = ?5 AND aweme_id = ?6",
+                rusqlite::params![item_status, file_path, file_size, error_msg, task_id, aweme_id],
+            )?;
+
+            // 2. 保存下载记录
+            if let Some(record) = download_record {
+                Self::save_download_inner(tx, record)?;
+            }
+
+            // 3. 保存视频信息
+            if let Some(video) = video_info {
+                Self::save_video_inner(tx, video)?;
+            }
+
+            // 4. 保存用户信息（仅当用户不存在时）
+            if let Some(user) = user_info {
+                let sec_uid = &user.sec_user_id;
+                if !sec_uid.is_empty() {
+                    let exists: bool = tx.query_row(
+                        "SELECT COUNT(*) > 0 FROM user_info WHERE sec_user_id = ?1",
+                        rusqlite::params![sec_uid],
+                        |row| row.get(0),
+                    )?;
+                    if !exists {
+                        Self::save_user_inner(tx, user)?;
+                    }
+                }
+            }
+
+            // 5. 重新计算任务计数
+            tx.execute(
+                "UPDATE download_tasks SET \
+                 completed = (SELECT COUNT(*) FROM download_task_items WHERE task_id = ?1 AND status = 'completed'), \
+                 skipped = (SELECT COUNT(*) FROM download_task_items WHERE task_id = ?1 AND status = 'skipped'), \
+                 failed = (SELECT COUNT(*) FROM download_task_items WHERE task_id = ?1 AND status = 'failed'), \
+                 total = (SELECT COUNT(*) FROM download_task_items WHERE task_id = ?1), \
+                 updated_at = ?2 \
+                 WHERE id = ?1",
+                rusqlite::params![task_id, now],
+            )?;
+
+            Ok(())
+        })
+    }
+
+    /// 原子操作：完成单视频下载的全部持久化（单次事务）
+    ///
+    /// F2.1: 替代 service.rs 中多个独立 DB 写入，保证原子性。
+    /// 事务覆盖：
+    /// 1. 创建任务子项 (download_task_items INSERT)
+    /// 2. 更新任务子项状态为 completed
+    /// 3. 保存下载记录 (download_history)
+    /// 4. 保存视频信息 (video_info)
+    /// 5. 保存用户信息 (user_info) — 仅当用户不存在时
+    /// 6. 更新任务计数 (download_tasks)
+    /// 7. 更新任务状态为 completed (download_tasks)
+    ///
+    /// 任何一步失败，整个事务回滚。
+    pub fn complete_single_download(
+        &self,
+        task_id: &str,
+        item: &NewTaskItem,
+        file_path: Option<&str>,
+        file_size: i64,
+        download_record: &NewDownloadRecord,
+        video_info: Option<&VideoInfo>,
+        user_info: Option<&UserInfo>,
+    ) -> Result<()> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        self.with_transaction(|tx| {
+            // 1. 创建任务子项
+            tx.execute(
+                "INSERT INTO download_task_items (task_id, aweme_id, title, author_nickname, cover_url, created_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![item.task_id, item.aweme_id, item.title, item.author_nickname, item.cover_url, now],
+            )?;
+
+            // 2. 更新任务子项状态为 completed
+            let aweme_id = item.aweme_id.as_deref().unwrap_or("unknown");
+            tx.execute(
+                "UPDATE download_task_items SET status = 'completed', file_path = ?1, file_size = ?2 \
+                 WHERE task_id = ?3 AND aweme_id = ?4",
+                rusqlite::params![file_path, file_size, task_id, aweme_id],
+            )?;
+
+            // 3. 保存下载记录
+            Self::save_download_inner(tx, download_record)?;
+
+            // 4. 保存视频信息
+            if let Some(video) = video_info {
+                Self::save_video_inner(tx, video)?;
+            }
+
+            // 5. 保存用户信息（仅当用户不存在时）
+            if let Some(user) = user_info {
+                let sec_uid = &user.sec_user_id;
+                if !sec_uid.is_empty() {
+                    let exists: bool = tx.query_row(
+                        "SELECT COUNT(*) > 0 FROM user_info WHERE sec_user_id = ?1",
+                        rusqlite::params![sec_uid],
+                        |row| row.get(0),
+                    )?;
+                    if !exists {
+                        Self::save_user_inner(tx, user)?;
+                    }
+                }
+            }
+
+            // 6. 更新任务计数
+            tx.execute(
+                "UPDATE download_tasks SET \
+                 completed = (SELECT COUNT(*) FROM download_task_items WHERE task_id = ?1 AND status = 'completed'), \
+                 skipped = (SELECT COUNT(*) FROM download_task_items WHERE task_id = ?1 AND status = 'skipped'), \
+                 failed = (SELECT COUNT(*) FROM download_task_items WHERE task_id = ?1 AND status = 'failed'), \
+                 total = (SELECT COUNT(*) FROM download_task_items WHERE task_id = ?1), \
+                 updated_at = ?2 \
+                 WHERE id = ?1",
+                rusqlite::params![task_id, now],
+            )?;
+
+            // 7. 更新任务状态为 completed
+            tx.execute(
+                "UPDATE download_tasks SET status = 'completed', updated_at = ?1 WHERE id = ?2",
+                rusqlite::params![now, task_id],
+            )?;
+
             Ok(())
         })
     }

@@ -3,7 +3,9 @@
 职责拆分：
 - TaskManager（本文件）：配置管理 + Handler 生命周期 + 事件广播（门面）
 - LiveRecordManager（live_manager.py）：直播录制任务管理
-- BatchManager（batch_manager.py）：批量下载任务管理
+
+注：批量下载（BatchManager）已迁移到 Rust TaskApplicationService，
+    batch_manager.py 保留为废弃代码。
 """
 
 import json
@@ -12,7 +14,6 @@ import asyncio
 from pathlib import Path
 from backend.logger import get_logger, setup_logging
 from backend.live_manager import LiveRecordManager
-from backend.batch_manager import BatchManager
 from core.handler import DouyinHandler
 
 # 确保日志系统初始化（PyO3 路径不会经过 server.py）
@@ -47,7 +48,6 @@ class TaskManager:
         self._max_tasks: int = 10
         self._handler: DouyinHandler | None = None
         self._live_mgr = LiveRecordManager()
-        self._batch_mgr = BatchManager()
         self._load_config()
 
     # ============================================================
@@ -55,42 +55,16 @@ class TaskManager:
     # ============================================================
 
     def _load_config(self):
-        """从 config/app.json 加载配置"""
-        if CONFIG_PATH.exists():
-            try:
-                data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-                douyin_config = data.get("douyin", {})
-                self._cookie = douyin_config.get("cookie", "")
-                logger.info("[_load_config] 已加载 cookie (len={})", len(self._cookie))
-                if '\n' in self._cookie or '\r' in self._cookie:
-                    logger.warning("[_load_config] cookie 中包含换行符! \\n={}, \\r={}, 正在清理...",
-                                   self._cookie.count('\n'), self._cookie.count('\r'))
-                    self._cookie = " ".join(self._cookie.split())
-                    logger.info("[_load_config] cookie 已清理换行符 (len={})", len(self._cookie))
-                self._download_path = douyin_config.get("download_path", "Download")
-                self._naming = douyin_config.get("naming", "{create}_{desc}")
-                self._encryption = douyin_config.get("encryption", "ab")
-                self._proxy = douyin_config.get("proxy", "")
-                self._app_name = douyin_config.get("app_name", "douyin")
-                self._folderize = douyin_config.get("folderize", False)
-                self._music = douyin_config.get("music", False)
-                self._cover = douyin_config.get("cover", False)
-                self._desc = douyin_config.get("desc", False)
-                self._interval = douyin_config.get("interval", None)
-                self._page_counts = douyin_config.get("page_counts", 20)
-                self._max_counts = douyin_config.get("max_counts", 0)
-                self._timeout = douyin_config.get("timeout", 5)
-                self._max_connections = douyin_config.get("max_connections", 5)
-                self._max_retries = douyin_config.get("max_retries", 5)
-                self._max_tasks = douyin_config.get("max_tasks", 10)
-                logger.info("已加载配置: {}", CONFIG_PATH)
-            except Exception as e:
-                logger.error("加载配置失败: {}", e)
-        else:
-            logger.warning("配置文件不存在: {}", CONFIG_PATH)
+        """Phase 6: 不再直接读取 config/app.json，由 Rust init_config() 推送配置。"""
+        logger.info("[_load_config] 跳过文件读取，等待 Rust 推送配置")
 
     def _save_config(self):
-        """保存配置到 config/app.json"""
+        """Phase 6: 已废弃，由 Rust ConfigManager 管理配置文件。保留方法签名避免调用方报错。"""
+        logger.debug("[_save_config] 已废弃，配置由 Rust 管理")
+        return
+
+    def _save_config_legacy(self):
+        """旧的保存逻辑（已废弃）"""
         try:
             existing_config = {}
             if CONFIG_PATH.exists():
@@ -173,8 +147,7 @@ class TaskManager:
         if max_tasks is not None:
             self._max_tasks = max_tasks
         self._handler = None  # 重建 handler
-        if save:
-            self._save_config()
+        # Phase 6: 不再由 Python 写入 config/app.json，由 Rust ConfigManager 管理
 
     @property
     def is_configured(self) -> bool:
@@ -279,220 +252,31 @@ class TaskManager:
         return self._live_mgr.get_live_status()
 
     # ============================================================
-    # 批量下载（委托给 BatchManager）
-    # ============================================================
-
-    def start_batch_download(self, url: str, download_type: str) -> str:
-        """启动批量下载任务，返回 task_id"""
-        return self._batch_mgr.start_batch_download(url, download_type, self.handler, self.broadcast_task_update_sync)
-
-    def get_batch_status(self) -> dict[str, dict]:
-        """获取所有批量下载任务状态"""
-        return self._batch_mgr.get_batch_status()
-
-    # ============================================================
     # 统一下载入口（mode 调度）
     # ============================================================
 
     def start_download(self, mode: str, url: str) -> str:
-        """统一下载入口，根据 mode 分发到对应 handler，返回 task_id"""
+        """统一下载入口（Phase 7: 仅 live 模式仍走此路径，其他模式已迁移到 Rust）
+
+        one/music/post/like/mix/collects 已迁移到 Rust TaskApplicationService，
+        此函数仅保留 live 模式的兜底调用。
+        """
         from core.constants import DownloadMode
-        from core import db
 
         task_id = str(uuid.uuid4())[:8]
+        logger.info("[start_download] task_id={}, mode={}", task_id, mode)
 
-        # 在 DB 创建任务记录
-        db.create_task(task_id, mode, url)
-        logger.info("[start_download] 任务已创建 task_id={}, mode={}", task_id, mode)
-
-        if mode == DownloadMode.ONE:
-            self._run_single_download(task_id, url)
-        elif mode in (DownloadMode.POST, DownloadMode.LIKE, DownloadMode.MIX, DownloadMode.COLLECTS):
-            self._run_batch_download(task_id, mode, url)
-        elif mode == DownloadMode.LIVE:
+        if mode == DownloadMode.LIVE:
             self._run_live_record(task_id, url)
-        elif mode == DownloadMode.MUSIC:
-            self._run_music_download(task_id, url)
         else:
-            db.update_task_status(task_id, "error", f"未知的下载模式: {mode}")
-            logger.error("[start_download] 未知的下载模式: {}", mode)
+            logger.error("[start_download] mode={} 已迁移到 Rust TaskApplicationService，不应走此路径", mode)
+            return ""
 
         return task_id
-
-    def _run_single_download(self, task_id: str, url: str):
-        """单视频下载（后台线程）"""
-        import threading
-
-        def _run():
-            try:
-                result = self.handler.handle_one_video(url)
-                if result.get("success"):
-                    from core import db
-                    detail = result.get("detail", {})
-                    file_path = result.get("path") or (result.get("paths", [None])[0] if result.get("paths") else None)
-                    aweme_id = detail.get("aweme_id", "")
-                    db.create_task_item(task_id, aweme_id=aweme_id, title=detail.get("desc"),
-                                        author_nickname=detail.get("author_nickname"))
-                    file_size = 0
-                    if file_path:
-                        from pathlib import Path
-                        try:
-                            file_size = Path(file_path).stat().st_size
-                        except (OSError, ValueError):
-                            pass
-                    db.update_task_item_status(task_id, aweme_id, "completed", file_path, file_size)
-                    db.update_task_status(task_id, "completed")
-                    self.broadcast_task_update_sync(task_id, {
-                        "task_id": task_id, "mode": "one", "status": "completed",
-                        "total": 1, "completed": 1, "skipped": 0, "failed": 0,
-                    }, "batch")
-                else:
-                    from core import db
-                    db.update_task_status(task_id, "error", result.get("error", "下载失败"))
-                    self.broadcast_task_update_sync(task_id, {
-                        "task_id": task_id, "mode": "one", "status": "error",
-                        "error": result.get("error"),
-                    }, "batch")
-            except Exception as e:
-                from core import db
-                db.update_task_status(task_id, "error", str(e))
-                logger.error("[_run_single_download] 异常: {}", e, exc_info=True)
-
-        thread = threading.Thread(target=_run, daemon=True)
-        thread.start()
-
-    def download_single_sync(self, url: str) -> dict:
-        """同步下载单个视频并保存记录到数据库（供 py_bridge.download_video 调用）
-
-        业务流程：
-        1. 调用 handler 下载视频
-        2. 保存下载记录到 download_history
-        3. 保存视频信息到 video_info
-        4. 获取并保存用户信息到 user_info（如不存在）
-        """
-        import asyncio
-        from pathlib import Path as P
-
-        result = asyncio.run(self.handler.handle_one_video(url))
-        if not result.get("success"):
-            return result
-
-        from core.db import save_download_record, save_video_info, save_user_info
-        from core.filter import UserProfileFilter
-
-        detail = result.get("detail", {})
-        file_path = result.get("path") or (result.get("paths", [None])[0] if result.get("paths") else None)
-        file_size = 0
-        if file_path:
-            try:
-                file_size = P(file_path).stat().st_size
-            except (OSError, ValueError):
-                pass
-
-        save_download_record(
-            aweme_id=detail.get("aweme_id"),
-            download_type="video",
-            title=detail.get("desc"),
-            author_nickname=detail.get("author_nickname"),
-            author_sec_uid=detail.get("author_sec_uid"),
-            file_path=file_path,
-            file_size=file_size,
-            cover_url=detail.get("cover_url"),
-            status="completed",
-        )
-        if detail.get("aweme_id"):
-            save_video_info(detail)
-        if detail.get("author_sec_uid") is not None:
-            from core import db_bridge
-            if db_bridge.has_user(detail["author_sec_uid"]):
-                logger.info("[download_single_sync] 用户 {} 已存在，跳过", detail["author_sec_uid"][:20])
-            else:
-                try:
-                    async def _fetch_profile():
-                        async with self.handler._make_crawler() as crawler:
-                            return await crawler.fetch_user_profile(detail["author_sec_uid"])
-                    profile_data = asyncio.run(_fetch_profile())
-                    profile = UserProfileFilter(profile_data)
-                    save_user_info(profile.to_dict())
-                except Exception as e:
-                    logger.warning("[download_single_sync] 获取用户资料失败: {}", e)
-                    save_user_info(detail)
-
-        return result
-
-    def _run_batch_download(self, task_id: str, mode: str, url: str):
-        """批量下载（后台线程，委托给 BatchManager）"""
-        # 映射 mode 到旧的 download_type
-        mode_to_type = {"post": "user_post", "like": "user_like", "mix": "mix", "collects": "collects"}
-        download_type = mode_to_type.get(mode, mode)
-        self._batch_mgr.start_batch_download(url, download_type, self.handler,
-                                              self.broadcast_task_update_sync, task_id)
 
     def _run_live_record(self, task_id: str, url: str):
         """直播录制（委托给 LiveRecordManager）"""
         self._live_mgr.start_live_record(url, self.handler, self.broadcast_task_update_sync, task_id)
-
-    def _run_music_download(self, task_id: str, url: str):
-        """音乐批量下载（后台线程）"""
-        import threading
-
-        def _run():
-            from core import db
-            try:
-                # url 在这里实际是 sec_user_id 或 profile URL，需要先获取音乐列表
-                result = asyncio.run(self.handler.handle_user_music_collection())
-                if not result.get("success"):
-                    db.update_task_status(task_id, "error", result.get("error", "获取音乐列表失败"))
-                    return
-
-                music_list = result.get("music_list", [])
-                for music in music_list:
-                    db.create_task_item(task_id, aweme_id=music.get("music_id"),
-                                        title=music.get("title"), author_nickname=music.get("author"))
-
-                db.update_task_status(task_id, "running")
-                completed = 0
-                for music in music_list:
-                    try:
-                        dl_result = asyncio.run(self.handler.handle_download_music(
-                            music.get("play_url", ""), music.get("title", ""), music.get("author", "")))
-                        if dl_result.get("success"):
-                            file_path = dl_result.get("path", "")
-                            file_size = 0
-                            if file_path:
-                                from pathlib import Path
-                                try:
-                                    file_size = Path(file_path).stat().st_size
-                                except (OSError, ValueError):
-                                    pass
-                            db.update_task_item_status(task_id, music.get("music_id", ""), "completed",
-                                                       file_path, file_size)
-                            completed += 1
-                        else:
-                            db.update_task_item_status(task_id, music.get("music_id", ""), "failed",
-                                                       error_msg=dl_result.get("error", "下载失败"))
-                    except Exception as e:
-                        db.update_task_item_status(task_id, music.get("music_id", ""), "failed",
-                                                   error_msg=str(e))
-                        logger.error("[_run_music_download] 单曲下载失败: {}", e)
-
-                    self.broadcast_task_update_sync(task_id, {
-                        "task_id": task_id, "mode": "music", "status": "running",
-                        "total": len(music_list), "completed": completed,
-                    }, "batch")
-
-                db.update_task_status(task_id, "completed")
-                self.broadcast_task_update_sync(task_id, {
-                    "task_id": task_id, "mode": "music", "status": "completed",
-                    "total": len(music_list), "completed": completed,
-                }, "batch")
-
-            except Exception as e:
-                db.update_task_status(task_id, "error", str(e))
-                logger.error("[_run_music_download] 异常: {}", e, exc_info=True)
-
-        thread = threading.Thread(target=_run, daemon=True)
-        thread.start()
 
     # ============================================================
     # 事件广播

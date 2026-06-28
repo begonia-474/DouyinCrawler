@@ -6,7 +6,7 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { AnimateEntry } from "@/components/shared/animate-entry";
 import { Bezel } from "@/components/shared/bezel";
-import { getPostDetail, downloadOne } from "@/lib/api";
+import { getPostDetail, startDownload } from "@/lib/api";
 import {
   Download,
   CheckCircle2,
@@ -90,7 +90,7 @@ export default function VideoPage() {
     setDownloadProgress(0);
     setError(null);
 
-    const res = await downloadOne(downloadUrl);
+    const res = await startDownload("one", downloadUrl);
 
     if (res.success) {
       setDownloaded(true);

@@ -33,7 +33,7 @@ export default function DownloadsPage() {
   const liveRecordsQuery = useLiveRecordsQuery({ limit: 50 });
   const dbTasksQuery = useDownloadTasksQuery({ limit: 100 });
   const liveRecords = liveRecordsQuery.data ?? [];
-  const dbTasks = dbTasksQuery.data ?? [];
+  const dbTasks = useMemo(() => dbTasksQuery.data ?? [], [dbTasksQuery.data]);
   const { tasks: liveTasks, connect, clearCompleted, removeTask } = useTaskStore();
   const deleteLive = useDeleteLiveRecord();
   const deleteTask = useDeleteDownloadTask();
@@ -118,7 +118,7 @@ export default function DownloadsPage() {
         taskMap.set(live.task_id, {
           id: live.task_id,
           mode: (live.type as DownloadTask["mode"]) ?? "one",
-          url: live.url,
+          url: live.url ?? "",
           title: live.title ?? live.nickname ?? null,
           author_nickname: live.nickname ?? null,
           status: (live.status as DownloadTask["status"]) ?? "running",

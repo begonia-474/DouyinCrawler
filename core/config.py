@@ -46,7 +46,7 @@ DEFAULTS = {
     "interval": None,
     "page_counts": 20,
     "max_counts": 0,
-    "timeout": 10,
+    "timeout": 5,
     "max_connections": 5,
     "max_retries": 5,
     "max_tasks": 10,

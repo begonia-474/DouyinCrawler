@@ -2,6 +2,7 @@ mod db;
 mod python;
 mod config;
 mod commands;
+mod tasks;
 
 use config::{AppConfig, ConfigManager};
 use python::PythonBridge;
@@ -172,9 +173,7 @@ pub fn run() {
             get_db_path,
             // Python 桥接调用（commands/python.rs）
             commands::python::py_parse_video,
-            commands::python::py_download_video,
             commands::python::py_get_live_info,
-            commands::python::py_start_batch_download,
             commands::python::py_start_download,
             commands::python::py_get_user_profile,
             commands::python::py_get_user_posts,
@@ -243,12 +242,14 @@ pub fn run() {
             commands::db::get_download_task_items,
             commands::db::get_download_task_item_counts,
             commands::db::delete_download_task,
+            // 任务系统（Rust-owned，Phase 3 新增）
+            commands::tasks::start_download,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
 
-fn resolve_db_path(app: &tauri::App) -> PathBuf {
+fn resolve_db_path(_app: &tauri::App) -> PathBuf {
     // 生产模式优先使用 app_data_dir，开发模式使用项目相对路径
     #[cfg(not(debug_assertions))]
     {

@@ -29,8 +29,9 @@ pub fn parse_video(url: &str) -> PyResult<Value> {
     call_py_json("parse_video", (url,))
 }
 
-/// 下载单个视频
+/// 下载单个视频（仅下载，不写 DB，返回结果供 Rust 事务性完成）
 pub fn download_video(url: &str) -> PyResult<Value> {
+    info!("[handler.rs] download_video, url={}", &url[..url.len().min(60)]);
     call_py_json("download_video", (url,))
 }
 
@@ -88,23 +89,15 @@ pub fn get_mix_info(url: &str, cursor: i64, count: i64) -> PyResult<Value> {
     call_py_json("get_mix_info", (url, cursor, count))
 }
 
-// ============================================================
-// 批量下载
-// ============================================================
-
-/// 开始批量下载
-pub fn start_batch_download(url: &str, download_type: &str) -> PyResult<Value> {
-    call_py_json("start_batch_download", (url, download_type))
-}
-
 /// 统一下载入口（通过 mode 分发）
 pub fn start_download(mode: &str, url: &str) -> PyResult<Value> {
     call_py_json("start_download", (mode, url))
 }
 
-/// 获取批量下载状态
-pub fn get_batch_status() -> PyResult<Value> {
-    call_py_json("get_batch_status", ())
+/// 批量下载（不写 task DB 表，返回结果供 Rust 处理）
+pub fn download_batch(mode: &str, url: &str) -> PyResult<Value> {
+    info!("[handler.rs] download_batch, mode={}, url={}", mode, &url[..url.len().min(60)]);
+    call_py_json("download_batch", (mode, url))
 }
 
 // ============================================================
@@ -176,6 +169,12 @@ pub fn get_music_collection(cursor: i64, count: i64) -> PyResult<Value> {
 /// 下载音乐
 pub fn download_music(play_url: &str, title: &str, author: &str) -> PyResult<Value> {
     call_py_json("download_music", (play_url, title, author))
+}
+
+/// 下载全部音乐（不写 task DB 表，返回结果供 Rust 处理）
+pub fn download_music_batch(url: &str) -> PyResult<Value> {
+    info!("[handler.rs] download_music_batch, url={}", &url[..url.len().min(60)]);
+    call_py_json("download_music_batch", (url,))
 }
 
 // ============================================================

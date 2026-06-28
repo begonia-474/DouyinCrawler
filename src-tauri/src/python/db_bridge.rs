@@ -9,6 +9,9 @@
 //!
 //! 架构边界：Python 不直接执行 SQL。所有 DB 写入最终由本模块的闭包通过 rusqlite 执行。
 //! 前端也有两条直接写入路径（不经 Python）：live_records、music_collection（见 lib.rs Tauri commands）。
+//!
+//! 注意：任务生命周期（_create_task, _update_task_status, _create_task_item, _update_task_item_status）
+//! 已迁移到 Rust TaskApplicationService，不再通过 Python 桥接注册。
 
 use pyo3::prelude::*;
 use serde_json::Value;
@@ -240,113 +243,6 @@ pub fn register_db_bridge() {
             warn!("[db_bridge] 注入 has_user 失败: {}", e);
         }
 
-        // === 任务管理闭包 ===
-
-        // 注册 create_task
-        let create_task_fn = pyo3::types::PyCFunction::new_closure_bound(
-            py,
-            None,
-            None,
-            move |args: &Bound<'_, pyo3::types::PyTuple>, _kwargs: Option<&Bound<'_, pyo3::types::PyDict>>| -> PyResult<()> {
-                let data = args.get_item(0)?;
-                let app_handle = crate::APP_HANDLE.get()
-                    .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("AppHandle 未初始化"))?;
-
-                let id: String = data.get_item("id")?.extract()?;
-                let mode: String = data.get_item("mode")?.extract()?;
-                let url: String = data.get_item("url")?.extract()?;
-                let title: Option<String> = data.get_item("title").ok().and_then(|v| v.extract().ok());
-                let author_nickname: Option<String> = data.get_item("author_nickname").ok().and_then(|v| v.extract().ok());
-
-                let db = app_handle.state::<crate::db::Database>();
-                let task = crate::db::NewDownloadTask { id, mode, url, title, author_nickname };
-                db.create_task(&task)
-                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("创建任务失败: {}", e)))?;
-                Ok(())
-            },
-        ).expect("创建 create_task 闭包失败");
-
-        // 注册 update_task_status
-        let update_task_status_fn = pyo3::types::PyCFunction::new_closure_bound(
-            py,
-            None,
-            None,
-            move |args: &Bound<'_, pyo3::types::PyTuple>, _kwargs: Option<&Bound<'_, pyo3::types::PyDict>>| -> PyResult<()> {
-                let task_id: String = args.get_item(0)?.extract()?;
-                let status: String = args.get_item(1)?.extract()?;
-                let error_msg: Option<String> = args.get_item(2).ok().and_then(|v| v.extract().ok());
-
-                let app_handle = crate::APP_HANDLE.get()
-                    .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("AppHandle 未初始化"))?;
-
-                let db = app_handle.state::<crate::db::Database>();
-                db.update_task_status(&task_id, &status, error_msg.as_deref())
-                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("更新任务状态失败: {}", e)))?;
-                Ok(())
-            },
-        ).expect("创建 update_task_status 闭包失败");
-
-        // 注册 create_task_item
-        let create_task_item_fn = pyo3::types::PyCFunction::new_closure_bound(
-            py,
-            None,
-            None,
-            move |args: &Bound<'_, pyo3::types::PyTuple>, _kwargs: Option<&Bound<'_, pyo3::types::PyDict>>| -> PyResult<()> {
-                let data = args.get_item(0)?;
-                let app_handle = crate::APP_HANDLE.get()
-                    .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("AppHandle 未初始化"))?;
-
-                let task_id: String = data.get_item("task_id")?.extract()?;
-                let aweme_id: Option<String> = data.get_item("aweme_id").ok().and_then(|v| v.extract().ok());
-                let title: Option<String> = data.get_item("title").ok().and_then(|v| v.extract().ok());
-                let author_nickname: Option<String> = data.get_item("author_nickname").ok().and_then(|v| v.extract().ok());
-                let cover_url: Option<String> = data.get_item("cover_url").ok().and_then(|v| v.extract().ok());
-
-                let db = app_handle.state::<crate::db::Database>();
-                let item = crate::db::NewTaskItem { task_id, aweme_id, title, author_nickname, cover_url };
-                db.create_task_item(&item)
-                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("创建子项失败: {}", e)))?;
-                Ok(())
-            },
-        ).expect("创建 create_task_item 闭包失败");
-
-        // 注册 update_task_item_status（原子操作：更新子项状态 + 刷新任务计数）
-        let update_task_item_status_fn = pyo3::types::PyCFunction::new_closure_bound(
-            py,
-            None,
-            None,
-            move |args: &Bound<'_, pyo3::types::PyTuple>, _kwargs: Option<&Bound<'_, pyo3::types::PyDict>>| -> PyResult<()> {
-                let task_id: String = args.get_item(0)?.extract()?;
-                let aweme_id: String = args.get_item(1)?.extract()?;
-                let status: String = args.get_item(2)?.extract()?;
-                let file_path: Option<String> = args.get_item(3).ok().and_then(|v| v.extract().ok());
-                let file_size: i64 = args.get_item(4).ok().and_then(|v| v.extract().ok()).unwrap_or(0);
-                let error_msg: Option<String> = args.get_item(5).ok().and_then(|v| v.extract().ok());
-
-                let app_handle = crate::APP_HANDLE.get()
-                    .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("AppHandle 未初始化"))?;
-
-                let db = app_handle.state::<crate::db::Database>();
-                db.update_task_item_and_counts(&task_id, &aweme_id, &status, file_path.as_deref(), file_size, error_msg.as_deref())
-                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("更新子项状态失败: {}", e)))?;
-                Ok(())
-            },
-        ).expect("创建 update_task_item_status 闭包失败");
-
-        // 注入任务管理闭包
-        if let Err(e) = db_bridge.setattr("_create_task", create_task_fn) {
-            warn!("[db_bridge] 注入 create_task 失败: {}", e);
-        }
-        if let Err(e) = db_bridge.setattr("_update_task_status", update_task_status_fn) {
-            warn!("[db_bridge] 注入 update_task_status 失败: {}", e);
-        }
-        if let Err(e) = db_bridge.setattr("_create_task_item", create_task_item_fn) {
-            warn!("[db_bridge] 注入 create_task_item 失败: {}", e);
-        }
-        if let Err(e) = db_bridge.setattr("_update_task_item_status", update_task_item_status_fn) {
-            warn!("[db_bridge] 注入 update_task_item_status 失败: {}", e);
-        }
-
-        info!("[db_bridge] 数据库桥接方法已注入");
+        info!("[db_bridge] 数据库桥接方法已注入（任务生命周期已迁移到 Rust TaskApplicationService）");
     });
 }

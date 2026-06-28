@@ -5,7 +5,10 @@ PyO3 集成测试脚本
 
 import json
 import sys
+import pytest
 from pathlib import Path
+
+pytestmark = [pytest.mark.integration]
 
 # 添加项目根目录到 Python 路径
 project_root = Path(__file__).parent.parent

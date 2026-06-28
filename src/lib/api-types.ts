@@ -197,3 +197,38 @@ export interface DownloadResult {
   paths?: string[];
   detail?: PostDetail;
 }
+
+// ============================================================
+// 类型化任务事件系统（对齐 Rust src/tasks/mod.rs）
+// ============================================================
+
+/** 任务状态（对齐 Rust TaskStatus 枚举） */
+export type TaskStatus = "pending" | "starting" | "running" | "recording" | "stopping" | "completed" | "error" | "cancelled";
+
+/** 任务子项状态（对齐 Rust TaskItemStatus 枚举） */
+export type TaskItemStatus = "pending" | "downloading" | "completed" | "skipped" | "failed";
+
+/** 任务事件类型（对齐 Rust TaskEventType 枚举） */
+export type TaskEventType = "started" | "progress" | "finished";
+
+/** 任务补丁（对齐 Rust TaskPatch）None 字段不覆盖现有值 */
+export interface TaskPatch {
+  task_id: string;
+  status?: TaskStatus;
+  total?: number;
+  completed?: number;
+  skipped?: number;
+  failed?: number;
+  error_msg?: string;
+  current_item?: string;
+}
+
+/** 类型化任务事件（对齐 Rust TaskEvent，通过 Tauri event 发射） */
+export interface TaskEvent {
+  event_type: TaskEventType;
+  task_id: string;
+  mode?: DownloadMode;
+  url?: string;
+  /** 补丁字段（通过 serde(flatten) 展开） */
+  patch: TaskPatch;
+}

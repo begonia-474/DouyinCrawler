@@ -19,23 +19,9 @@ pub async fn py_parse_video(url: String) -> Result<Value, String> {
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub async fn py_download_video(url: String) -> Result<Value, String> {
-    run_python_blocking("download_video", move || {
-        crate::python::download_video(&url)
-    }).await
-}
-
-#[tauri::command(rename_all = "snake_case")]
 pub async fn py_get_live_info(url: String) -> Result<Value, String> {
     run_python_blocking("get_live_info", move || {
         crate::python::get_live_info(&url)
-    }).await
-}
-
-#[tauri::command(rename_all = "snake_case")]
-pub async fn py_start_batch_download(url: String, download_type: String) -> Result<Value, String> {
-    run_python_blocking("start_batch_download", move || {
-        crate::python::start_batch_download(&url, &download_type)
     }).await
 }
 

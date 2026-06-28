@@ -41,7 +41,7 @@ import {
   Activity,
 } from "lucide-react";
 
-const settingsSchema = z.object({
+const _settingsSchema = z.object({
   cookie: z.string(),
   downloadPath: z.string(),
   naming: z.string(),
@@ -61,7 +61,7 @@ const settingsSchema = z.object({
   interval: z.string(),
 });
 
-type SettingsForm = z.infer<typeof settingsSchema>;
+type SettingsForm = z.infer<typeof _settingsSchema>;
 
 function SettingItem({
   icon: Icon,

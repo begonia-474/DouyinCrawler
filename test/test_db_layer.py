@@ -2,6 +2,9 @@
 
 db.py 是纯透传层，测试其参数组装和调用链路。
 db_bridge.py 的 stubs 未注册时应安全返回 False。
+
+注意：任务生命周期函数（create_task, update_task_status, create_task_item, update_task_item_status）
+已迁移到 Rust TaskApplicationService，相关测试已移除。
 """
 
 import pytest

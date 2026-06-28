@@ -29,7 +29,7 @@ export function DownloadStatusCard() {
   // 新任务开始时重置 dismissed 状态
   useEffect(() => {
     if (activeTask) setDismissed(false);
-  }, [activeTask?.task_id]);
+  }, [activeTask?.task_id]); // eslint-disable-line react-hooks/exhaustive-deps -- activeTask identity changes every render; task_id is the stable trigger
 
   // 已完成/失败的任务 5 秒后自动隐藏
   useEffect(() => {
@@ -37,6 +37,7 @@ export function DownloadStatusCard() {
       const timer = setTimeout(() => setDismissed(true), 5000);
       return () => clearTimeout(timer);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- derived objects change every render; task_id is the stable trigger
   }, [activeTask, recentCompletedTask?.task_id]);
 
   // 没有任务或已隐藏时不显示

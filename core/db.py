@@ -9,6 +9,9 @@
 - db_bridge 中的 `_save_*` 函数是 Rust 在启动时通过 PyO3 注入的闭包。
 - 前端也有两条直接写入路径（不经 Python）：live_records（Tauri command）、music_collection（Tauri command）。
 
+注意：任务生命周期函数（create_task, update_task_status, create_task_item, update_task_item_status）
+已迁移到 Rust TaskApplicationService，不再通过 Python 桥接注册。
+
 数据流：
     Python 业务逻辑 → db.py（透传）→ db_bridge.py（转发）→ Rust PyO3 closure（清洗+写入）→ db.rs（SQL）
 """
@@ -75,35 +78,6 @@ def save_live_record(record: dict) -> bool:
             file_path, file_size, duration_sec, status, started_at, ended_at, cover_url
     """
     return db_bridge.save_live_record(record)
-
-
-# ============================================================
-# 下载任务管理
-# ============================================================
-
-def create_task(task_id: str, mode: str, url: str, title: str = None, author_nickname: str = None) -> bool:
-    """创建下载任务记录（通过 Rust 桥接）"""
-    return db_bridge.create_task(task_id, mode, url, title, author_nickname)
-
-
-def update_task_status(task_id: str, status: str, error_msg: str = None) -> bool:
-    """更新任务状态"""
-    return db_bridge.update_task_status(task_id, status, error_msg)
-
-
-def create_task_item(task_id: str, aweme_id: str = None, title: str = None,
-                     author_nickname: str = None, cover_url: str = None) -> bool:
-    """创建任务子项"""
-    return db_bridge.create_task_item(task_id, aweme_id, title, author_nickname, cover_url)
-
-
-def update_task_item_status(task_id: str, aweme_id: str, status: str,
-                            file_path: str = None, file_size: int = 0,
-                            error_msg: str = None) -> bool:
-    """更新子项状态（completed / skipped / failed）"""
-    return db_bridge.update_task_item_status(
-        task_id, aweme_id, status, file_path, file_size, error_msg
-    )
 
 
 def save_batch_results(results: list, download_type: str = "batch") -> dict:
