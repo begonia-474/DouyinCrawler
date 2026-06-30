@@ -28,6 +28,18 @@ export const queryKeys = {
   friendFeed: (params: QueryParams = {}) => ["friend-feed", params] as const,
   // 收藏夹
   collectsList: () => ["collects-list"] as const,
+  collectsVideos: (id: string, params: QueryParams = {}) => ["collects-videos", id, params] as const,
   // 关注直播
   followingLive: () => ["following-live"] as const,
+  // 用户
+  userProfile: (url: string) => ["user-profile", url] as const,
+  userPosts: (url: string, params: QueryParams = {}) => ["user-posts", url, params] as const,
+  userFollowing: (url: string) => ["user-following", url] as const,
+  userFollowers: (url: string) => ["user-followers", url] as const,
+  userLikes: (url: string, params: QueryParams = {}) => ["user-likes", url, params] as const,
+  // 合集
+  mixInfo: (url: string, params: QueryParams = {}) => ["mix-info", url, params] as const,
+  // 直播
+  liveInfo: (url: string) => ["live-info", url] as const,
+  liveStatus: () => ["live-status"] as const,
 };

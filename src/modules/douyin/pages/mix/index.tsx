@@ -9,9 +9,9 @@ import { DownloadStatusCard } from "@/components/shared/download-status-card";
 import { DownloadAllButton } from "@/components/shared/download-all-button";
 import { DownloadProgressOverlay } from "@/components/shared/download-progress-overlay";
 import { InfiniteScrollSentinel } from "@/components/shared/infinite-scroll-sentinel";
-import { getMixInfo, downloadMix } from "@/lib/api";
+import { useMixInfoQuery, useMixVideosInfiniteQuery } from "@/lib/queries";
+import { downloadMix } from "@/lib/api";
 import { useTaskStore } from "@/stores/task-store";
-import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import type { VideoItem } from "@/lib/api-types";
 import {
   Download,
@@ -20,56 +20,39 @@ import {
   ListVideo,
 } from "lucide-react";
 import { ErrorBanner } from "@/components/shared/error-banner";
+import { LoadingSpinner } from "@/components/shared/loading-spinner";
 import { formatCount, formatDurationSec } from "@/lib/utils";
 
 type MixVideo = VideoItem & { downloaded?: boolean };
 
 export default function MixPage() {
-  const [loading, setLoading] = useState(false);
+  const [currentUrl, setCurrentUrl] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [downloadedCount, setDownloadedCount] = useState(0);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const batchTask = useTaskStore((s) => activeTaskId ? s.tasks[activeTaskId] : null);
   const downloadProgress = batchTask ? ((batchTask.total ?? 0) > 0 ? Math.round(((batchTask.completed ?? 0) / (batchTask.total ?? 1)) * 100) : 0) : 0;
-  const [mixName, setMixName] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [currentUrl, setCurrentUrl] = useState("");
 
-  const { items: videos, setItems: setVideos, hasMore, loadingMore, sentinelRef, reset } = useInfiniteScroll<MixVideo>({
-    fetchPage: useCallback(async (cursor: number) => {
-      if (!currentUrl) return null;
-      const res = await getMixInfo(currentUrl, cursor, 20);
-      if (res.success && res.data?.videos) {
-        return {
-          items: res.data.videos.map((v) => ({ ...v, downloaded: false })),
-          nextCursor: res.data.next_cursor ?? 0,
-          hasMore: res.data.has_more ?? false,
-        };
-      }
-      return null;
-    }, [currentUrl]),
-    enabled: !!currentUrl,
-  });
+  const mixInfoQuery = useMixInfoQuery(currentUrl || null);
+  const videosQuery = useMixVideosInfiniteQuery(currentUrl || null);
 
-  const handleParse = useCallback(async (url: string) => {
-    setLoading(true);
-    setMixName("");
+  const mixName = mixInfoQuery.data?.data?.detail?.desc || "合集";
+  const videos: MixVideo[] = videosQuery.data?.pages.flatMap((p) => (p.data?.videos ?? []).map((v) => ({ ...v, downloaded: false }))) ?? [];
+  const hasMore = videosQuery.hasNextPage;
+  const loadingMore = videosQuery.isFetchingNextPage;
+  const loading = mixInfoQuery.isLoading || videosQuery.isLoading;
+
+  const fetchNextPage = useCallback(() => {
+    if (videosQuery.hasNextPage && !videosQuery.isFetchingNextPage) {
+      videosQuery.fetchNextPage();
+    }
+  }, [videosQuery]);
+
+  const handleParse = useCallback((url: string) => {
     setError(null);
     setCurrentUrl(url);
-
-    const res = await getMixInfo(url, 0, 20);
-    if (res.success && res.data?.videos) {
-      setMixName(res.data.detail?.desc || "合集");
-      reset(async () => ({
-        items: res.data!.videos!.map((v) => ({ ...v, downloaded: false })),
-        nextCursor: res.data!.next_cursor ?? 0,
-        hasMore: res.data!.has_more ?? false,
-      }));
-    } else {
-      setError(res.error || "获取合集失败");
-    }
-    setLoading(false);
-  }, [reset]);
+  }, []);
 
   const handleDownloadAll = async () => {
     setDownloading(true);
@@ -81,12 +64,15 @@ export default function MixPage() {
       setActiveTaskId(res.task_id);
     } else if (res.success) {
       setDownloadedCount(videos.length);
-      setVideos((prev) => prev.map((v) => ({ ...v, downloaded: true })));
     } else {
       setError(res.error || "下载失败");
     }
     setDownloading(false);
   };
+
+  const queryError = mixInfoQuery.error?.message || videosQuery.error?.message
+    || (!mixInfoQuery.data?.success ? (mixInfoQuery.data?.error ?? null) : null)
+    || error;
 
   return (
     <>
@@ -106,7 +92,9 @@ export default function MixPage() {
       <div className="space-y-6">
         <UrlInput onSubmit={handleParse} loading={loading} placeholder="粘贴合集链接..." allowedTypes={["mix"]} autoDetect />
 
-        <ErrorBanner message={error} />
+        <ErrorBanner message={queryError} />
+
+        {loading && <LoadingSpinner size={24} className="py-16" />}
 
         {videos.length > 0 && (
           <>
@@ -168,11 +156,11 @@ export default function MixPage() {
               ))}
             </div>
             <InfiniteScrollSentinel
-              sentinelRef={sentinelRef}
               loadingMore={loadingMore}
-              hasMore={hasMore}
+              hasMore={!!hasMore}
               total={videos.length}
               label="视频"
+              onVisible={fetchNextPage}
             />
           </>
         )}

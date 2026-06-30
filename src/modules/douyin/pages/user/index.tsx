@@ -9,12 +9,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Bezel } from "@/components/shared/bezel";
 import { DownloadStatusCard } from "@/components/shared/download-status-card";
-import {
-  getUserProfile, getUserPosts,
-  getUserFollowing, getUserFollowers, downloadUserPosts,
-} from "@/lib/api";
+import { useUserProfileQuery, useUserPostsInfiniteQuery, useUserFollowingQuery, useUserFollowersQuery } from "@/lib/queries";
+import { downloadUserPosts } from "@/lib/api";
 import { useTaskStore } from "@/stores/task-store";
-import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import type { UserProfile as UserProfileType, VideoItem, FollowItem } from "@/lib/api-types";
 import {
   Users, Heart, Video, UserPlus,
@@ -49,70 +46,37 @@ function FollowItemCard({ item, type }: { item: FollowItem; type: "following" | 
 }
 
 export default function UserPage() {
-  const [loading, setLoading] = useState(false);
-  const [profile, setProfile] = useState<UserProfileType | null>(null);
-  const [following, setFollowing] = useState<FollowItem[]>([]);
-  const [followers, setFollowers] = useState<FollowItem[]>([]);
+  const [currentUrl, setCurrentUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [downloadedCount, setDownloadedCount] = useState(0);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
-  const [currentUrl, setCurrentUrl] = useState("");
   const batchTask = useTaskStore((s) => activeTaskId ? s.tasks[activeTaskId] : null);
   const downloadProgress = batchTask ? ((batchTask.total ?? 0) > 0 ? Math.round(((batchTask.completed ?? 0) / (batchTask.total ?? 1)) * 100) : 0) : 0;
 
-  const { items: videos, setItems: setVideos, hasMore, loadingMore, sentinelRef, reset } = useInfiniteScroll<VideoItem>({
-    fetchPage: useCallback(async (cursor: number) => {
-      if (!currentUrl) return null;
-      const res = await getUserPosts(currentUrl, cursor, 20);
-      if (res.success && res.data?.videos) {
-        return {
-          items: res.data.videos,
-          nextCursor: res.data.next_cursor ?? 0,
-          hasMore: res.data.has_more ?? false,
-        };
-      }
-      return null;
-    }, [currentUrl]),
-    enabled: !!currentUrl,
-  });
+  const profileQuery = useUserProfileQuery(currentUrl || null);
+  const postsQuery = useUserPostsInfiniteQuery(currentUrl || null);
+  const followingQuery = useUserFollowingQuery(currentUrl || null);
+  const followersQuery = useUserFollowersQuery(currentUrl || null);
 
-  const handleParse = useCallback(async (url: string) => {
-    setLoading(true);
-    setProfile(null);
-    setVideos([]);
-    setFollowing([]);
-    setFollowers([]);
+  const profile = (profileQuery.data?.data?.profile as unknown as UserProfileType) || null;
+  const videos: VideoItem[] = postsQuery.data?.pages.flatMap((p) => p.data?.videos ?? []) ?? [];
+  const hasMore = postsQuery.hasNextPage;
+  const loadingMore = postsQuery.isFetchingNextPage;
+  const following: FollowItem[] = (followingQuery.data?.data?.followings ?? []) as unknown as FollowItem[];
+  const followers: FollowItem[] = (followersQuery.data?.data?.followers ?? []) as unknown as FollowItem[];
+  const loading = profileQuery.isLoading;
+
+  const fetchNextPage = useCallback(() => {
+    if (postsQuery.hasNextPage && !postsQuery.isFetchingNextPage) {
+      postsQuery.fetchNextPage();
+    }
+  }, [postsQuery]);
+
+  const handleParse = useCallback((url: string) => {
     setError(null);
     setCurrentUrl(url);
-
-    const profileRes = await getUserProfile(url);
-    if (profileRes.success && profileRes.data?.profile) {
-      setProfile(profileRes.data.profile as unknown as UserProfileType);
-    } else {
-      setError(profileRes.error || "获取用户信息失败");
-      setLoading(false);
-      return;
-    }
-
-    const [postsRes, followingRes, followersRes] = await Promise.all([
-      getUserPosts(url, 0, 20),
-      getUserFollowing(url),
-      getUserFollowers(url),
-    ]);
-
-    if (postsRes.success && postsRes.data?.videos) {
-      reset(async () => ({
-        items: postsRes.data!.videos!,
-        nextCursor: postsRes.data!.next_cursor ?? 0,
-        hasMore: postsRes.data!.has_more ?? false,
-      }));
-    }
-    if (followingRes.success && followingRes.data?.followings) setFollowing(followingRes.data.followings);
-    if (followersRes.success && followersRes.data?.followers) setFollowers(followersRes.data.followers);
-
-    setLoading(false);
-  }, [reset, setVideos]);
+  }, []);
 
   const handleDownloadAll = async () => {
     setDownloading(true);
@@ -129,6 +93,10 @@ export default function UserPage() {
     }
     setDownloading(false);
   };
+
+  const queryError = profileQuery.error?.message || postsQuery.error?.message
+    || (!profileQuery.data?.success ? (profileQuery.data?.error ?? null) : null)
+    || error;
 
   return (
     <>
@@ -148,7 +116,7 @@ export default function UserPage() {
       <div className="space-y-6">
         <UrlInput onSubmit={handleParse} loading={loading} placeholder="粘贴用户主页链接..." allowedTypes={["user"]} autoDetect />
 
-        <ErrorBanner message={error} />
+        <ErrorBanner message={queryError} />
 
         {loading && <LoadingSpinner size={24} className="py-16" />}
 
@@ -223,11 +191,11 @@ export default function UserPage() {
                   ))}
                 </div>
                 <InfiniteScrollSentinel
-                  sentinelRef={sentinelRef}
                   loadingMore={loadingMore}
-                  hasMore={hasMore}
+                  hasMore={!!hasMore}
                   total={videos.length}
                   label="作品"
+                  onVisible={fetchNextPage}
                 />
               </TabsContent>
 

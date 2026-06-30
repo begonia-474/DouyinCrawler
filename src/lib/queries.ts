@@ -1,5 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
-import { getDownloadStats, getDownloads, getLiveRecordCount, getLiveRecords, getMusicCollectionCountFromDB, getMusicCollectionFromDB, getUserCount, getUserStats, getUsers, getVideoCount, getVideos, getVideoStats, getDownloadTasks, getDownloadTaskDetail, getDownloadTaskItems, getDownloadTaskItemCounts, getDownloadTrend, getTopAuthors, getStorageAnalysis, dbHealthCheck, getPostDetail, getTabFeed, getFollowFeed, getFriendFeed, getUserCollects, getFollowingLive } from "@/lib/api";
+import { useQuery, useInfiniteQuery } from "@tanstack/react-query";
+import { getDownloadStats, getDownloads, getLiveRecordCount, getLiveRecords, getMusicCollectionCountFromDB, getMusicCollectionFromDB, getUserCount, getUserStats, getUsers, getVideoCount, getVideos, getVideoStats, getDownloadTasks, getDownloadTaskDetail, getDownloadTaskItems, getDownloadTaskItemCounts, getDownloadTrend, getTopAuthors, getStorageAnalysis, dbHealthCheck, getPostDetail, getTabFeed, getFollowFeed, getFriendFeed, getUserCollects, getFollowingLive, getUserProfile, getUserPosts, getUserFollowing, getUserFollowers, getUserLikes, getCollectsVideoList, getMixInfo, getLiveInfo, getLiveStatus } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 
 export function useDownloadsQuery(params: {
@@ -236,5 +236,140 @@ export function useFollowingLiveQuery(enabled = true) {
     queryFn: () => getFollowingLive(),
     enabled,
     staleTime: 30 * 1000, // 直播数据 30s 缓存
+  });
+}
+
+// ============================================================
+// 用户页面
+// ============================================================
+
+/** 用户资料 */
+export function useUserProfileQuery(url: string | null) {
+  return useQuery({
+    queryKey: queryKeys.userProfile(url ?? ""),
+    queryFn: () => getUserProfile(url!),
+    enabled: !!url,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** 用户作品（无限滚动） */
+export function useUserPostsInfiniteQuery(url: string | null) {
+  return useInfiniteQuery({
+    queryKey: queryKeys.userPosts(url ?? ""),
+    queryFn: ({ pageParam }) => getUserPosts(url!, pageParam, 20),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage) => {
+      if (!lastPage?.data) return undefined;
+      return lastPage.data.has_more ? (lastPage.data.next_cursor ?? 0) : undefined;
+    },
+    enabled: !!url,
+    staleTime: 2 * 60 * 1000,
+  });
+}
+
+/** 用户关注列表 */
+export function useUserFollowingQuery(url: string | null) {
+  return useQuery({
+    queryKey: queryKeys.userFollowing(url ?? ""),
+    queryFn: () => getUserFollowing(url!),
+    enabled: !!url,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** 用户粉丝列表 */
+export function useUserFollowersQuery(url: string | null) {
+  return useQuery({
+    queryKey: queryKeys.userFollowers(url ?? ""),
+    queryFn: () => getUserFollowers(url!),
+    enabled: !!url,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** 用户点赞（无限滚动） */
+export function useUserLikesInfiniteQuery(url: string | null) {
+  return useInfiniteQuery({
+    queryKey: queryKeys.userLikes(url ?? ""),
+    queryFn: ({ pageParam }) => getUserLikes(url!, pageParam, 20),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage) => {
+      if (!lastPage?.data) return undefined;
+      return lastPage.data.has_more ? (lastPage.data.next_cursor ?? 0) : undefined;
+    },
+    enabled: !!url,
+    staleTime: 2 * 60 * 1000,
+  });
+}
+
+// ============================================================
+// 收藏夹详情
+// ============================================================
+
+/** 收藏夹视频（无限滚动） */
+export function useCollectsVideosInfiniteQuery(id: string | null) {
+  return useInfiniteQuery({
+    queryKey: queryKeys.collectsVideos(id ?? ""),
+    queryFn: ({ pageParam }) => getCollectsVideoList(id!, pageParam, 20),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage) => {
+      if (!lastPage?.data) return undefined;
+      return lastPage.data.has_more ? (lastPage.data.next_cursor ?? 0) : undefined;
+    },
+    enabled: !!id,
+    staleTime: 2 * 60 * 1000,
+  });
+}
+
+// ============================================================
+// 合集
+// ============================================================
+
+/** 合集信息 */
+export function useMixInfoQuery(url: string | null) {
+  return useQuery({
+    queryKey: queryKeys.mixInfo(url ?? ""),
+    queryFn: () => getMixInfo(url!, 0, 1),
+    enabled: !!url,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** 合集视频（无限滚动） */
+export function useMixVideosInfiniteQuery(url: string | null) {
+  return useInfiniteQuery({
+    queryKey: queryKeys.mixInfo(url ?? "", { scope: "videos" }),
+    queryFn: ({ pageParam }) => getMixInfo(url!, pageParam, 20),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage) => {
+      if (!lastPage?.data) return undefined;
+      return lastPage.data.has_more ? (lastPage.data.next_cursor ?? 0) : undefined;
+    },
+    enabled: !!url,
+    staleTime: 2 * 60 * 1000,
+  });
+}
+
+// ============================================================
+// 直播
+// ============================================================
+
+/** 直播信息 */
+export function useLiveInfoQuery(url: string | null) {
+  return useQuery({
+    queryKey: queryKeys.liveInfo(url ?? ""),
+    queryFn: () => getLiveInfo(url!),
+    enabled: !!url,
+    staleTime: 30 * 1000,
+  });
+}
+
+/** 直播录制状态 */
+export function useLiveStatusQuery() {
+  return useQuery({
+    queryKey: queryKeys.liveStatus(),
+    queryFn: () => getLiveStatus(),
+    refetchInterval: 5000,
   });
 }

@@ -1,43 +1,32 @@
-import { useState, useCallback } from "react";
+import { useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Header } from "@/components/layout/header";
 import { UrlInput } from "@/components/shared/url-input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Bezel } from "@/components/shared/bezel";
-import { getUserProfile, getUserCollects } from "@/lib/api";
+import { useUserProfileQuery, useCollectsListQuery } from "@/lib/queries";
 import type { UserProfile as UserProfileType, CollectsFolder } from "@/lib/api-types";
-import { FolderOpen, ChevronRight, Loader2 } from "lucide-react";
+import { FolderOpen, ChevronRight } from "lucide-react";
 import { ErrorBanner } from "@/components/shared/error-banner";
+import { LoadingSpinner } from "@/components/shared/loading-spinner";
 
 export default function CollectsPage() {
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(false);
-  const [profile, setProfile] = useState<UserProfileType | null>(null);
-  const [collects, setCollects] = useState<CollectsFolder[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [currentUrl, setCurrentUrl] = useState("");
 
-  const handleParse = useCallback(async (url: string) => {
-    setLoading(true);
-    setProfile(null);
-    setCollects([]);
-    setError(null);
+  const profileQuery = useUserProfileQuery(currentUrl || null);
+  const collectsQuery = useCollectsListQuery();
 
-    const profileRes = await getUserProfile(url);
-    if (profileRes.success && profileRes.data?.profile) {
-      setProfile(profileRes.data.profile as unknown as UserProfileType);
-    } else {
-      setError(profileRes.error || "获取用户信息失败");
-      setLoading(false);
-      return;
-    }
+  const profile = (profileQuery.data?.data?.profile as unknown as UserProfileType) || null;
+  const collects = (collectsQuery.data?.data?.collects ?? []) as unknown as CollectsFolder[];
+  const loading = profileQuery.isLoading;
+  const error = profileQuery.error?.message
+    || collectsQuery.error?.message
+    || (!profileQuery.data?.success ? (profileQuery.data?.error ?? null) : null);
 
-    const collectsRes = await getUserCollects();
-    if (collectsRes.success && collectsRes.data?.collects) {
-      setCollects(collectsRes.data.collects as unknown as CollectsFolder[]);
-    }
-
-    setLoading(false);
+  const handleParse = useCallback((url: string) => {
+    setCurrentUrl(url);
   }, []);
 
   return (
@@ -49,11 +38,7 @@ export default function CollectsPage() {
 
         <ErrorBanner message={error} />
 
-        {loading && (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-          </div>
-        )}
+        {loading && <LoadingSpinner size={24} className="py-16" />}
 
         {profile && !loading && (
           <>
