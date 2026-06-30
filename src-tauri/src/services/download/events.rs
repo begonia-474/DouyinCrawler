@@ -3,17 +3,25 @@
 //! 通过 Tauri 事件系统将类型化 TaskEvent 推送到前端。
 //! 替代当前 Python→emit.rs 的非类型化事件路径。
 
+use std::sync::OnceLock;
 use log::{info, warn};
-use tauri::Emitter;
+use tauri::{AppHandle, Emitter};
 
 use super::{DownloadMode, TaskEvent, TaskPatch, TaskStatus};
+
+static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
+
+/// 初始化事件模块，在应用 setup 时调用
+pub fn init(app_handle: &AppHandle) {
+    let _ = APP_HANDLE.set(app_handle.clone());
+}
 
 /// 发射类型化任务事件到前端
 ///
 /// 事件名: "task-update"
 /// payload: { task_id, task_type: "typed", data: TaskEvent }
 pub fn emit_task_event(event: &TaskEvent) {
-    let app_handle = match crate::APP_HANDLE.get() {
+    let app_handle = match APP_HANDLE.get() {
         Some(h) => h,
         None => {
             warn!("[tasks/events] APP_HANDLE 未初始化，无法发射事件");

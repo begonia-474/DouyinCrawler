@@ -3,11 +3,12 @@
 //! 供 Python 通过 PyO3 调用，将任务状态推送到前端
 
 use pyo3::prelude::*;
-use tauri::Emitter;
+use tauri::{AppHandle, Emitter};
 use log::{info, warn};
 
 /// 注册 emit_task_update 到 Python core.tauri_bridge 模块
-pub fn register_app_handle() {
+pub fn register_app_handle(app_handle: &AppHandle) {
+    let handle = app_handle.clone();
     Python::with_gil(|py| {
         let tauri_bridge = match py.import_bound("core.tauri_bridge") {
             Ok(m) => m,
@@ -29,9 +30,6 @@ pub fn register_app_handle() {
 
                 info!("[emit] Python 调用 emit: task_id={}, task_type={}", task_id, task_type);
 
-                let app_handle = crate::APP_HANDLE.get()
-                    .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("AppHandle 未初始化"))?;
-
                 // 将 Python dict 转为 JSON（使用统一桥接辅助函数）
                 let json_value = super::bridge::py_to_json_value(&data)?;
 
@@ -42,7 +40,7 @@ pub fn register_app_handle() {
                 });
 
                 info!("[emit] 发送 Tauri 事件: task-update, payload={}", payload);
-                app_handle.emit("task-update", &payload)
+                handle.emit("task-update", &payload)
                     .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("事件发射失败: {}", e)))?;
                 info!("[emit] Tauri 事件发送成功");
 

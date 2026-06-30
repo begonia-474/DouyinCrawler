@@ -9,23 +9,17 @@ mod error;
 
 use config::{AppConfig, ConfigManager};
 use python::PythonBridge;
+use state::AppState;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use parking_lot::Mutex;
-use tauri::Manager;
+use tauri::{Manager, State};
 use log::{info, warn, error};
 
-/// 全局 AppHandle，供 Python 通过 PyO3 发送 Tauri 事件
-static APP_HANDLE: OnceLock<tauri::AppHandle> = OnceLock::new();
-
-// ============================================================
-// Tauri Commands - 配置（跨模块依赖，保留在 lib.rs）
-// ============================================================
-
 #[tauri::command(rename_all = "snake_case")]
-fn get_config(config_manager: tauri::State<'_, Arc<Mutex<ConfigManager>>>) -> Result<AppConfig, String> {
-    let manager = config_manager.lock();
+fn get_config(state: State<'_, AppState>) -> Result<AppConfig, String> {
+    let manager = state.config.lock();
     Ok(manager.get_douyin_config())
 }
 
@@ -41,8 +35,7 @@ fn get_db_path() -> Result<String, String> {
 
 #[tauri::command(rename_all = "snake_case")]
 fn set_config(
-    config_manager: tauri::State<'_, Arc<Mutex<ConfigManager>>>,
-    _python_bridge: tauri::State<'_, Arc<PythonBridge>>,
+    state: State<'_, AppState>,
     updates: HashMap<String, String>,
 ) -> Result<(), String> {
     info!("[set_config] 收到 {} 个配置更新", updates.len());
@@ -55,7 +48,7 @@ fn set_config(
     }
 
     // 1. 更新配置文件
-    let mut manager = config_manager.lock();
+    let mut manager = state.config.lock();
     manager.update_douyin_config(&updates)?;
 
     // 2. 同步到 Python
@@ -127,14 +120,12 @@ pub fn run() {
 
             let database = db::Database::open(&db_path)
                 .expect("Failed to open database");
-            app.manage(database);
 
             // 存储数据库路径
             let _ = DB_PATH.set(db_path.clone());
 
             // 初始化配置管理器
             let config_manager = Arc::new(Mutex::new(ConfigManager::new()));
-            app.manage(config_manager.clone());
 
             // 初始化 Python 桥接器
             let python_bridge = match PythonBridge::new() {
@@ -149,21 +140,26 @@ pub fn run() {
                     }))
                 }
             };
-            app.manage(python_bridge);
+
+            // 创建并注册全局状态容器
+            let state = AppState::new(database, config_manager, python_bridge);
+            app.manage(state);
 
             // 同步配置到 Python
-            let config = config_manager.lock().get_douyin_config();
+            let config = app.state::<AppState>().config.lock().get_douyin_config();
             if let Err(e) = python::init_config(&config) {
                 warn!("同步配置到 Python 失败: {}", e);
             }
 
-            // 存储全局 AppHandle，供 Python 发送 Tauri 事件
-            let _ = APP_HANDLE.set(app.handle().clone());
-            python::register_app_handle();
+            // 初始化事件模块，供 Rust 侧 task_service 使用
+            services::download::events::init(app.handle());
+
+            // 注册 Python 事件桥接
+            python::register_app_handle(app.handle());
             info!("AppHandle 已注册到 Python 模块");
 
             // 注册数据库桥接方法，供 Python 直接写入数据库
-            python::register_db_bridge();
+            python::register_db_bridge(app.handle());
             info!("数据库桥接已注册到 Python 模块");
 
             info!("应用初始化完成");

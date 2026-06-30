@@ -15,7 +15,7 @@
 
 use pyo3::prelude::*;
 use serde_json::Value;
-use tauri::Manager;
+use tauri::{AppHandle, Manager};
 use log::{info, warn};
 
 /// 递归将 JSON 中的 bool 值转为 int（Python True/False → 1/0）
@@ -33,7 +33,7 @@ pub(crate) fn bool_to_int(v: &mut Value) {
 }
 
 /// 注册数据库方法到 Python core.db_bridge 模块
-pub fn register_db_bridge() {
+pub fn register_db_bridge(app_handle: &AppHandle) {
     Python::with_gil(|py| {
         let db_bridge = match py.import_bound("core.db_bridge") {
             Ok(m) => m,
@@ -44,14 +44,14 @@ pub fn register_db_bridge() {
         };
 
         // 注册 save_download_record
+        let h1 = app_handle.clone();
         let save_download_fn = pyo3::types::PyCFunction::new_closure_bound(
             py,
             None,
             None,
             move |args: &Bound<'_, pyo3::types::PyTuple>, _kwargs: Option<&Bound<'_, pyo3::types::PyDict>>| -> PyResult<()> {
                 let data = args.get_item(0)?;
-                let app_handle = crate::APP_HANDLE.get()
-                    .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("AppHandle 未初始化"))?;
+                let state = h1.state::<crate::state::AppState>();
 
                 // 从 Python dict 提取字段
                 let aweme_id: Option<String> = data.get_item("aweme_id").ok().and_then(|v| v.extract().ok());
@@ -65,8 +65,6 @@ pub fn register_db_bridge() {
                 let status: String = data.get_item("status")?.extract()?;
                 let error_msg: Option<String> = data.get_item("error_msg").ok().and_then(|v| v.extract().ok());
 
-                // 获取数据库实例
-                let db = app_handle.state::<crate::db::Database>();
                 let record = crate::db::NewDownloadRecord {
                     aweme_id,
                     download_type,
@@ -80,7 +78,7 @@ pub fn register_db_bridge() {
                     error_msg,
                 };
 
-                match db.save_download(&record) {
+                match state.db.save_download(&record) {
                     Ok(id) => {
                         info!("[db_bridge] save_download_record 成功: id={}", id);
                     }
@@ -94,14 +92,14 @@ pub fn register_db_bridge() {
         ).expect("创建 save_download_record 闭包失败");
 
         // 注册 save_video_info
+        let h2 = app_handle.clone();
         let save_video_fn = pyo3::types::PyCFunction::new_closure_bound(
             py,
             None,
             None,
             move |args: &Bound<'_, pyo3::types::PyTuple>, _kwargs: Option<&Bound<'_, pyo3::types::PyDict>>| -> PyResult<()> {
                 let data = args.get_item(0)?;
-                let app_handle = crate::APP_HANDLE.get()
-                    .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("AppHandle 未初始化"))?;
+                let state = h2.state::<crate::state::AppState>();
 
                 // 将 Python dict 转为 JSON，修复 bool→int，再反序列化为 VideoInfo
                 let mut json_value = super::bridge::py_to_json_value(&data)?;
@@ -109,8 +107,7 @@ pub fn register_db_bridge() {
                 let video_info: crate::db::VideoInfo = serde_json::from_value(json_value)
                     .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("反序列化 VideoInfo 失败: {}", e)))?;
 
-                let db = app_handle.state::<crate::db::Database>();
-                match db.save_video(&video_info) {
+                match state.db.save_video(&video_info) {
                     Ok(_) => {
                         info!("[db_bridge] save_video_info 成功: aweme_id={}", video_info.aweme_id);
                     }
@@ -124,22 +121,21 @@ pub fn register_db_bridge() {
         ).expect("创建 save_video_info 闭包失败");
 
         // 注册 save_user_info
+        let h3 = app_handle.clone();
         let save_user_fn = pyo3::types::PyCFunction::new_closure_bound(
             py,
             None,
             None,
             move |args: &Bound<'_, pyo3::types::PyTuple>, _kwargs: Option<&Bound<'_, pyo3::types::PyDict>>| -> PyResult<()> {
                 let data = args.get_item(0)?;
-                let app_handle = crate::APP_HANDLE.get()
-                    .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("AppHandle 未初始化"))?;
+                let state = h3.state::<crate::state::AppState>();
 
                 let mut json_value = super::bridge::py_to_json_value(&data)?;
                 bool_to_int(&mut json_value);
                 let user_info: crate::db::UserInfo = serde_json::from_value(json_value)
                     .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("反序列化 UserInfo 失败: {}", e)))?;
 
-                let db = app_handle.state::<crate::db::Database>();
-                match db.save_user(&user_info) {
+                match state.db.save_user(&user_info) {
                     Ok(_) => {
                         info!("[db_bridge] save_user_info 成功: sec_user_id={}", user_info.sec_user_id);
                     }
@@ -153,14 +149,14 @@ pub fn register_db_bridge() {
         ).expect("创建 save_user_info 闭包失败");
 
         // 注册 save_live_record
+        let h4 = app_handle.clone();
         let save_live_record_fn = pyo3::types::PyCFunction::new_closure_bound(
             py,
             None,
             None,
             move |args: &Bound<'_, pyo3::types::PyTuple>, _kwargs: Option<&Bound<'_, pyo3::types::PyDict>>| -> PyResult<()> {
                 let data = args.get_item(0)?;
-                let app_handle = crate::APP_HANDLE.get()
-                    .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("AppHandle 未初始化"))?;
+                let state = h4.state::<crate::state::AppState>();
 
                 let room_id: Option<String> = data.get_item("room_id").ok().and_then(|v| v.extract().ok());
                 let web_rid: Option<String> = data.get_item("web_rid").ok().and_then(|v| v.extract().ok());
@@ -175,7 +171,6 @@ pub fn register_db_bridge() {
                 let ended_at: Option<i64> = data.get_item("ended_at").ok().and_then(|v| v.extract().ok());
                 let cover_url: Option<String> = data.get_item("cover_url").ok().and_then(|v| v.extract().ok());
 
-                let db = app_handle.state::<crate::db::Database>();
                 let record = crate::db::NewLiveRecord {
                     room_id,
                     web_rid,
@@ -191,7 +186,7 @@ pub fn register_db_bridge() {
                     cover_url,
                 };
 
-                match db.save_live_record(&record) {
+                match state.db.save_live_record(&record) {
                     Ok(id) => {
                         info!("[db_bridge] save_live_record 成功: id={}", id);
                     }
@@ -205,17 +200,16 @@ pub fn register_db_bridge() {
         ).expect("创建 save_live_record 闭包失败");
 
         // 注册 has_user（查询用户是否已存在）
+        let h5 = app_handle.clone();
         let has_user_fn = pyo3::types::PyCFunction::new_closure_bound(
             py,
             None,
             None,
             move |args: &Bound<'_, pyo3::types::PyTuple>, _kwargs: Option<&Bound<'_, pyo3::types::PyDict>>| -> PyResult<bool> {
                 let sec_user_id: String = args.get_item(0)?.extract()?;
-                let app_handle = crate::APP_HANDLE.get()
-                    .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("AppHandle 未初始化"))?;
+                let state = h5.state::<crate::state::AppState>();
 
-                let db = app_handle.state::<crate::db::Database>();
-                match db.get_user_by_sec_uid(&sec_user_id) {
+                match state.db.get_user_by_sec_uid(&sec_user_id) {
                     Ok(Some(_)) => Ok(true),
                     Ok(None) => Ok(false),
                     Err(e) => {

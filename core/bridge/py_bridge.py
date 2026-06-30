@@ -35,10 +35,6 @@ def _get_task_manager():
         from core.task.task_manager import task_manager
         _task_manager = task_manager
 
-        # 检查 Cookie 是否为空，如果为空则从 config.json 加载
-        if not _task_manager._cookie:
-            logger.info("[py_bridge] cookie 为空，尝试从 config 加载")
-            _task_manager._load_config()
         logger.info("[py_bridge] task_manager 初始化完成, cookie 长度=%d", len(_task_manager._cookie))
     return _task_manager
 

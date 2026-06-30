@@ -8,7 +8,7 @@
 use serde_json::Value;
 use tauri::State;
 
-use crate::db::Database;
+use crate::state::AppState;
 use crate::services::download::task_service::TaskApplicationService;
 use crate::services::download::{DownloadMode, DownloadRequest};
 
@@ -18,17 +18,18 @@ use crate::services::download::{DownloadMode, DownloadRequest};
 /// 其他 mode 暂时回退到 Python（Phase 5 逐步迁移）。
 #[tauri::command(rename_all = "snake_case")]
 pub async fn start_download(
-    db: State<'_, Database>,
+    state: State<'_, AppState>,
     mode: String,
     url: String,
 ) -> Result<Value, String> {
+    let db = &state.db;
     let download_mode = DownloadMode::from_str(&mode)
         .ok_or_else(|| format!("未知的下载模式: {}", mode))?;
 
     match download_mode {
         DownloadMode::One => {
             // Rust-owned 路径：通过 TaskApplicationService
-            let service = TaskApplicationService::new(&db);
+            let service = TaskApplicationService::new(db);
             let request = DownloadRequest {
                 mode: download_mode,
                 url,
@@ -41,7 +42,7 @@ pub async fn start_download(
         }
         DownloadMode::Music => {
             // Phase 5.1: music 迁移到 Rust-owned 路径
-            let service = TaskApplicationService::new(&db);
+            let service = TaskApplicationService::new(db);
             let task_id = service.start_music_download(&url)?;
             Ok(serde_json::json!({
                 "success": true,
@@ -52,7 +53,7 @@ pub async fn start_download(
             // Phase 5.2: batch modes 迁移到 Rust-owned 路径
             // 注意：当前实现是同步的，会阻塞直到下载完成
             // TODO: 改为异步执行，立即返回 task_id
-            let service = TaskApplicationService::new(&db);
+            let service = TaskApplicationService::new(db);
             let task_id = service.start_batch_download_mode(download_mode, &url)?;
             Ok(serde_json::json!({
                 "success": true,

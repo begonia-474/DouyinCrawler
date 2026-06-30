@@ -48,20 +48,6 @@ class TaskManager:
         self._max_tasks: int = 10
         self._handler: DouyinHandler | None = None
         self._live_mgr = LiveRecordManager()
-        self._load_config()
-
-    # ============================================================
-    # 配置管理
-    # ============================================================
-
-    def _load_config(self):
-        """Phase 6: 不再直接读取 config/app.json，由 Rust init_config() 推送配置。"""
-        logger.info("[_load_config] 跳过文件读取，等待 Rust 推送配置")
-
-    def _save_config(self):
-        """Phase 6: 已废弃，由 Rust ConfigManager 管理配置文件。保留方法签名避免调用方报错。"""
-        logger.debug("[_save_config] 已废弃，配置由 Rust 管理")
-        return
 
     def update_config(self, cookie: str = None, download_path: str = None,
                       naming: str = None, encryption: str = None, proxy: str = None,
