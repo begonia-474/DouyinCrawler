@@ -86,8 +86,8 @@ export function DownloadStatusCard() {
             )}
           </div>
 
-          {/* 进度条 + 计数（batch 任务运行中） */}
-          {task.task_type === "batch" && (isRunning || total > 0) && (
+          {/* 进度条 + 计数（批量任务运行中） */}
+          {(isRunning || total > 0) && (
             <div className="space-y-1.5">
               <Progress value={isRunning ? progressPercent : 100} className="h-1.5" />
               <div className="flex items-center justify-between text-xs text-muted-foreground">

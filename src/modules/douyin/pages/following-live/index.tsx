@@ -1,11 +1,10 @@
-import { useState, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Header } from "@/components/layout/header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AnimateEntry } from "@/components/shared/animate-entry";
 import { Bezel } from "@/components/shared/bezel";
-import { getFollowingLive } from "@/lib/api";
+import { useFollowingLiveQuery } from "@/lib/queries";
 import { formatCount } from "@/lib/utils";
 import type { FollowingLiveItem } from "@/lib/api-types";
 import {
@@ -26,27 +25,11 @@ function Dot({ className }: { className?: string }) {
 
 export default function FollowingLivePage() {
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(false);
-  const [lives, setLives] = useState<FollowingLiveItem[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const { data, isLoading, error, refetch, isFetching } = useFollowingLiveQuery();
 
-  const fetchLives = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-
-    const res = await getFollowingLive();
-    if (res.success && res.data?.lives) {
-      setLives(res.data.lives);
-    } else {
-      setError(res.error || "获取关注直播列表失败");
-    }
-
-    setLoading(false);
-  }, []);
-
-  useEffect(() => {
-    fetchLives();
-  }, [fetchLives]);
+  const lives = (data?.data?.lives ?? []) as unknown as FollowingLiveItem[];
+  const errorMsg = error?.message || (!data?.success ? (data?.error ?? null) : null);
+  const loading = isLoading || isFetching;
 
   return (
     <>
@@ -59,13 +42,13 @@ export default function FollowingLivePage() {
           <p className="text-sm text-muted-foreground tracking-wide">
             {lives.length > 0 ? `${lives.length} 位主播正在直播` : ""}
           </p>
-          <Button variant="capsule" size="sm" onClick={fetchLives} disabled={loading}>
+          <Button variant="capsule" size="sm" onClick={() => refetch()} disabled={loading}>
             {loading ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1.5" />}
             刷新
           </Button>
         </div>
 
-        <ErrorBanner message={error} />
+        <ErrorBanner message={errorMsg} />
 
         {loading && lives.length === 0 && (
           <div className="flex items-center justify-center py-16">
@@ -73,7 +56,7 @@ export default function FollowingLivePage() {
           </div>
         )}
 
-        {!loading && lives.length === 0 && !error && (
+        {!loading && lives.length === 0 && !errorMsg && (
           <Bezel radius="xl">
             <div className="p-14 text-center">
               <Radio className="h-10 w-10 text-muted-foreground/30 mx-auto mb-4" />

@@ -38,7 +38,7 @@ export default function LivePage() {
   // 使用全局 store
   const { tasks: allTasks, connect: connectLive, updateTask, removeTask } = useTaskStore();
   const liveTasks = Object.fromEntries(
-    Object.entries(allTasks).filter(([, t]) => t.task_type === "live")
+    Object.entries(allTasks).filter(([, t]) => t.mode === "live")
   );
 
   // 查找当前正在进行的录制任务
@@ -66,7 +66,8 @@ export default function LivePage() {
               // 添加到全局 store
               useTaskStore.getState().addTask({
                 task_id: task.task_id,
-                task_type: "live",
+                task_type: "typed",
+                mode: "live",
                 url: task.url || "",
                 status: task.status as string,
                 title: task.title,
@@ -138,7 +139,8 @@ export default function LivePage() {
       // 添加到全局 store
       useTaskStore.getState().addTask({
         task_id: res.data.task_id,
-        task_type: "live",
+        task_type: "typed",
+        mode: "live",
         url: lastParsedUrl.current,
         status: "starting",
       });

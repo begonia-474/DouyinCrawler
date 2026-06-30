@@ -4,20 +4,23 @@
 //! 内部使用 `spawn_blocking` 将 GIL 阻塞移出 tokio 运行时线程。
 
 use pyo3::prelude::*;
+use serde::Serialize;
 use serde_json::Value;
 use log::info;
 
 /// 在 spawn_blocking 线程中执行 Python 调用，避免阻塞 tokio 运行时。
 ///
+/// 泛型版本：闭包可返回任意 `PyResult<T>` 类型。
 /// 用法：
 /// ```rust
-/// let result = run_python_blocking("parse_video", || {
-///     crate::python::parse_video(&url)
+/// let result: VideoParseResult = run_python_blocking("parse_video", || {
+///     crate::python::handler::parse_video(&url)
 /// }).await?;
 /// ```
-pub async fn run_python_blocking<F>(label: &str, f: F) -> Result<Value, String>
+pub async fn run_python_blocking<T, F>(label: &str, f: F) -> Result<T, String>
 where
-    F: FnOnce() -> PyResult<Value> + Send + 'static,
+    T: Send + 'static,
+    F: FnOnce() -> PyResult<T> + Send + 'static,
 {
     let label = label.to_string();
     let start = std::time::Instant::now();

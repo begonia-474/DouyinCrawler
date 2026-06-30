@@ -1,37 +1,19 @@
-import { useState, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Header } from "@/components/layout/header";
 import { AnimateEntry } from "@/components/shared/animate-entry";
 import { Bezel } from "@/components/shared/bezel";
 import { Badge } from "@/components/ui/badge";
-import { getUserCollects } from "@/lib/api";
+import { useCollectsListQuery } from "@/lib/queries";
 import type { CollectsFolder } from "@/lib/api-types";
 import { FolderOpen, ChevronRight, Loader2, Heart } from "lucide-react";
 import { ErrorBanner } from "@/components/shared/error-banner";
 
 export default function FavoritesPage() {
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(false);
-  const [collects, setCollects] = useState<CollectsFolder[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const { data, isLoading, error } = useCollectsListQuery();
 
-  const fetchCollects = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-
-    const res = await getUserCollects();
-    if (res.success && res.data?.collects) {
-      setCollects(res.data.collects as unknown as CollectsFolder[]);
-    } else {
-      setError(res.error || "获取收藏夹失败");
-    }
-
-    setLoading(false);
-  }, []);
-
-  useEffect(() => {
-    fetchCollects();
-  }, [fetchCollects]);
+  const collects = (data?.data?.collects ?? []) as unknown as CollectsFolder[];
+  const errorMsg = error?.message || (!data?.success ? (data?.error ?? null) : null);
 
   return (
     <>
@@ -40,15 +22,15 @@ export default function FavoritesPage() {
       </AnimateEntry>
 
       <div className="space-y-5">
-        <ErrorBanner message={error} />
+        <ErrorBanner message={errorMsg} />
 
-        {loading && (
+        {isLoading && (
           <div className="flex items-center justify-center py-16">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         )}
 
-        {!loading && collects.length === 0 && !error && (
+        {!isLoading && collects.length === 0 && !errorMsg && (
           <Bezel radius="xl">
             <div className="p-12 text-center">
               <Heart className="h-12 w-12 text-muted-foreground/30 mx-auto mb-4" />
@@ -60,7 +42,7 @@ export default function FavoritesPage() {
           </Bezel>
         )}
 
-        {!loading && collects.length > 0 && (
+        {!isLoading && collects.length > 0 && (
           <div className="space-y-3">
             {collects.map((folder, i) => (
               <AnimateEntry key={folder.id} delay={i * 40}>

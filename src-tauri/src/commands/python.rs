@@ -6,56 +6,74 @@
 //!
 //! 使用 `py_command_*!` 宏消除样板代码（覆盖 ~70% 命令）。
 
+use serde::Serialize;
 use serde_json::Value;
+use crate::error::AppError;
 use crate::python::runtime::run_python_blocking;
+use crate::python::responses::*;
 
 // ============================================================
 // 命令宏定义（消除样板代码）
+//
+// 泛型参数 $ret 必须实现 BridgeResponse trait。
+// 宏内部自动调用 into_result() 将 success: false 转为 Err(AppError)。
 // ============================================================
 
 macro_rules! py_command_str {
-    ($name:ident, $handler:path) => {
+    ($name:ident, $handler:path, $ret:ty) => {
         #[tauri::command(rename_all = "snake_case")]
-        pub async fn $name(url: String) -> Result<Value, String> {
-            run_python_blocking(stringify!($name), move || $handler(&url)).await
+        pub async fn $name(url: String) -> Result<$ret, AppError> {
+            run_python_blocking(stringify!($name), move || $handler(&url))
+                .await
+                .map_err(AppError::from)?
+                .into_result()
         }
     };
 }
 
 macro_rules! py_command_str_opts {
-    ($name:ident, $handler:path) => {
+    ($name:ident, $handler:path, $ret:ty) => {
         #[tauri::command(rename_all = "snake_case")]
-        pub async fn $name(url: String, cursor: Option<i64>, count: Option<i64>) -> Result<Value, String> {
+        pub async fn $name(url: String, cursor: Option<i64>, count: Option<i64>) -> Result<$ret, AppError> {
             run_python_blocking(stringify!($name), move || {
                 $handler(&url, cursor.unwrap_or(0), count.unwrap_or(20))
-            }).await
+            }).await.map_err(AppError::from)?.into_result()
         }
     };
 }
 
 macro_rules! py_command_str_ii {
-    ($name:ident, $handler:path) => {
+    ($name:ident, $handler:path, $ret:ty) => {
         #[tauri::command(rename_all = "snake_case")]
-        pub async fn $name(url: String, arg1: i64, arg2: i64) -> Result<Value, String> {
-            run_python_blocking(stringify!($name), move || $handler(&url, arg1, arg2)).await
+        pub async fn $name(url: String, arg1: i64, arg2: i64) -> Result<$ret, AppError> {
+            run_python_blocking(stringify!($name), move || $handler(&url, arg1, arg2))
+                .await
+                .map_err(AppError::from)?
+                .into_result()
         }
     };
 }
 
 macro_rules! py_command_i64 {
-    ($name:ident, $handler:path) => {
+    ($name:ident, $handler:path, $ret:ty) => {
         #[tauri::command(rename_all = "snake_case")]
-        pub async fn $name(count: i64) -> Result<Value, String> {
-            run_python_blocking(stringify!($name), move || $handler(count)).await
+        pub async fn $name(count: i64) -> Result<$ret, AppError> {
+            run_python_blocking(stringify!($name), move || $handler(count))
+                .await
+                .map_err(AppError::from)?
+                .into_result()
         }
     };
 }
 
 macro_rules! py_command_noargs {
-    ($name:ident, $handler:path) => {
+    ($name:ident, $handler:path, $ret:ty) => {
         #[tauri::command(rename_all = "snake_case")]
-        pub async fn $name() -> Result<Value, String> {
-            run_python_blocking(stringify!($name), || $handler()).await
+        pub async fn $name() -> Result<$ret, AppError> {
+            run_python_blocking(stringify!($name), || $handler())
+                .await
+                .map_err(AppError::from)?
+                .into_result()
         }
     };
 }
@@ -64,76 +82,80 @@ macro_rules! py_command_noargs {
 // async 命令 — 通过 spawn_blocking 执行（宏展开）
 // ============================================================
 
-// 模式 1: (url: String) — 5 commands
-py_command_str!(py_parse_video, crate::python::parse_video);
-py_command_str!(py_get_live_info, crate::python::get_live_info);
-py_command_str!(py_get_user_profile, crate::python::get_user_profile);
-py_command_str!(py_get_post_stats, crate::python::get_post_stats);
-py_command_str!(py_start_live_record, crate::python::start_live_record);
+// 模式 1: (url: String)
+py_command_str!(py_parse_video, crate::python::handler::parse_video, VideoParseResult);
+py_command_str!(py_get_live_info, crate::python::handler::get_live_info, LiveInfoResult);
+py_command_str!(py_get_user_profile, crate::python::handler::get_user_profile, UserProfileResult);
+py_command_str!(py_get_post_stats, crate::python::handler::get_post_stats, PostStatsResult);
+py_command_str!(py_start_live_record, crate::python::handler::start_live_record, LiveRecordResult);
 
-// 模式 2: (url: String, cursor: Option<i64>, count: Option<i64>) — 4 commands
-py_command_str_opts!(py_get_user_posts, crate::python::get_user_posts);
-py_command_str_opts!(py_get_mix_info, crate::python::get_mix_info);
-py_command_str_opts!(py_get_collects_video_list, crate::python::get_collects_video_list);
-py_command_str_opts!(py_get_user_likes, crate::python::get_user_likes);
+// 模式 2: (url: String, cursor: Option<i64>, count: Option<i64>)
+py_command_str_opts!(py_get_user_posts, crate::python::handler::get_user_posts, UserPostsResult);
+py_command_str_opts!(py_get_mix_info, crate::python::handler::get_mix_info, MixInfoResult);
+py_command_str_opts!(py_get_collects_video_list, crate::python::handler::get_collects_video_list, CollectsVideoListResult);
+py_command_str_opts!(py_get_user_likes, crate::python::handler::get_user_likes, UserLikesResult);
 
-// 模式 3: (url: String, arg1: i64, arg2: i64) — 4 commands
-py_command_str_ii!(py_search_videos, crate::python::search_videos);
-py_command_str_ii!(py_get_following_list, crate::python::get_following_list);
-py_command_str_ii!(py_get_follower_list, crate::python::get_follower_list);
-py_command_str_ii!(py_get_comments, crate::python::get_comments);
+// 模式 3: (url: String, arg1: i64, arg2: i64)
+py_command_str_ii!(py_search_videos, crate::python::handler::search_videos, SearchResult);
+py_command_str_ii!(py_get_following_list, crate::python::handler::get_following_list, FollowingListResult);
+py_command_str_ii!(py_get_follower_list, crate::python::handler::get_follower_list, FollowerListResult);
+py_command_str_ii!(py_get_comments, crate::python::handler::get_comments, CommentsResult);
 
-// 模式 4: (count: i64) — 1 command
-py_command_i64!(py_get_tab_feed, crate::python::get_tab_feed);
+// 模式 4: (count: i64)
+py_command_i64!(py_get_tab_feed, crate::python::handler::get_tab_feed, TabFeedResult);
 
-// 模式 5: () — 2 commands
-py_command_noargs!(py_get_collects_list, crate::python::get_collects_list);
-py_command_noargs!(py_get_following_live, crate::python::get_following_live);
+// 模式 5: ()
+py_command_noargs!(py_get_collects_list, crate::python::handler::get_collects_list, CollectsListResult);
+py_command_noargs!(py_get_following_live, crate::python::handler::get_following_live, FollowingLiveResult);
 
 // ============================================================
-// 特殊参数模式 — 手动定义（参数组合独特，不值得单独建宏）
+// 特殊参数模式 — 手动定义
 // ============================================================
 
 #[tauri::command(rename_all = "snake_case")]
-pub async fn py_start_download(mode: String, url: String) -> Result<Value, String> {
-    run_python_blocking("start_download", move || {
-        crate::python::start_download(&mode, &url)
-    }).await
-}
-
-#[tauri::command(rename_all = "snake_case")]
-pub async fn py_download_music(play_url: String, title: String, author: String) -> Result<Value, String> {
-    run_python_blocking("download_music", move || {
-        crate::python::download_music(&play_url, &title, &author)
-    }).await
-}
-
-#[tauri::command(rename_all = "snake_case")]
-pub async fn py_get_comment_replies(url: String, comment_id: String, cursor: i64, count: i64) -> Result<Value, String> {
-    run_python_blocking("get_comment_replies", move || {
-        crate::python::get_comment_replies(&url, &comment_id, cursor, count)
-    }).await
-}
-
-#[tauri::command(rename_all = "snake_case")]
-pub async fn py_get_music_collection(cursor: i64, count: i64) -> Result<Value, String> {
+pub async fn py_get_music_collection(cursor: i64, count: i64) -> Result<MusicCollectionResult, AppError> {
     run_python_blocking("get_music_collection", move || {
-        crate::python::get_music_collection(cursor, count)
-    }).await
+        crate::python::handler::get_music_collection(cursor, count)
+    }).await.map_err(AppError::from)?.into_result()
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub async fn py_get_follow_feed(cursor: i64, count: i64) -> Result<Value, String> {
+pub async fn py_get_follow_feed(cursor: i64, count: i64) -> Result<FollowFeedResult, AppError> {
     run_python_blocking("get_follow_feed", move || {
-        crate::python::get_follow_feed(cursor, count)
-    }).await
+        crate::python::handler::get_follow_feed(cursor, count)
+    }).await.map_err(AppError::from)?.into_result()
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub async fn py_get_friend_feed(cursor: i64, count: i64) -> Result<Value, String> {
+pub async fn py_get_friend_feed(cursor: i64, count: i64) -> Result<FriendFeedResult, AppError> {
     run_python_blocking("get_friend_feed", move || {
-        crate::python::get_friend_feed(cursor, count)
-    }).await
+        crate::python::handler::get_friend_feed(cursor, count)
+    }).await.map_err(AppError::from)?.into_result()
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn py_get_comment_replies(url: String, comment_id: String, cursor: i64, count: i64) -> Result<CommentsResult, AppError> {
+    run_python_blocking("get_comment_replies", move || {
+        crate::python::handler::get_comment_replies(&url, &comment_id, cursor, count)
+    }).await.map_err(AppError::from)?.into_result()
+}
+
+// ============================================================
+// 下载类命令 — 保持返回 Value（由 task_service.rs 处理）
+// ============================================================
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn py_start_download(mode: String, url: String) -> Result<Value, AppError> {
+    run_python_blocking("start_download", move || {
+        crate::python::handler::start_download(&mode, &url)
+    }).await.map_err(AppError::from)
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn py_download_music(play_url: String, title: String, author: String) -> Result<Value, AppError> {
+    run_python_blocking("download_music", move || {
+        crate::python::handler::download_music(&play_url, &title, &author)
+    }).await.map_err(AppError::from)
 }
 
 // ============================================================
@@ -141,16 +163,20 @@ pub async fn py_get_friend_feed(cursor: i64, count: i64) -> Result<Value, String
 // ============================================================
 
 #[tauri::command(rename_all = "snake_case")]
-pub fn py_stop_live_record(task_id: String) -> Result<Value, String> {
-    crate::python::stop_live_record(&task_id).map_err(|e| e.to_string())
+pub fn py_stop_live_record(task_id: String) -> Result<LiveStatusResult, AppError> {
+    crate::python::handler::stop_live_record(&task_id)
+        .map_err(|e| AppError::from(e.to_string()))?
+        .into_result()
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub fn py_get_live_status() -> Result<Value, String> {
-    crate::python::get_live_status().map_err(|e| e.to_string())
+pub fn py_get_live_status() -> Result<LiveStatusResult, AppError> {
+    crate::python::handler::get_live_status()
+        .map_err(|e| AppError::from(e.to_string()))?
+        .into_result()
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub fn py_test_emit() -> Result<Value, String> {
-    crate::python::test_emit().map_err(|e| e.to_string())
+pub fn py_test_emit() -> Result<Value, AppError> {
+    crate::python::handler::test_emit().map_err(|e| AppError::from(e.to_string()))
 }

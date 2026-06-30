@@ -4,20 +4,20 @@ import { queryClient } from "@/lib/query-client";
 
 export interface UnifiedTask {
   task_id: string;
-  task_type: "batch" | "live" | "typed";
-  // TaskEvent 对齐字段（Python / Rust 统一发射）
+  task_type: "typed";
+  // TaskEvent 字段
   event_type?: "started" | "progress" | "finished";
-  // batch/typed 字段
-  type?: string;       // download_type: user_post / user_like / mix / collects
+  mode?: string;       // download mode: one / post / like / mix / collects / live / music
   url?: string;
   status: string;      // starting | running | completed | error | recording | stopping
-  mode?: string;       // download mode: one / post / like / mix / collects / live / music
   total?: number;
   completed?: number;
   failed?: number;
   skipped?: number;
   current_item?: string;
-  // live 字段
+  error_msg?: string;
+  // batch/live 扩展字段（Python 侧可能发送）
+  type?: string;
   title?: string;
   nickname?: string;
   room_id?: string;
@@ -29,7 +29,6 @@ export interface UnifiedTask {
   ended_at?: number;
   cover_url?: string;
   error?: string;
-  error_msg?: string;
 }
 
 interface TaskState {
@@ -57,24 +56,23 @@ const TERMINAL_STATUSES = new Set<string>(["completed", "error", "cancelled"]);
 function mergePatch(
   old: UnifiedTask | undefined,
   patch: Record<string, unknown>,
-  taskType: "batch" | "live" | "typed",
 ): UnifiedTask {
   const base: UnifiedTask = old ?? {
     task_id: (patch.task_id as string) ?? "",
-    task_type: taskType,
+    task_type: "typed",
     status: "",
   };
 
-  const merged: UnifiedTask = { ...base, task_type: taskType };
+  const merged: UnifiedTask = { ...base, task_type: "typed" };
 
   // 只覆盖 patch 中明确存在的字段（undefined 跳过）
   const fields: (keyof UnifiedTask)[] = [
     "event_type",
     "status", "url", "type", "mode",
-    "total", "completed", "failed", "skipped", "current_item",
+    "total", "completed", "failed", "skipped", "current_item", "error_msg",
     "title", "nickname", "room_id", "web_rid",
     "file", "file_size", "duration_sec", "started_at", "ended_at",
-    "cover_url", "error", "error_msg",
+    "cover_url", "error",
   ];
 
   for (const key of fields) {
@@ -139,70 +137,37 @@ export const useTaskStore = create<TaskState>((set) => ({
         return;
       }
 
-      const taskType = msg.task_type;
       const data = msg.data ?? {};
 
-      // 处理 batch/live 事件（Python 路径，已对齐 event_type 字段）
-      if (taskType === "batch" || taskType === "live") {
-        const patch = {
-          task_id: taskId,
-          event_type: data.event_type as string | undefined,
-          status: data.status as string | undefined,
-          url: data.url as string | undefined,
-          type: data.type as string | undefined,
-          mode: data.mode as string | undefined,
-          total: data.total as number | undefined,
-          completed: data.completed as number | undefined,
-          failed: data.failed as number | undefined,
-          skipped: data.skipped as number | undefined,
-          current_item: data.current_item as string | undefined,
-          title: data.title as string | undefined,
-          nickname: data.nickname as string | undefined,
-          room_id: data.room_id as string | undefined,
-          web_rid: data.web_rid as string | undefined,
-          file: data.file as string | undefined,
-          file_size: data.file_size as number | undefined,
-          duration_sec: data.duration_sec as number | undefined,
-          started_at: data.started_at as number | undefined,
-          ended_at: data.ended_at as number | undefined,
-          cover_url: data.cover_url as string | undefined,
-          error: data.error as string | undefined,
-        };
+      // 统一处理所有事件（task_type 始终为 "typed"）
+      // data 包含 TaskEvent 的所有字段（event_type, task_id, mode, url, patch.*）
+      const patch: Record<string, unknown> = {
+        task_id: taskId,
+      };
 
-        set((state) => ({
-          tasks: {
-            ...state.tasks,
-            [taskId]: mergePatch(state.tasks[taskId], patch, taskType),
-          },
-          connected: true,
-        }));
+      // 复制所有字段到 patch（前端 UnifiedTask 会处理）
+      const fields = [
+        "event_type", "status", "url", "type", "mode",
+        "total", "completed", "failed", "skipped", "current_item", "error_msg",
+        "title", "nickname", "room_id", "web_rid",
+        "file", "file_size", "duration_sec", "started_at", "ended_at",
+        "cover_url", "error",
+      ];
+
+      for (const key of fields) {
+        const val = data[key];
+        if (val !== undefined && val !== null) {
+          patch[key] = val;
+        }
       }
 
-      // 处理 typed 事件（Rust 新路径，TaskEvent 通过 serde(flatten) 展开在 data 中）
-      if (taskType === "typed") {
-        // TaskEvent 字段直接在 data 顶层（serde(flatten) + event_type）
-        const patch = {
-          task_id: taskId,
-          event_type: data.event_type as string | undefined,
-          status: data.status as string | undefined,
-          url: data.url as string | undefined,
-          mode: data.mode as string | undefined,
-          total: data.total as number | undefined,
-          completed: data.completed as number | undefined,
-          failed: data.failed as number | undefined,
-          skipped: data.skipped as number | undefined,
-          current_item: data.current_item as string | undefined,
-          error_msg: data.error_msg as string | undefined,
-        };
-
-        set((state) => ({
-          tasks: {
-            ...state.tasks,
-            [taskId]: mergePatch(state.tasks[taskId], patch, taskType),
-          },
-          connected: true,
-        }));
-      }
+      set((state) => ({
+        tasks: {
+          ...state.tasks,
+          [taskId]: mergePatch(state.tasks[taskId], patch),
+        },
+        connected: true,
+      }));
 
       // 终态：刷新 DB 查询缓存（事件只是 hint，DB 是真相）
       const currentStatus = (data.status as string) ?? "";
@@ -211,7 +176,9 @@ export const useTaskStore = create<TaskState>((set) => ({
         void queryClient.invalidateQueries({ queryKey: ["download-stats"] });
         void queryClient.invalidateQueries({ queryKey: ["download-tasks"] });
         void queryClient.invalidateQueries({ queryKey: ["download-task-detail"] });
-        if (taskType === "live") {
+
+        const mode = (data.mode as string) ?? "";
+        if (mode === "live") {
           void queryClient.invalidateQueries({ queryKey: ["live-records"] });
           void queryClient.invalidateQueries({ queryKey: ["live-record-count"] });
         } else {

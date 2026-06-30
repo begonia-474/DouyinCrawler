@@ -22,4 +22,12 @@ export const queryKeys = {
   downloadTaskItems: (taskId: string, status?: string) => ["download-task-items", taskId, status] as const,
   downloadTaskItemCounts: (taskId: string) => ["download-task-item-counts", taskId] as const,
   videoParse: (url: string) => ["video-parse", url] as const,
+  // Feed
+  tabFeed: (params: QueryParams = {}) => ["tab-feed", params] as const,
+  followFeed: (params: QueryParams = {}) => ["follow-feed", params] as const,
+  friendFeed: (params: QueryParams = {}) => ["friend-feed", params] as const,
+  // 收藏夹
+  collectsList: () => ["collects-list"] as const,
+  // 关注直播
+  followingLive: () => ["following-live"] as const,
 };

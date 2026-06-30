@@ -1,10 +1,13 @@
 //! Tauri 事件发射模块
 //!
-//! 供 Python 通过 PyO3 调用，将任务状态推送到前端
+//! 供 Python 通过 PyO3 调用，将任务状态推送到前端。
+//! 统一事件格式：所有事件使用 task_type: "typed" + TaskEvent 兼容结构。
 
 use pyo3::prelude::*;
 use tauri::{AppHandle, Emitter};
 use log::{info, warn};
+
+use crate::services::download::{DownloadMode, TaskEvent, TaskPatch, TaskStatus, TaskEventType};
 
 /// 注册 emit_task_update 到 Python core.tauri_bridge 模块
 pub fn register_app_handle(app_handle: &AppHandle) {
@@ -19,6 +22,7 @@ pub fn register_app_handle(app_handle: &AppHandle) {
         };
 
         // 创建一个 Python 可调用的闭包，包装 Rust 的 emit_task_update
+        // 签名: _emit_func(task_id: str, task_type: str, data: dict) -> None
         let emit_fn = pyo3::types::PyCFunction::new_closure_bound(
             py,
             None,
@@ -30,14 +34,12 @@ pub fn register_app_handle(app_handle: &AppHandle) {
 
                 info!("[emit] Python 调用 emit: task_id={}, task_type={}", task_id, task_type);
 
-                // 将 Python dict 转为 JSON（使用统一桥接辅助函数）
+                // 将 Python dict 转为 JSON
                 let json_value = super::bridge::py_to_json_value(&data)?;
 
-                let payload = serde_json::json!({
-                    "task_id": task_id,
-                    "task_type": task_type,
-                    "data": json_value,
-                });
+                // 统一格式：所有事件使用 task_type: "typed"
+                // 将 Python 的 batch/live 事件格式化为 TaskEvent 兼容结构
+                let payload = format_event_payload(&task_id, &task_type, &json_value);
 
                 info!("[emit] 发送 Tauri 事件: task-update, payload={}", payload);
                 handle.emit("task-update", &payload)
@@ -71,4 +73,73 @@ pub fn register_app_handle(app_handle: &AppHandle) {
             }
         }
     });
+}
+
+/// 将 Python 事件格式化为 TaskEvent 兼容的 JSON payload
+///
+/// 统一规则：
+/// - task_type 始终为 "typed"
+/// - data 包含 TaskEvent 的所有字段（event_type, task_id, mode, url, patch.*）
+/// - Python 特有字段（title, nickname 等）放在 data 顶层，前端 UnifiedTask 会处理
+fn format_event_payload(task_id: &str, python_task_type: &str, data: &serde_json::Value) -> serde_json::Value {
+    // 从 Python data 中提取字段
+    let event_type_str = data.get("event_type").and_then(|v| v.as_str()).unwrap_or("progress");
+    let event_type = match event_type_str {
+        "started" => "started",
+        "finished" => "completed",
+        "progress" => "progress",
+        _ => "progress",
+    };
+
+    let status_str = data.get("status").and_then(|v| v.as_str()).unwrap_or("running");
+    let mode_str = data.get("mode").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let url = data.get("url").and_then(|v| v.as_str()).map(|s| s.to_string());
+
+    // 构建 patch 字段（TaskPatch 兼容）
+    let mut patch = serde_json::Map::new();
+    patch.insert("task_id".to_string(), serde_json::Value::String(task_id.to_string()));
+    patch.insert("status".to_string(), serde_json::Value::String(status_str.to_string()));
+
+    // 复制可选字段
+    for field in &["total", "completed", "failed", "skipped"] {
+        if let Some(val) = data.get(*field) {
+            patch.insert(field.to_string(), val.clone());
+        }
+    }
+    for field in &["current_item", "error_msg", "error"] {
+        if let Some(val) = data.get(*field) {
+            patch.insert(field.to_string(), val.clone());
+        }
+    }
+
+    // Python 特有字段（live 事件等）也复制到 patch 中
+    for field in &["title", "nickname", "room_id", "web_rid", "file", "file_size", "duration_sec", "started_at", "ended_at", "cover_url", "type"] {
+        if let Some(val) = data.get(*field) {
+            patch.insert(field.to_string(), val.clone());
+        }
+    }
+
+    // 构建完整的 TaskEvent 兼容 payload
+    let mut event_data = serde_json::Map::new();
+    event_data.insert("event_type".to_string(), serde_json::Value::String(event_type.to_string()));
+    event_data.insert("task_id".to_string(), serde_json::Value::String(task_id.to_string()));
+
+    if let Some(mode) = &mode_str {
+        event_data.insert("mode".to_string(), serde_json::Value::String(mode.clone()));
+    }
+    if let Some(url) = &url {
+        event_data.insert("url".to_string(), serde_json::Value::String(url.clone()));
+    }
+
+    // 展开 patch 字段到 data 顶层（与 Rust TaskEvent 的 serde(flatten) 一致）
+    for (k, v) in patch {
+        event_data.insert(k, v);
+    }
+
+    // 统一使用 task_type: "typed"
+    serde_json::json!({
+        "task_id": task_id,
+        "task_type": "typed",
+        "data": event_data,
+    })
 }

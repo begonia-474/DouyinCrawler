@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { getDownloadStats, getDownloads, getLiveRecordCount, getLiveRecords, getMusicCollectionCountFromDB, getMusicCollectionFromDB, getUserCount, getUserStats, getUsers, getVideoCount, getVideos, getVideoStats, getDownloadTasks, getDownloadTaskDetail, getDownloadTaskItems, getDownloadTaskItemCounts, getDownloadTrend, getTopAuthors, getStorageAnalysis, dbHealthCheck, getPostDetail } from "@/lib/api";
+import { getDownloadStats, getDownloads, getLiveRecordCount, getLiveRecords, getMusicCollectionCountFromDB, getMusicCollectionFromDB, getUserCount, getUserStats, getUsers, getVideoCount, getVideos, getVideoStats, getDownloadTasks, getDownloadTaskDetail, getDownloadTaskItems, getDownloadTaskItemCounts, getDownloadTrend, getTopAuthors, getStorageAnalysis, dbHealthCheck, getPostDetail, getTabFeed, getFollowFeed, getFriendFeed, getUserCollects, getFollowingLive } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 
 export function useDownloadsQuery(params: {
@@ -179,5 +179,62 @@ export function useVideoParseQuery(url: string | null) {
     queryFn: () => getPostDetail(url!),
     enabled: !!url,
     staleTime: 5 * 60 * 1000, // 5 分钟内不重新请求
+  });
+}
+
+// ============================================================
+// Feed 查询
+// ============================================================
+
+/** 推荐 Feed */
+export function useTabFeedQuery(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.tabFeed(),
+    queryFn: () => getTabFeed(),
+    enabled,
+    staleTime: 2 * 60 * 1000,
+  });
+}
+
+/** 关注 Feed */
+export function useFollowFeedQuery(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.followFeed(),
+    queryFn: () => getFollowFeed(),
+    enabled,
+    staleTime: 2 * 60 * 1000,
+  });
+}
+
+/** 朋友 Feed */
+export function useFriendFeedQuery(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.friendFeed(),
+    queryFn: () => getFriendFeed(),
+    enabled,
+    staleTime: 2 * 60 * 1000,
+  });
+}
+
+// ============================================================
+// 收藏夹 / 直播
+// ============================================================
+
+/** 我的收藏夹列表 */
+export function useCollectsListQuery() {
+  return useQuery({
+    queryKey: queryKeys.collectsList(),
+    queryFn: () => getUserCollects(),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** 关注直播列表 */
+export function useFollowingLiveQuery(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.followingLive(),
+    queryFn: () => getFollowingLive(),
+    enabled,
+    staleTime: 30 * 1000, // 直播数据 30s 缓存
   });
 }
