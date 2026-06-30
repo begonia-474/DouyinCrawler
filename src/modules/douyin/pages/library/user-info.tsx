@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Header } from "@/components/layout/header";
@@ -48,7 +49,7 @@ export default function LibraryUserInfoPage() {
   const handleDelete = (item: UserInfo) => {
     if (!window.confirm("确定删除这条用户记录？")) return;
     deleteUser.mutate(item.sec_user_id, {
-      onError: (err) => window.alert(err instanceof Error ? err.message : "删除失败"),
+      onError: (err) => toast.error(err instanceof Error ? err.message : "删除失败"),
     });
   };
 

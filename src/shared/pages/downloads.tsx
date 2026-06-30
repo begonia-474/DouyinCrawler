@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from "react";
+import { toast } from "sonner";
 import { useMergedTasks } from "@/hooks/use-merged-tasks";
 import { Header } from "@/components/layout/header";
 import { Button } from "@/components/ui/button";
@@ -47,7 +48,7 @@ export default function DownloadsPage() {
       const config = await getConfig();
       await openFolder(config.download_path);
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "打开文件夹失败");
+      toast.error(err instanceof Error ? err.message : "打开文件夹失败");
     }
   };
 
@@ -65,9 +66,9 @@ export default function DownloadsPage() {
       const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
       const savePath = `${config.download_path}/export_${dataType}_${ts}.json`;
       await exportData(dataType, savePath);
-      window.alert(`导出成功：${savePath}`);
+      toast.success(`导出成功：${savePath}`);
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "导出失败");
+      toast.error(err instanceof Error ? err.message : "导出失败");
     }
   };
 
@@ -79,7 +80,7 @@ export default function DownloadsPage() {
   const handleDeleteLiveRecord = (item: LiveRecord) => {
     if (!window.confirm("确定删除这条直播录制记录？")) return;
     deleteLive.mutate({ id: item.id, deleteFile: askDeleteFile(item.file_path) }, {
-      onError: (err) => window.alert(err instanceof Error ? err.message : "删除失败"),
+      onError: (err) => toast.error(err instanceof Error ? err.message : "删除失败"),
     });
   };
 

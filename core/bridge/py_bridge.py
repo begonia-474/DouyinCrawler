@@ -9,20 +9,57 @@ import uuid
 import logging
 from typing import Optional
 
+from core.models.responses import ErrorCode
+
 logger = logging.getLogger(__name__)
 
 
 def _safe_call(func):
-    """装饰器：统一捕获异常，返回 {success: False, error: ...}"""
+    """装饰器：统一捕获异常，根据异常类型设置 error_code，返回 {success: False, error_code: ..., error: ...}"""
     def wrapper(*args, **kwargs):
         try:
             return func(*args, **kwargs)
         except Exception as e:
             logger.error("[py_bridge] %s 异常: %s", func.__name__, e, exc_info=True)
-            return {"success": False, "error": str(e)}
+            error_code = _classify_error(e)
+            return {"success": False, "error_code": error_code.value, "error": str(e)}
     wrapper.__name__ = func.__name__
     wrapper.__doc__ = func.__doc__
     return wrapper
+
+
+def _classify_error(exc: Exception) -> ErrorCode:
+    """根据异常类型映射到 ErrorCode 枚举"""
+    try:
+        import httpx
+        if isinstance(exc, httpx.TimeoutException):
+            return ErrorCode.NETWORK_TIMEOUT
+        if isinstance(exc, httpx.HTTPStatusError):
+            status = exc.response.status_code
+            if status == 429:
+                return ErrorCode.RATE_LIMITED
+            if status in (401, 403):
+                return ErrorCode.COOKIE_EXPIRED
+            if status == 404:
+                return ErrorCode.VIDEO_NOT_FOUND
+            return ErrorCode.NETWORK_ERROR
+        if isinstance(exc, httpx.ConnectError):
+            return ErrorCode.NETWORK_ERROR
+    except ImportError:
+        pass
+
+    name = type(exc).__name__
+    if "Timeout" in name:
+        return ErrorCode.NETWORK_TIMEOUT
+    if "Connection" in name or "Connect" in name:
+        return ErrorCode.NETWORK_ERROR
+    if "Cookie" in name or "Auth" in name:
+        return ErrorCode.COOKIE_EXPIRED
+    if "Signature" in name:
+        return ErrorCode.SIGNATURE_ERROR
+    if "Parse" in name:
+        return ErrorCode.PARSE_ERROR
+    return ErrorCode.UNKNOWN
 
 
 # 延迟导入，避免循环导入
@@ -249,19 +286,9 @@ def download_music_batch(url: str) -> dict:
 
 @_safe_call
 def download_music(play_url: str, title: str, author: str = "") -> dict:
-    """下载音乐"""
+    """下载音乐（不写 DB，返回结果供 Rust/前端处理持久化）"""
     handler = _get_task_manager().handler
     result = _run_async(handler.handle_download_music(play_url, title, author))
-    # 下载成功后写入数据库
-    if result.get("success"):
-        from core.db import save_download_record
-        save_download_record(
-            download_type="music",
-            title=title,
-            author_nickname=author,
-            file_path=result.get("path"),
-            status="completed",
-        )
     return result
 
 

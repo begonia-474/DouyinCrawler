@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Header } from "@/components/layout/header";
@@ -52,7 +53,7 @@ export default function LibraryMusicPage() {
       ? window.confirm("是否同时删除这条记录对应的本地文件？\n\n取消则只删除记录。")
       : false;
     deleteMusic.mutate({ musicId: item.music_id, deleteFile }, {
-      onError: (err) => window.alert(err instanceof Error ? err.message : "删除失败"),
+      onError: (err) => toast.error(err instanceof Error ? err.message : "删除失败"),
     });
   };
 
