@@ -12,6 +12,12 @@
 注意：任务生命周期函数（create_task, update_task_status, create_task_item, update_task_item_status）
 已迁移到 Rust TaskApplicationService，不再通过 Python 桥接注册。
 
+P2-07 过渡状态：
+- save_live_record: [deprecated] 不再被 live_manager.py 调用，所有 live 记录通过 Rust emit 持久化。
+- save_download_record / save_video_info / save_user_info: 过渡路径，
+  P2-07 后新代码应通过 Rust TaskApplicationService 写入。
+- save_batch_results: 仍是下载流程的活跃路径，Phase 3 将迁移到 Rust。
+
 数据流：
     Python 业务逻辑 → db.py（透传）→ db_bridge.py（转发）→ Rust PyO3 closure（清洗+写入）→ db.rs（SQL）
 """
@@ -70,7 +76,10 @@ def save_user_info(user_data: dict) -> bool:
 
 
 def save_live_record(record: dict) -> bool:
-    """保存直播录制记录（通过 Rust 桥接）
+    """[deprecated] 保存直播录制记录（通过 Rust 桥接）
+
+    Deprecated: P2-02 后 live 记录由 Rust emit.rs 持久化。
+    此函数保留仅用于向前兼容，不应在新代码中调用。
 
     Args:
         record: 直播记录字典，字段参见 NewLiveRecord:

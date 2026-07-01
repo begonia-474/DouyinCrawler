@@ -20,6 +20,7 @@ use crate::lock_conn;
 /// impl TaskRepository for MockTaskRepo { ... }
 /// let service = TaskApplicationService::new(&mock_repo, adapter);
 /// ```
+#[allow(dead_code)] // TODO P2-01: may become used after download entry unification
 pub trait TaskRepository {
     fn create_task(&self, task: &NewDownloadTask) -> Result<()>;
     fn update_task_status(&self, task_id: &str, status: &str, error_msg: Option<&str>) -> Result<()>;

@@ -4,8 +4,6 @@
 //! 内部使用 `spawn_blocking` 将 GIL 阻塞移出 tokio 运行时线程。
 
 use pyo3::prelude::*;
-use serde::Serialize;
-use serde_json::Value;
 use log::info;
 
 /// 在 spawn_blocking 线程中执行 Python 调用，避免阻塞 tokio 运行时。

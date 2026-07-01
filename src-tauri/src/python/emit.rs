@@ -4,10 +4,8 @@
 //! 统一事件格式：所有事件使用 task_type: "typed" + TaskEvent 兼容结构。
 
 use pyo3::prelude::*;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use log::{info, warn};
-
-use crate::services::download::{DownloadMode, TaskEvent, TaskPatch, TaskStatus, TaskEventType};
 
 /// 注册 emit_task_update 到 Python core.tauri_bridge 模块
 pub fn register_app_handle(app_handle: &AppHandle) {
@@ -46,6 +44,34 @@ pub fn register_app_handle(app_handle: &AppHandle) {
                     .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("事件发射失败: {}", e)))?;
                 info!("[emit] Tauri 事件发送成功");
 
+                // 如果是 live completed 事件，持久化到 DB
+                if task_type == "live" {
+                    if let Some(status) = json_value.get("status").and_then(|v| v.as_str()) {
+                        if status == "completed" {
+                            let state = handle.state::<crate::state::AppState>();
+                            let record = crate::db::NewLiveRecord {
+                                room_id: json_value.get("room_id").and_then(|v| v.as_str()).map(String::from),
+                                web_rid: json_value.get("web_rid").and_then(|v| v.as_str()).map(String::from),
+                                title: json_value.get("title").and_then(|v| v.as_str()).map(String::from),
+                                nickname: json_value.get("nickname").and_then(|v| v.as_str()).map(String::from),
+                                sec_user_id: None,
+                                file_path: json_value.get("file").and_then(|v| v.as_str()).map(String::from),
+                                file_size: json_value.get("file_size").and_then(|v| v.as_i64()).unwrap_or(0),
+                                duration_sec: json_value.get("duration_sec").and_then(|v| v.as_i64()).unwrap_or(0),
+                                status: "completed".to_string(),
+                                started_at: json_value.get("started_at").and_then(|v| v.as_i64()),
+                                ended_at: json_value.get("ended_at").and_then(|v| v.as_i64()),
+                                cover_url: json_value.get("cover_url").and_then(|v| v.as_str()).map(String::from),
+                            };
+                            if let Err(e) = state.db.save_live_record(&record) {
+                                warn!("[emit] 保存 live 记录失败: {}", e);
+                            } else {
+                                info!("[emit] live 记录已保存, task_id={}", task_id);
+                            }
+                        }
+                    }
+                }
+
                 Ok(())
             },
         ).expect("创建 emit 闭包失败");
@@ -81,7 +107,7 @@ pub fn register_app_handle(app_handle: &AppHandle) {
 /// - task_type 始终为 "typed"
 /// - data 包含 TaskEvent 的所有字段（event_type, task_id, mode, url, patch.*）
 /// - Python 特有字段（title, nickname 等）放在 data 顶层，前端 UnifiedTask 会处理
-fn format_event_payload(task_id: &str, python_task_type: &str, data: &serde_json::Value) -> serde_json::Value {
+fn format_event_payload(task_id: &str, _python_task_type: &str, data: &serde_json::Value) -> serde_json::Value {
     // 从 Python data 中提取字段
     let event_type_str = data.get("event_type").and_then(|v| v.as_str()).unwrap_or("progress");
     let event_type = match event_type_str {
@@ -142,4 +168,117 @@ fn format_event_payload(task_id: &str, python_task_type: &str, data: &serde_json
         "task_type": "typed",
         "data": event_data,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_progress_event() {
+        let data = json!({
+            "event_type": "progress",
+            "status": "running",
+            "mode": "post",
+            "url": "https://example.com",
+            "total": 10,
+            "completed": 5,
+            "failed": 1,
+            "skipped": 0,
+            "current_item": "video_3",
+        });
+        let result = format_event_payload("task-123", "batch", &data);
+        assert_eq!(result["task_type"], "typed");
+        assert_eq!(result["task_id"], "task-123");
+        let d = &result["data"];
+        assert_eq!(d["event_type"], "progress");
+        assert_eq!(d["status"], "running");
+        assert_eq!(d["mode"], "post");
+        assert_eq!(d["total"], 10);
+        assert_eq!(d["completed"], 5);
+        assert_eq!(d["failed"], 1);
+        assert_eq!(d["current_item"], "video_3");
+    }
+
+    #[test]
+    fn test_live_completed_event() {
+        let data = json!({
+            "event_type": "finished",
+            "status": "completed",
+            "mode": "live",
+            "title": "主播名称",
+            "nickname": "用户名",
+            "file": "/path/to/file.mp4",
+            "file_size": 12345,
+            "duration_sec": 3600,
+            "room_id": "123456",
+            "type": "live_record",
+        });
+        let result = format_event_payload("task-456", "live", &data);
+        assert_eq!(result["task_type"], "typed");
+        let d = &result["data"];
+        assert_eq!(d["event_type"], "completed");
+        assert_eq!(d["title"], "主播名称");
+        assert_eq!(d["file"], "/path/to/file.mp4");
+        assert_eq!(d["file_size"], 12345);
+    }
+
+    #[test]
+    fn test_unknown_event_type_fallback() {
+        let data = json!({});
+        let result = format_event_payload("task-789", "unknown", &data);
+        assert_eq!(result["task_type"], "typed");
+        let d = &result["data"];
+        assert_eq!(d["event_type"], "progress");
+        assert_eq!(d["status"], "running");
+    }
+
+    #[test]
+    fn test_error_fields() {
+        let data = json!({
+            "event_type": "progress",
+            "status": "error",
+            "error": "Connection failed",
+            "error_msg": "无法连接到服务器",
+        });
+        let result = format_event_payload("task-err", "batch", &data);
+        let d = &result["data"];
+        assert_eq!(d["error"], "Connection failed");
+        assert_eq!(d["error_msg"], "无法连接到服务器");
+    }
+
+    #[test]
+    fn test_live_started_fields_forwarded() {
+        let data = json!({
+            "event_type": "started",
+            "status": "recording",
+            "mode": "live",
+            "room_id": "123456",
+            "web_rid": "abc123",
+            "cover_url": "https://example.com/cover.jpg",
+            "started_at": "2026-07-01T00:00:00Z",
+        });
+        let result = format_event_payload("task-live", "live", &data);
+        let d = &result["data"];
+        assert_eq!(d["event_type"], "started");
+        assert_eq!(d["room_id"], "123456");
+        assert_eq!(d["web_rid"], "abc123");
+        assert!(d.get("cover_url").is_some());
+    }
+
+    #[test]
+    fn test_task_type_always_typed() {
+        let cases = vec![
+            json!({"event_type": "progress", "status": "running"}),
+            json!({"event_type": "finished", "status": "completed"}),
+            json!({"event_type": "started", "status": "starting"}),
+            json!({}),
+            json!({"event_type": "unknown_event_type"}),
+        ];
+        for data in cases {
+            let result = format_event_payload("tid", "any", &data);
+            assert_eq!(result["task_type"], "typed", "task_type 应为 typed 对于输入: {}", data);
+        }
+    }
 }

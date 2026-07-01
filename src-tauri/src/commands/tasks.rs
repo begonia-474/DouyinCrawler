@@ -60,8 +60,8 @@ pub async fn start_download(
                 "task_id": task_id,
             }))
         }
-        _ => {
-            // live 暂时回退到 Python
+        DownloadMode::Live => {
+            // live 当前通过 Python bridge 实现（P2-02 后将改为 Rust 原生路径）
             let result = crate::python::handler::start_download(&mode, &url)
                 .map_err(|e| format!("Python 调用失败: {}", e))?;
             Ok(result)

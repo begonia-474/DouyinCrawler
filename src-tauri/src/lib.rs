@@ -173,7 +173,6 @@ pub fn run() {
             // Python 桥接调用（commands/python.rs）
             commands::python::py_parse_video,
             commands::python::py_get_live_info,
-            commands::python::py_start_download,
             commands::python::py_get_user_profile,
             commands::python::py_get_user_posts,
             commands::python::py_search_videos,
@@ -195,7 +194,6 @@ pub fn run() {
             commands::python::py_start_live_record,
             commands::python::py_stop_live_record,
             commands::python::py_get_live_status,
-            commands::python::py_test_emit,
             // 数据库读取（commands/db.rs）
             commands::db::get_downloads,
             commands::db::get_download_stats,
@@ -248,7 +246,7 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-fn resolve_db_path(app: &tauri::App) -> PathBuf {
+fn resolve_db_path(_app: &tauri::App) -> PathBuf {
     // 生产模式优先使用 app_data_dir，开发模式使用项目相对路径
     #[cfg(not(debug_assertions))]
     {

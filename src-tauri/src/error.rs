@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// 跨语言错误码
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
     // 网络层
@@ -43,7 +43,7 @@ impl std::fmt::Display for ErrorCode {
 }
 
 /// 应用错误
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct AppError {
     pub code: ErrorCode,
     pub message: String,
@@ -60,6 +60,7 @@ impl AppError {
         }
     }
 
+    #[allow(dead_code)]
     pub fn with_detail(code: ErrorCode, message: impl Into<String>, detail: impl Into<String>) -> Self {
         Self {
             code,
@@ -72,10 +73,12 @@ impl AppError {
         Self::new(ErrorCode::Unknown, message)
     }
 
+    #[allow(dead_code)]
     pub fn from_py_err(e: impl ToString) -> Self {
         Self::unknown(e.to_string())
     }
 
+    #[allow(dead_code)]
     pub fn from_join_err(e: impl ToString) -> Self {
         Self::new(ErrorCode::Unknown, format!("spawn_blocking join error: {}", e.to_string()))
     }

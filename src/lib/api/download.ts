@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ApiResponse, MixInfoResult, DownloadResult, DownloadMode } from "../api-types";
+import type { DownloadMode } from "../bindings";
+import type { ApiResponse, MixInfoResult, DownloadResult } from "../api-types";
 import { wrap, pyCall, type BackendResponse } from "./core";
 
 // ============================================================
@@ -51,10 +52,7 @@ export async function getMixInfo(url: string, cursor: number = 0, count: number 
 /** 统一下载入口（通过 mode 分发） */
 export async function startDownload(mode: DownloadMode, url: string): Promise<ApiResponse & { task_id?: string }> {
   try {
-    // one/music/post/like/mix/collects 走 Rust-owned 路径，live 暂走 Python
-    const rustModes = new Set(["one", "music", "post", "like", "mix", "collects"]);
-    const command = rustModes.has(mode) ? "start_download" : "py_start_download";
-    const raw = await invoke<BackendResponse>(command, { mode, url });
+    const raw = await invoke<BackendResponse>("start_download", { mode, url });
     let taskId: string | undefined;
     if (raw?.success && raw.task_id != null) {
       taskId = String(raw.task_id);

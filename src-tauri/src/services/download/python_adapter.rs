@@ -7,18 +7,19 @@
 //! - 具体类型（非 trait）：PyO3 所有操作需要 GIL，trait 抽象不可行
 //! - spawn_blocking：避免同步 Python 调用阻塞 async runtime
 
-use log::error;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 /// Python 下载适配器 — 封装 GIL 管理，对外暴露 async 方法
+#[allow(dead_code)] // TODO P2-01: may become used after download entry unification
 pub struct PythonDownloadAdapter;
 
+#[allow(dead_code)] // TODO P2-01: may become used after download entry unification
 impl PythonDownloadAdapter {
     /// 调用 Python handler 函数并将 JSON 结果反序列化为目标类型
     async fn call_python<T: DeserializeOwned + Send>(
         handler_fn: impl FnOnce() -> Result<Value, pyo3::PyErr> + Send + 'static,
-        label: &str,
+        _label: &str,
     ) -> Result<T, String> {
         let result = tokio::task::spawn_blocking(move || {
             handler_fn().map_err(|e| format!("Python 调用失败: {}", e))

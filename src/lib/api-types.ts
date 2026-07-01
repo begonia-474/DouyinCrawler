@@ -1,3 +1,6 @@
+// Rust-owned 基础类型统一从 bindings.ts 导入，避免重复定义
+import type { DownloadMode, TaskStatus, TaskEvent, ErrorCode } from "./bindings";
+
 export interface ApiResponse<T = unknown> {
   success: boolean;
   data?: T;
@@ -218,8 +221,6 @@ export interface FollowingLiveItem {
 // 统一任务系统
 // ============================================================
 
-export type DownloadMode = "one" | "post" | "like" | "mix" | "collects" | "live" | "music";
-
 export interface DownloadTask {
   id: string;
   mode: DownloadMode;
@@ -271,17 +272,11 @@ export interface DownloadResult {
 }
 
 // ============================================================
-// 类型化任务事件系统（对齐 Rust src/tasks/mod.rs）
+// 类型化任务事件系统 — 事件类型和事件体从 bindings.ts 导入
 // ============================================================
-
-/** 任务状态（对齐 Rust TaskStatus 枚举） */
-export type TaskStatus = "pending" | "starting" | "running" | "recording" | "stopping" | "completed" | "error" | "cancelled";
 
 /** 任务子项状态（对齐 Rust TaskItemStatus 枚举） */
 export type TaskItemStatus = "pending" | "downloading" | "completed" | "skipped" | "failed";
-
-/** 任务事件类型（对齐 Rust TaskEventType 枚举） */
-export type TaskEventType = "started" | "progress" | "finished";
 
 /** 任务补丁（对齐 Rust TaskPatch）None 字段不覆盖现有值 */
 export interface TaskPatch {
@@ -296,43 +291,11 @@ export interface TaskPatch {
 }
 
 /** 类型化任务事件（对齐 Rust TaskEvent，通过 Tauri event 发射） */
-export interface TaskEvent {
-  event_type: TaskEventType;
-  task_id: string;
-  mode?: DownloadMode;
-  url?: string;
-  /** 补丁字段（通过 serde(flatten) 展开） */
-  patch: TaskPatch;
-}
+export type { TaskEvent };
 
 // ============================================================
-// 错误码（对齐 Rust ErrorCode 枚举）
+// 错误码 — 从 bindings.ts 导入
 // ============================================================
-
-/** 错误码枚举（对齐 Rust ErrorCode） */
-export type ErrorCode =
-  // 网络层
-  | "network_timeout"
-  | "network_error"
-  | "rate_limited"
-  | "proxy_error"
-  // 认证层
-  | "cookie_expired"
-  | "cookie_invalid"
-  | "login_required"
-  // 内容层
-  | "video_not_found"
-  | "user_not_found"
-  | "content_deleted"
-  // 处理层
-  | "signature_error"
-  | "parse_error"
-  // 系统层
-  | "database_error"
-  | "file_system_error"
-  | "config_error"
-  // 未知
-  | "unknown";
 
 /** 错误码分类 */
 export type ErrorCategory = "network" | "auth" | "content" | "processing" | "system" | "unknown";

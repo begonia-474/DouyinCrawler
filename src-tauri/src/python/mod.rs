@@ -12,10 +12,12 @@ pub mod runtime;
 
 // 重新导出主要接口
 pub use bridge::PythonBridge;
+#[allow(unused_imports)]
 pub use responses::*;
 pub use config::init_config;
 pub use db_bridge::register_db_bridge;
 pub use emit::register_app_handle;
+#[allow(unused_imports)]
 pub use handler::{
     parse_video, get_live_info, start_download,
     get_user_profile, get_user_posts, search_videos, get_mix_info,
@@ -23,5 +25,5 @@ pub use handler::{
     get_follower_list, get_music_collection, download_music, get_following_live,
     get_comments, get_comment_replies, get_tab_feed, get_follow_feed,
     get_friend_feed, get_user_likes, get_post_stats, start_live_record,
-    stop_live_record, get_live_status, test_emit,
+    stop_live_record, get_live_status,
 };

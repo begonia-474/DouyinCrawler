@@ -351,6 +351,7 @@ pub struct PostStatsResult {
 // ============================================================
 
 /// download_video() 返回值 — 对齐 Python DownloadResult
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DownloadResult {
     #[serde(default = "default_success")]
@@ -365,6 +366,7 @@ pub struct DownloadResult {
 }
 
 /// download_batch() 返回值 — 对齐 Python BatchDownloadResult
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatchDownloadResult {
     #[serde(default = "default_success")]
@@ -380,6 +382,7 @@ pub struct BatchDownloadResult {
 }
 
 /// download_music_batch() 返回值 — 对齐 Python MusicBatchResult
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MusicBatchResult {
     #[serde(default = "default_success")]

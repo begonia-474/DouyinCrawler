@@ -5,7 +5,6 @@ import uuid
 import threading
 from typing import Callable
 from core.logger import get_logger
-from core import db
 
 logger = get_logger(__name__)
 
@@ -64,24 +63,6 @@ class LiveRecordManager:
                             "ended_at": result.get("ended_at", 0),
                             "cover_url": result.get("cover_url", ""),
                         })
-                        # 后端外围层保存直播记录到 DB
-                        try:
-                            db.save_live_record({
-                                "room_id": result.get("room_id"),
-                                "web_rid": result.get("web_rid"),
-                                "title": result.get("title"),
-                                "nickname": result.get("nickname"),
-                                "file_path": result.get("file"),
-                                "file_size": result.get("file_size", 0),
-                                "duration_sec": result.get("duration_sec", 0),
-                                "status": "completed",
-                                "started_at": result.get("started_at"),
-                                "ended_at": result.get("ended_at"),
-                                "cover_url": result.get("cover_url"),
-                            })
-                            logger.info("[live_record] 直播记录已保存到 DB, task_id={}", task_id)
-                        except Exception as save_err:
-                            logger.error("[live_record] 保存直播记录到 DB 失败: {}", save_err)
                     else:
                         self._live_tasks[task_id]["status"] = "error"
                         self._live_tasks[task_id]["error"] = result.get("error", "未知错误")
@@ -94,7 +75,7 @@ class LiveRecordManager:
             finally:
                 broadcast_fn(task_id, self._live_tasks[task_id], "live")
                 loop.close()
-                # 释放内存：录制记录已通过 db_bridge 持久化到 SQLite，前端从 DB 读历史
+                # 释放内存：录制记录已通过 Rust emit 持久化到 SQLite，前端从 DB 读历史
                 self._live_tasks.pop(task_id, None)
 
         thread = threading.Thread(target=_run, daemon=True)

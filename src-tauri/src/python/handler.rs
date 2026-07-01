@@ -208,12 +208,3 @@ pub fn get_comments(url: &str, cursor: i64, count: i64) -> PyResult<CommentsResu
 pub fn get_comment_replies(url: &str, comment_id: &str, cursor: i64, count: i64) -> PyResult<CommentsResult> {
     call_py_typed("get_comment_replies", (url, comment_id, cursor, count))
 }
-
-// ============================================================
-// 工具
-// ============================================================
-
-/// 测试 Tauri 事件发射
-pub fn test_emit() -> PyResult<Value> {
-    call_py_json("test_emit", ())
-}

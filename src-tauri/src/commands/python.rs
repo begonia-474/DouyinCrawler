@@ -6,7 +6,6 @@
 //!
 //! 使用 `py_command_*!` 宏消除样板代码（覆盖 ~70% 命令）。
 
-use serde::Serialize;
 use serde_json::Value;
 use crate::error::AppError;
 use crate::python::runtime::run_python_blocking;
@@ -145,13 +144,6 @@ pub async fn py_get_comment_replies(url: String, comment_id: String, cursor: i64
 // ============================================================
 
 #[tauri::command(rename_all = "snake_case")]
-pub async fn py_start_download(mode: String, url: String) -> Result<Value, AppError> {
-    run_python_blocking("start_download", move || {
-        crate::python::handler::start_download(&mode, &url)
-    }).await.map_err(AppError::from)
-}
-
-#[tauri::command(rename_all = "snake_case")]
 pub async fn py_download_music(play_url: String, title: String, author: String) -> Result<Value, AppError> {
     run_python_blocking("download_music", move || {
         crate::python::handler::download_music(&play_url, &title, &author)
@@ -174,9 +166,4 @@ pub fn py_get_live_status() -> Result<LiveStatusResult, AppError> {
     crate::python::handler::get_live_status()
         .map_err(|e| AppError::from(e.to_string()))?
         .into_result()
-}
-
-#[tauri::command(rename_all = "snake_case")]
-pub fn py_test_emit() -> Result<Value, AppError> {
-    crate::python::handler::test_emit().map_err(|e| AppError::from(e.to_string()))
 }

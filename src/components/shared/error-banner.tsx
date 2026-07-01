@@ -1,7 +1,7 @@
 import { AlertCircle, RefreshCw, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import type { ErrorCode } from "@/lib/api-types";
+import type { ErrorCode } from "@/lib/bindings";
 import { isRetryable, needsSettingsRedirect } from "@/lib/api-types";
 
 interface ErrorBannerProps {

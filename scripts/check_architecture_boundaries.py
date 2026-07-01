@@ -21,6 +21,17 @@ from pathlib import Path
 # 项目根目录
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
+# Phase Two 临时例外：每项 (检查名, 模式描述, 关联 issue, 说明)
+# 完成对应 issue 后必须从此处删除并让检查变为硬失败
+ALLOWED_EXCEPTIONS = []
+
+
+def _is_allowed_exception(check_name):
+    for name, _desc, issue, note in ALLOWED_EXCEPTIONS:
+        if name == check_name:
+            return issue, note
+    return None, None
+
 def check_task_lifecycle_stubs():
     """检查 Rust db_bridge.rs 中是否注册了任务生命周期桩函数"""
     db_bridge_path = PROJECT_ROOT / "src-tauri" / "src" / "python" / "db_bridge.rs"
@@ -243,6 +254,168 @@ def check_models_split():
     return True
 
 
+def check_frontend_py_start_download():
+    """检查前端 src/ 不得 invoke py_start_download"""
+    search_dir = PROJECT_ROOT / "src"
+    violations = []
+    for file_path in search_dir.rglob("*"):
+        if not file_path.is_file() or file_path.suffix not in ('.ts', '.tsx'):
+            continue
+        try:
+            content = file_path.read_text(encoding="utf-8")
+            if 'invoke("py_start_download")' in content or "invoke('py_start_download')" in content:
+                violations.append(file_path.relative_to(PROJECT_ROOT))
+        except (UnicodeDecodeError, PermissionError):
+            continue
+
+    if violations:
+        print("✗ 架构违规：前端代码中发现 invoke(\"py_start_download\") 调用")
+        for v in violations:
+            print(f"  - {v}")
+        return False
+
+    print("✓ 前端代码中未发现对 py_start_download 的 invoke 调用")
+    return True
+
+
+def check_py_start_download_command_registration():
+    """检查 Tauri lib.rs 的 generate_handler! 中不得注册 py_start_download"""
+    lib_path = PROJECT_ROOT / "src-tauri" / "src" / "lib.rs"
+    if not lib_path.exists():
+        print(f"✓ 文件不存在: {lib_path}")
+        return True
+
+    content = lib_path.read_text(encoding="utf-8")
+    for i, line in enumerate(content.split('\n'), 1):
+        if 'py_start_download' in line:
+            print(f"✗ 架构违规：lib.rs:{i} 仍注册了 py_start_download")
+            return False
+
+    print("✓ lib.rs 中未注册 py_start_download command")
+    return True
+
+
+def check_py_test_emit_registration():
+    """检查 Tauri 不得注册 py_test_emit command"""
+    search_dir = PROJECT_ROOT / "src-tauri" / "src"
+    violations = []
+    for file_path in search_dir.rglob("*.rs"):
+        if not file_path.is_file():
+            continue
+        try:
+            content = file_path.read_text(encoding="utf-8")
+            for i, line in enumerate(content.split('\n'), 1):
+                if 'py_test_emit' in line:
+                    violations.append(f"{file_path.relative_to(PROJECT_ROOT)}:{i}")
+        except (UnicodeDecodeError, PermissionError):
+            continue
+
+    if violations:
+        issue, note = _is_allowed_exception("py_test_emit_registration")
+        if note:
+            print(f"⚠ 临时例外（允许）：{note} [TODO {issue}]")
+            for v in violations:
+                print(f"  - {v}")
+            return True
+        print("✗ 架构违规：Tauri 代码中仍注册了 py_test_emit command")
+        for v in violations:
+            print(f"  - {v}")
+        return False
+
+    print("✓ Tauri 代码中未发现 py_test_emit command")
+    return True
+
+
+def check_python_db_writes():
+    """检查 Python 普通下载路径不得写普通任务 DB；live 写入受控"""
+    search_dirs = [
+        PROJECT_ROOT / "core" / "download",
+        PROJECT_ROOT / "core" / "task",
+        PROJECT_ROOT / "backend",
+    ]
+    excluded_files = {
+        PROJECT_ROOT / "core" / "db.py",
+        PROJECT_ROOT / "core" / "bridge" / "db_bridge.py",
+        PROJECT_ROOT / "core" / "bridge" / "__init__.py",
+        PROJECT_ROOT / "core" / "__init__.py",
+    }
+    live_manager_path = (PROJECT_ROOT / "core" / "task" / "live_manager.py").resolve()
+
+    hard_violations = []
+    allowed_violations = []
+
+    for search_dir in search_dirs:
+        if not search_dir.exists():
+            continue
+        for file_path in search_dir.rglob("*.py"):
+            if not file_path.is_file() or file_path in excluded_files:
+                continue
+            try:
+                content = file_path.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, PermissionError):
+                continue
+
+            for i, line in enumerate(content.split('\n'), 1):
+                if 'save_download_record(' in line:
+                    hard_violations.append(f"{file_path.relative_to(PROJECT_ROOT)}:{i} 调用了 save_download_record")
+                if 'save_live_record(' in line:
+                    if file_path.resolve() == live_manager_path:
+                        allowed_violations.append(f"{file_path.relative_to(PROJECT_ROOT)}:{i} 调用了 save_live_record")
+                    else:
+                        hard_violations.append(f"{file_path.relative_to(PROJECT_ROOT)}:{i} 调用了 save_live_record")
+
+    for v in allowed_violations:
+        issue, note = _is_allowed_exception("python_db_writes")
+        if note:
+            print(f"⚠ 临时例外（允许）：{note} [TODO {issue}]")
+            print(f"  - {v}")
+        else:
+            hard_violations.append(v)
+
+    if hard_violations:
+        print("✗ 架构违规：Python 业务层绕过了 Rust 直接写 DB")
+        for v in hard_violations:
+            print(f"  - {v}")
+        return False
+
+    if not allowed_violations:
+        print("✓ Python 业务层中未发现直接 DB 写入")
+    return True
+
+
+def check_api_types_rust_owned_duplicates():
+    """检查 api-types.ts 不得定义 Rust-owned 基础类型"""
+    file_path = PROJECT_ROOT / "src" / "lib" / "api-types.ts"
+    if not file_path.exists():
+        print(f"✓ 文件不存在: {file_path}")
+        return True
+
+    content = file_path.read_text(encoding="utf-8")
+    rust_owned_types = ["DownloadMode", "TaskStatus", "TaskEventType", "TaskEvent", "ErrorCode"]
+    pattern = re.compile(r'export\s+(type|interface|enum)\s+(' + '|'.join(rust_owned_types) + r')\b')
+
+    violations = []
+    for i, line in enumerate(content.split('\n'), 1):
+        m = pattern.search(line)
+        if m:
+            violations.append(f"{file_path.relative_to(PROJECT_ROOT)}:{i} 定义了 Rust-owned 类型 {m.group(2)}")
+
+    if violations:
+        issue, note = _is_allowed_exception("api_types_rust_owned_duplicates")
+        if note:
+            print(f"⚠ 临时例外（允许）：{note} [TODO {issue}]")
+            for v in violations:
+                print(f"  - {v}")
+            return True
+        print("✗ 架构违规：api-types.ts 重复定义了 Rust-owned 基础类型")
+        for v in violations:
+            print(f"  - {v}")
+        return False
+
+    print("✓ api-types.ts 未定义 Rust-owned 基础类型")
+    return True
+
+
 def main():
     """运行所有架构边界检查"""
     print("=" * 60)
@@ -256,6 +429,11 @@ def main():
         ("py_download_video 引用", check_py_download_video),
         ("RED LINE shim 文件", check_redline_shims),
         ("models 子包拆分", check_models_split),
+        ("前端 py_start_download", check_frontend_py_start_download),
+        ("py_start_download command 注册", check_py_start_download_command_registration),
+        ("py_test_emit 注册", check_py_test_emit_registration),
+        ("Python 直接 DB 写入", check_python_db_writes),
+        ("api-types 重复定义", check_api_types_rust_owned_duplicates),
     ]
 
     all_passed = True
@@ -268,10 +446,18 @@ def main():
     print("\n" + "=" * 60)
     if all_passed:
         print("✓ 所有架构边界检查通过")
-        return 0
     else:
         print("✗ 发现架构违规，请修复后重试")
-        return 1
+
+    print("\n" + "=" * 60)
+    print("当前生效的临时例外（完成对应 issue 后删除）")
+    print("-" * 60)
+    for name, desc, issue, note in ALLOWED_EXCEPTIONS:
+        print(f"  [{issue}] {desc}")
+        print(f"          {note}")
+    print("=" * 60)
+
+    return 0 if all_passed else 1
 
 if __name__ == "__main__":
     sys.exit(main())

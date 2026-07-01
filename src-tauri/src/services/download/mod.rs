@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 // ============================================================
 
 /// 下载模式枚举（对齐 Python core.constants.DownloadMode）
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum DownloadMode {
     One,
@@ -68,7 +68,7 @@ impl std::fmt::Display for DownloadMode {
 // ============================================================
 
 /// 任务状态枚举（对齐 DB download_tasks.status）
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskStatus {
     Pending,
@@ -81,6 +81,7 @@ pub enum TaskStatus {
     Cancelled,
 }
 
+#[allow(dead_code)]
 impl TaskStatus {
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
@@ -120,7 +121,7 @@ impl TaskStatus {
 // ============================================================
 
 /// 统一下载请求（前端 invoke 参数）
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct DownloadRequest {
     pub mode: DownloadMode,
     pub url: String,
@@ -136,7 +137,7 @@ pub struct DownloadRequest {
 
 /// 任务补丁（事件携带的部分更新，前端 patch 语义合并）
 /// None 字段不覆盖现有值
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct TaskPatch {
     pub task_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -160,7 +161,7 @@ pub struct TaskPatch {
 // ============================================================
 
 /// 任务事件类型
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskEventType {
     Started,
@@ -169,7 +170,7 @@ pub enum TaskEventType {
 }
 
 /// 类型化任务事件（通过 Tauri event 系统发射到前端）
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct TaskEvent {
     pub event_type: TaskEventType,
     pub task_id: String,
@@ -293,6 +294,7 @@ impl TaskPatch {
     }
 }
 
+#[allow(dead_code)]
 impl TaskEvent {
     /// 创建任务启动事件
     pub fn started(task_id: impl Into<String>, mode: DownloadMode, url: impl Into<String>) -> Self {

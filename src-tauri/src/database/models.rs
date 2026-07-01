@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 // === 下载记录 ===
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, specta::Type)]
 pub struct DownloadRecord {
     pub id: i64,
     pub aweme_id: Option<String>,
@@ -22,7 +22,7 @@ pub struct DownloadRecord {
     pub created_at: i64,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, specta::Type)]
 pub struct DownloadStats {
     pub total_count: i64,
     pub total_size: i64,
@@ -30,20 +30,20 @@ pub struct DownloadStats {
     pub by_day: Vec<DayStat>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, specta::Type)]
 pub struct TypeStat {
     pub download_type: String,
     pub cnt: i64,
     pub size: i64,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, specta::Type)]
 pub struct DayStat {
     pub day: String,
     pub cnt: i64,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, specta::Type)]
 pub struct LiveRecord {
     pub id: i64,
     pub room_id: Option<String>,
@@ -60,7 +60,7 @@ pub struct LiveRecord {
     pub cover_url: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, specta::Type)]
 pub struct NewDownloadRecord {
     pub aweme_id: Option<String>,
     pub download_type: String,
@@ -74,7 +74,7 @@ pub struct NewDownloadRecord {
     pub error_msg: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, specta::Type)]
 pub struct NewLiveRecord {
     pub room_id: Option<String>,
     pub web_rid: Option<String>,
@@ -92,7 +92,7 @@ pub struct NewLiveRecord {
 
 // === 下载任务 ===
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, specta::Type)]
 pub struct DownloadTask {
     pub id: String,
     pub mode: String,
@@ -109,7 +109,7 @@ pub struct DownloadTask {
     pub updated_at: i64,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, specta::Type)]
 pub struct NewDownloadTask {
     pub id: String,
     pub mode: String,
@@ -118,7 +118,7 @@ pub struct NewDownloadTask {
     pub author_nickname: Option<String>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, specta::Type)]
 pub struct TaskItem {
     pub id: i64,
     pub task_id: String,
@@ -133,7 +133,7 @@ pub struct TaskItem {
     pub created_at: i64,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, specta::Type)]
 pub struct NewTaskItem {
     pub task_id: String,
     pub aweme_id: Option<String>,
@@ -142,7 +142,7 @@ pub struct NewTaskItem {
     pub cover_url: Option<String>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, specta::Type)]
 pub struct TaskItemCounts {
     pub total: i64,
     pub completed: i64,
@@ -151,7 +151,7 @@ pub struct TaskItemCounts {
     pub pending: i64,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, specta::Type)]
 pub struct DownloadTaskDetail {
     pub task: DownloadTask,
     pub items: Vec<TaskItem>,
@@ -159,7 +159,7 @@ pub struct DownloadTaskDetail {
 
 // === 用户 ===
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, specta::Type)]
 pub struct UserInfo {
     #[serde(alias = "author_sec_uid")]
     pub sec_user_id: String,
@@ -207,7 +207,7 @@ pub struct UserInfo {
 
 // === 视频 ===
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, specta::Type)]
 pub struct VideoInfo {
     pub aweme_id: String,
     pub desc: Option<String>,
@@ -287,7 +287,7 @@ pub struct VideoInfo {
 
 // === 统计 ===
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, specta::Type)]
 pub struct VideoStats {
     pub total_count: i64,
     pub total_digg: i64,
@@ -297,41 +297,41 @@ pub struct VideoStats {
     pub by_type: Vec<VideoTypeStat>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, specta::Type)]
 pub struct VideoTypeStat {
     pub aweme_type: i32,
     pub cnt: i64,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, specta::Type)]
 pub struct UserStats {
     pub total_count: i64,
     pub total_follower: i64,
     pub total_aweme: i64,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, specta::Type)]
 pub struct TrendPoint {
     pub day: String,
     pub cnt: i64,
     pub size: i64,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, specta::Type)]
 pub struct AuthorStat {
     pub author_nickname: String,
     pub cnt: i64,
     pub total_size: i64,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, specta::Type)]
 pub struct StorageStat {
     pub download_type: String,
     pub cnt: i64,
     pub total_size: i64,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, specta::Type)]
 pub struct DbHealth {
     pub download_count: i64,
     pub video_count: i64,
@@ -344,7 +344,7 @@ pub struct DbHealth {
 
 // === 音乐 ===
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, specta::Type)]
 pub struct MusicCollection {
     pub music_id: String,
     pub mid: Option<String>,
@@ -359,7 +359,7 @@ pub struct MusicCollection {
     pub created_at: i64,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, specta::Type)]
 pub struct NewMusicCollection {
     pub music_id: String,
     pub mid: Option<String>,

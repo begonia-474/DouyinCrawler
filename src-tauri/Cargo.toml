@@ -30,3 +30,6 @@ log = "0.4"
 env_logger = "0.10"
 parking_lot = "0.12"
 uuid = { version = "1", features = ["v4"] }
+specta = { version = "=2.0.0-rc.25", features = ["derive"] }
+tauri-specta = { version = "=2.0.0-rc.25", features = ["typescript"] }
+specta-typescript = "=0.0.12"

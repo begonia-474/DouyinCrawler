@@ -15,7 +15,7 @@ fn default_max_retries() -> u32 { 5 }
 fn default_max_tasks() -> u32 { 10 }
 
 /// 应用配置
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, specta::Type)]
 pub struct AppConfig {
     pub cookie: String,
     pub download_path: String,
@@ -67,7 +67,7 @@ impl Default for AppConfig {
 }
 
 /// 完整配置文件结构
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, specta::Type)]
 pub struct ConfigFile {
     pub douyin: Option<AppConfig>,
     pub tiktok: Option<AppConfig>,

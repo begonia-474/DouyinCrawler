@@ -29,6 +29,7 @@ use crate::python::PythonBridge;
 pub struct AppState {
     pub db: Database,
     pub config: Arc<Mutex<ConfigManager>>,
+    #[allow(dead_code)] // P2-01 下载入口统一后使用
     pub python: Arc<PythonBridge>,
 }
 

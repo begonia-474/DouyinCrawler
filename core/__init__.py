@@ -126,3 +126,75 @@ from core.utils import (
     timestamp_2_str, interval_2_timestamp, filter_by_date_interval,
     get_segments_from_m3u8, get_content_length, get_chunk_size,
 )
+
+# ── 正式公开接口列表 ──
+__all__ = [
+    # 爬虫引擎
+    "DouyinCrawler",
+    "DouyinAPIEndpoints",
+    "ABogus", "XBogus", "BrowserFingerprintGenerator",
+    "TokenManager",
+    # 过滤器
+    "JSONModel",
+    "PostDetailFilter", "UserProfileFilter", "UserPostFilter",
+    "UserLiveFilter", "UserLive2Filter", "UserLiveStatusFilter",
+    "FollowingUserLiveFilter", "UserCollectsFilter", "UserMusicCollectionFilter",
+    "UserFollowingFilter", "UserFollowerFilter",
+    "PostCommentFilter", "PostRelatedFilter",
+    "HomePostSearchFilter", "SuggestWordFilter",
+    "QueryUserFilter", "PostStatsFilter", "LiveImFetchFilter",
+    # 服务层
+    "BaseService", "run_concurrent",
+    "VideoService", "UserService", "CollectionService",
+    "MixService", "LiveService", "FeedService",
+    "ContentService", "MusicService",
+    # 下载引擎
+    "Downloader", "format_filename",
+    # 桥接层 — handler
+    "DouyinHandler",
+    # 桥接层 — db_bridge（过渡路径，新代码走 Rust 写入）
+    "save_download_record", "save_video_info", "save_user_info",
+    "save_live_record", "has_user",
+    # 桥接层 — events
+    "emit", "set_emit_func",
+    # 桥接层 — py_bridge（Rust 可调用函数）
+    "parse_video", "download_video", "get_live_info",
+    "download_batch", "start_download",
+    "get_user_profile", "get_user_posts", "search_videos",
+    "get_mix_info", "get_collects_list", "get_collects_video_list",
+    "get_following_list", "get_follower_list",
+    "get_music_collection", "download_music_batch", "download_music",
+    "get_following_live", "get_comments", "get_comment_replies",
+    "get_tab_feed", "get_follow_feed", "get_friend_feed",
+    "get_user_likes", "get_post_stats",
+    "start_live_record", "stop_live_record", "get_live_status",
+    # 数据模型
+    "ServiceConfig", "BaseRequestModel", "BaseLiveModel",
+    "UserProfile", "UserPost", "UserFavorite", "UserCollection",
+    "UserCollects", "UserCollectsVideo", "UserMusicCollection",
+    "UserFollowing", "UserFollower",
+    "PostDetail", "PostComment", "PostCommentReply", "PostRelated",
+    "PostSearch", "HomePostSearch", "SuggestWord",
+    "TabFeed", "FollowFeed", "FriendFeed",
+    "UserLive", "UserLive2", "FollowingUserLive", "UserLiveStatus",
+    "LiveImFetch", "QueryUser", "PostLocate", "PostStats", "UserMix",
+    "DownloadMode", "ErrorCode", "BridgeResponse",
+    "VideoParseResult", "UserProfileResult", "UserPostsResult",
+    "LiveInfoResult", "MusicCollectionResult", "CommentsResult",
+    "FollowingListResult", "FollowerListResult",
+    "CollectsListResult", "CollectsVideoListResult",
+    "MixInfoResult", "SearchResult",
+    "TabFeedResult", "FollowFeedResult", "FriendFeedResult",
+    "UserLikesResult", "PostStatsResult",
+    "DownloadResult", "BatchDownloadResult", "MusicBatchResult",
+    "LiveRecordResult", "LiveStatusResult", "FollowingLiveResult",
+    # 任务管理
+    "TaskManager", "task_manager", "LiveRecordManager",
+    # 工具函数
+    "extract_valid_urls",
+    "AwemeIdFetcher", "SecUserIdFetcher", "MixIdFetcher", "WebCastIdFetcher",
+    "detect_url_type",
+    "replaceT", "sanitize_filename",
+    "timestamp_2_str", "interval_2_timestamp", "filter_by_date_interval",
+    "get_segments_from_m3u8", "get_content_length", "get_chunk_size",
+]
