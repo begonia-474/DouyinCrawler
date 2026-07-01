@@ -2,7 +2,7 @@
 
 import logging
 
-from core.filter import UserPostFilter, PostCommentFilter
+from core.crawler_engine.filter import UserPostFilter, PostCommentFilter
 from core.utils import AwemeIdFetcher, SecUserIdFetcher
 
 from .base import BaseService
@@ -69,7 +69,7 @@ class ContentService(BaseService):
         async with self._make_crawler() as crawler:
             data = await crawler.fetch_post_stats(aweme_id)
 
-        from core.filter import PostStatsFilter
+        from core.crawler_engine.filter import PostStatsFilter
         stats_filter = PostStatsFilter(data)
         return {
             "success": True,

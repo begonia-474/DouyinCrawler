@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -50,7 +50,6 @@ export function UrlInput({ onSubmit, loading, placeholder, allowedTypes, default
   const [url, setUrl] = useState(defaultValue || "");
   const [typeError, setTypeError] = useState<string | null>(null);
   const [clipboardHint, setClipboardHint] = useState<string | null>(null);
-  const lastClipboardRef = useRef<string>("");
   const urlType = detectUrlType(url);
 
   useEffect(() => {
@@ -59,29 +58,28 @@ export function UrlInput({ onSubmit, loading, placeholder, allowedTypes, default
     }
   }, [defaultValue, autoSubmit, onSubmit]);
 
-  // 剪贴板自动检测
+  // 剪贴板自动检测：监听 paste 事件，仅在用户粘贴时读取剪贴板
   useEffect(() => {
     if (!autoDetect) return;
 
-    const poll = setInterval(() => {
-      // 仅在页面聚焦时轮询
-      if (!document.hasFocus()) return;
+    const handlePasteEvent = (e: ClipboardEvent) => {
+      // 如果焦点在输入框内，让输入框自然处理粘贴
+      if (document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA") {
+        return;
+      }
 
-      navigator.clipboard.readText().then((text) => {
-        if (!text || text === lastClipboardRef.current) return;
-        lastClipboardRef.current = text;
+      const text = e.clipboardData?.getData("text") ?? "";
+      if (!text) return;
 
-        const extracted = extractUrl(text);
-        const type = detectUrlType(extracted);
-        if (type !== "unknown" && extracted !== url) {
-          setClipboardHint(extracted);
-        }
-      }).catch(() => {
-        // 剪贴板权限被拒绝时静默忽略
-      });
-    }, 2000);
+      const extracted = extractUrl(text);
+      const type = detectUrlType(extracted);
+      if (type !== "unknown" && extracted !== url) {
+        setClipboardHint(extracted);
+      }
+    };
 
-    return () => clearInterval(poll);
+    document.addEventListener("paste", handlePasteEvent);
+    return () => document.removeEventListener("paste", handlePasteEvent);
   }, [autoDetect, url]);
 
   const handleAcceptClipboard = useCallback(() => {

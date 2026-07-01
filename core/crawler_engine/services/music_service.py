@@ -2,7 +2,7 @@
 
 import logging
 
-from core.filter import UserMusicCollectionFilter
+from core.crawler_engine.filter import UserMusicCollectionFilter
 from core.utils import sanitize_filename
 
 from .base import BaseService

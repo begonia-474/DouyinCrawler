@@ -49,6 +49,37 @@ let unlisten: (() => void) | null = null;
 /** 终态状态集合（DB 不会再变化，需要收敛到 DB 真相） */
 const TERMINAL_STATUSES = new Set<string>(["completed", "error", "cancelled"]);
 
+/** 记录待失效的 mode 类型，debounce 期间合并 */
+let pendingModes = new Set<string>();
+
+/** 300ms debounce 合并终态事件的 React Query 失效 */
+let invalidateTimer: ReturnType<typeof setTimeout> | null = null;
+
+function debouncedInvalidate(mode: string) {
+  pendingModes.add(mode);
+  if (invalidateTimer) return;
+  invalidateTimer = setTimeout(() => {
+    invalidateTimer = null;
+    const modes = pendingModes;
+    pendingModes = new Set();
+
+    void queryClient.invalidateQueries({ queryKey: ["downloads"] });
+    void queryClient.invalidateQueries({ queryKey: ["download-stats"] });
+    void queryClient.invalidateQueries({ queryKey: ["download-tasks"] });
+    void queryClient.invalidateQueries({ queryKey: ["download-task-detail"] });
+
+    if (modes.has("live")) {
+      void queryClient.invalidateQueries({ queryKey: ["live-records"] });
+      void queryClient.invalidateQueries({ queryKey: ["live-record-count"] });
+    }
+    if (modes.size > 1 || !modes.has("live")) {
+      void queryClient.invalidateQueries({ queryKey: ["video-count"] });
+      void queryClient.invalidateQueries({ queryKey: ["video-stats"] });
+      void queryClient.invalidateQueries({ queryKey: ["user-stats"] });
+    }
+  }, 300);
+}
+
 /**
  * 将 patch 中的非 undefined 字段合并到旧状态。
  * undefined 字段不覆盖现有值（patch 语义）。
@@ -169,23 +200,10 @@ export const useTaskStore = create<TaskState>((set) => ({
         connected: true,
       }));
 
-      // 终态：刷新 DB 查询缓存（事件只是 hint，DB 是真相）
+      // 终态：debounced 刷新 DB 查询缓存（事件只是 hint，DB 是真相）
       const currentStatus = (data.status as string) ?? "";
       if (TERMINAL_STATUSES.has(currentStatus)) {
-        void queryClient.invalidateQueries({ queryKey: ["downloads"] });
-        void queryClient.invalidateQueries({ queryKey: ["download-stats"] });
-        void queryClient.invalidateQueries({ queryKey: ["download-tasks"] });
-        void queryClient.invalidateQueries({ queryKey: ["download-task-detail"] });
-
-        const mode = (data.mode as string) ?? "";
-        if (mode === "live") {
-          void queryClient.invalidateQueries({ queryKey: ["live-records"] });
-          void queryClient.invalidateQueries({ queryKey: ["live-record-count"] });
-        } else {
-          void queryClient.invalidateQueries({ queryKey: ["video-count"] });
-          void queryClient.invalidateQueries({ queryKey: ["video-stats"] });
-          void queryClient.invalidateQueries({ queryKey: ["user-stats"] });
-        }
+        debouncedInvalidate((data.mode as string) ?? "");
       }
     }).then((fn) => {
       unlisten = fn;

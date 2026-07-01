@@ -10,7 +10,7 @@ import { DownloadAllButton } from "@/components/shared/download-all-button";
 import { DownloadProgressOverlay } from "@/components/shared/download-progress-overlay";
 import { InfiniteScrollSentinel } from "@/components/shared/infinite-scroll-sentinel";
 import { getMixInfo, downloadMix } from "@/lib/api";
-import { useTaskStore } from "@/stores/task-store";
+import { useActiveTask } from "@/hooks/use-active-task";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import type { VideoItem } from "@/lib/api-types";
 import {
@@ -29,7 +29,7 @@ export default function MixPage() {
   const [downloading, setDownloading] = useState(false);
   const [downloadedCount, setDownloadedCount] = useState(0);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
-  const batchTask = useTaskStore((s) => activeTaskId ? s.tasks[activeTaskId] : null);
+  const batchTask = useActiveTask(activeTaskId);
   const downloadProgress = batchTask ? ((batchTask.total ?? 0) > 0 ? Math.round(((batchTask.completed ?? 0) / (batchTask.total ?? 1)) * 100) : 0) : 0;
   const [mixName, setMixName] = useState("");
   const [error, setError] = useState<string | null>(null);

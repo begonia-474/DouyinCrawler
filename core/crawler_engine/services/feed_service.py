@@ -2,7 +2,7 @@
 
 import logging
 
-from core.filter import UserPostFilter
+from core.crawler_engine.filter import UserPostFilter
 
 from .base import BaseService
 

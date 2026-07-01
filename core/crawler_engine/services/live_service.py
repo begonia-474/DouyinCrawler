@@ -3,7 +3,7 @@
 import time
 import logging
 
-from core.filter import UserLiveFilter, FollowingUserLiveFilter
+from core.crawler_engine.filter import UserLiveFilter, FollowingUserLiveFilter
 from core.utils import WebCastIdFetcher, sanitize_filename
 
 from .base import BaseService

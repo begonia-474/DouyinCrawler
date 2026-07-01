@@ -26,6 +26,7 @@ pub fn register_app_handle(app_handle: &AppHandle) {
             None,
             None,
             move |args: &Bound<'_, pyo3::types::PyTuple>, _kwargs: Option<&Bound<'_, pyo3::types::PyDict>>| -> PyResult<()> {
+                let py = args.py();
                 let task_id: String = args.get_item(0)?.extract()?;
                 let task_type: String = args.get_item(1)?.extract()?;
                 let data = args.get_item(2)?;
@@ -39,38 +40,43 @@ pub fn register_app_handle(app_handle: &AppHandle) {
                 // 将 Python 的 batch/live 事件格式化为 TaskEvent 兼容结构
                 let payload = format_event_payload(&task_id, &task_type, &json_value);
 
-                info!("[emit] 发送 Tauri 事件: task-update, payload={}", payload);
-                handle.emit("task-update", &payload)
-                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("事件发射失败: {}", e)))?;
-                info!("[emit] Tauri 事件发送成功");
+                // 以下操作不需要 GIL：Tauri emit + DB 写入
+                py.allow_threads(|| {
+                    info!("[emit] 发送 Tauri 事件: task-update, payload={}", payload);
+                    handle.emit("task-update", &payload)
+                        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("事件发射失败: {}", e)))?;
+                    info!("[emit] Tauri 事件发送成功");
 
-                // 如果是 live completed 事件，持久化到 DB
-                if task_type == "live" {
-                    if let Some(status) = json_value.get("status").and_then(|v| v.as_str()) {
-                        if status == "completed" {
-                            let state = handle.state::<crate::state::AppState>();
-                            let record = crate::db::NewLiveRecord {
-                                room_id: json_value.get("room_id").and_then(|v| v.as_str()).map(String::from),
-                                web_rid: json_value.get("web_rid").and_then(|v| v.as_str()).map(String::from),
-                                title: json_value.get("title").and_then(|v| v.as_str()).map(String::from),
-                                nickname: json_value.get("nickname").and_then(|v| v.as_str()).map(String::from),
-                                sec_user_id: None,
-                                file_path: json_value.get("file").and_then(|v| v.as_str()).map(String::from),
-                                file_size: json_value.get("file_size").and_then(|v| v.as_i64()).unwrap_or(0),
-                                duration_sec: json_value.get("duration_sec").and_then(|v| v.as_i64()).unwrap_or(0),
-                                status: "completed".to_string(),
-                                started_at: json_value.get("started_at").and_then(|v| v.as_i64()),
-                                ended_at: json_value.get("ended_at").and_then(|v| v.as_i64()),
-                                cover_url: json_value.get("cover_url").and_then(|v| v.as_str()).map(String::from),
-                            };
-                            if let Err(e) = state.db.save_live_record(&record) {
-                                warn!("[emit] 保存 live 记录失败: {}", e);
-                            } else {
-                                info!("[emit] live 记录已保存, task_id={}", task_id);
+                    // 如果是 live completed 事件，持久化到 DB
+                    if task_type == "live" {
+                        if let Some(status) = json_value.get("status").and_then(|v| v.as_str()) {
+                            if status == "completed" {
+                                let state = handle.state::<crate::state::AppState>();
+                                let record = crate::db::NewLiveRecord {
+                                    room_id: json_value.get("room_id").and_then(|v| v.as_str()).map(String::from),
+                                    web_rid: json_value.get("web_rid").and_then(|v| v.as_str()).map(String::from),
+                                    title: json_value.get("title").and_then(|v| v.as_str()).map(String::from),
+                                    nickname: json_value.get("nickname").and_then(|v| v.as_str()).map(String::from),
+                                    sec_user_id: None,
+                                    file_path: json_value.get("file").and_then(|v| v.as_str()).map(String::from),
+                                    file_size: json_value.get("file_size").and_then(|v| v.as_i64()).unwrap_or(0),
+                                    duration_sec: json_value.get("duration_sec").and_then(|v| v.as_i64()).unwrap_or(0),
+                                    status: "completed".to_string(),
+                                    started_at: json_value.get("started_at").and_then(|v| v.as_i64()),
+                                    ended_at: json_value.get("ended_at").and_then(|v| v.as_i64()),
+                                    cover_url: json_value.get("cover_url").and_then(|v| v.as_str()).map(String::from),
+                                };
+                                if let Err(e) = state.db.save_live_record(&record) {
+                                    warn!("[emit] 保存 live 记录失败: {}", e);
+                                } else {
+                                    info!("[emit] live 记录已保存, task_id={}", task_id);
+                                }
                             }
                         }
                     }
-                }
+
+                    Ok::<(), pyo3::PyErr>(())
+                })?;
 
                 Ok(())
             },

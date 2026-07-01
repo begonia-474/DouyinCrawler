@@ -1,180 +1,34 @@
 // ============================================================
 // 此文件由 scripts/gen_tauri_types.py 自动生成
-// 源头：src-tauri/src/db.rs
+// 源头：src-tauri/src/db.rs + src-tauri/src/database/models.rs
+//
+// 类型来源：
+//   - 12 个类型 re-export 自 bindings.ts（specta 编译期生成，权威来源）
+//   - VideoInfo 本地定义（62 字段完整 DB 模型，bindings.ts 仅 18 字段）
+//
 // 修改后请运行: python scripts/gen_tauri_types.py
 // ============================================================
 
-/** DayStat（对齐 Rust DayStat 结构体） */
-export interface DayStat {
-  day: string;
-  cnt: number;
-}
+// Re-export 与 bindings.ts 一致的类型（单一来源）
+export type {
+  DayStat,
+  UserStats,
+  VideoTypeStat,
+  UserInfo,
+  DownloadRecord,
+  VideoStats,
+  MusicCollection,
+  TypeStat,
+  LiveRecord,
+  DownloadStats,
+  TrendPoint,
+  AuthorStat,
+  StorageStat,
+  DbHealth,
+} from "./bindings";
 
-/** UserStats（对齐 Rust UserStats 结构体） */
-export interface UserStats {
-  total_count: number;
-  total_follower: number;
-  total_aweme: number;
-}
-
-/** VideoTypeStat（对齐 Rust VideoTypeStat 结构体） */
-export interface VideoTypeStat {
-  aweme_type: number;
-  cnt: number;
-}
-
-/** UserInfo（对齐 Rust UserInfo 结构体） */
-export interface UserInfo {
-  sec_user_id: string;
-  nickname: string | null;
-  uid: string | null;
-  avatar_url: string | null;
-  unique_id: string | null;
-  signature: string | null;
-  aweme_count: number;
-  follower_count: number;
-  following_count: number;
-  total_favorited: number;
-  ip_location: string | null;
-  live_status: number;
-  room_id: string | null;
-  city: string | null;
-  country: string | null;
-  favoriting_count: number;
-  gender: number;
-  is_ban: number;
-  is_block: number;
-  is_blocked: number;
-  is_star: number;
-  mix_count: number;
-  mplatform_followers_count: number;
-  nickname_raw: string | null;
-  school_name: string | null;
-  short_id: string | null;
-  signature_raw: string | null;
-  user_age: number;
-  custom_verify: string | null;
-  updated_at: number;
-}
-
-/** DownloadRecord（对齐 Rust DownloadRecord 结构体） */
-export interface DownloadRecord {
-  id: number;
-  aweme_id: string | null;
-  download_type: string;
-  title: string | null;
-  author_nickname: string | null;
-  author_sec_uid: string | null;
-  file_path: string | null;
-  file_size: number;
-  cover_url: string | null;
-  status: string;
-  error_msg: string | null;
-  created_at: number;
-}
-
-/** VideoStats（对齐 Rust VideoStats 结构体） */
-export interface VideoStats {
-  total_count: number;
-  total_digg: number;
-  total_comment: number;
-  total_share: number;
-  total_collect: number;
-  by_type: VideoTypeStat[];
-}
-
-/** MusicCollection（对齐 Rust MusicCollection 结构体） */
-export interface MusicCollection {
-  music_id: string;
-  mid: string | null;
-  title: string | null;
-  author: string | null;
-  owner_nickname: string | null;
-  duration: number;
-  cover: string | null;
-  play_url: string | null;
-  file_path: string | null;
-  status: string;
-  created_at: number;
-}
-
-/** TypeStat（对齐 Rust TypeStat 结构体） */
-export interface TypeStat {
-  download_type: string;
-  cnt: number;
-  size: number;
-}
-
-/** NewMusicCollection（对齐 Rust NewMusicCollection 结构体） */
-export interface NewMusicCollection {
-  music_id: string;
-  mid: string | null;
-  title: string | null;
-  author: string | null;
-  owner_nickname: string | null;
-  duration: number;
-  cover: string | null;
-  play_url: string | null;
-}
-
-/** LiveRecord（对齐 Rust LiveRecord 结构体） */
-export interface LiveRecord {
-  id: number;
-  room_id: string | null;
-  web_rid: string | null;
-  title: string | null;
-  nickname: string | null;
-  sec_user_id: string | null;
-  file_path: string | null;
-  file_size: number;
-  duration_sec: number;
-  status: string;
-  started_at: number | null;
-  ended_at: number | null;
-  cover_url: string | null;
-}
-
-/** DownloadStats（对齐 Rust DownloadStats 结构体） */
-export interface DownloadStats {
-  total_count: number;
-  total_size: number;
-  by_type: TypeStat[];
-  by_day: DayStat[];
-}
-
-/** TrendPoint（对齐 Rust TrendPoint 结构体） */
-export interface TrendPoint {
-  day: string;
-  cnt: number;
-  size: number;
-}
-
-/** AuthorStat（对齐 Rust AuthorStat 结构体） */
-export interface AuthorStat {
-  author_nickname: string;
-  cnt: number;
-  total_size: number;
-}
-
-/** StorageStat（对齐 Rust StorageStat 结构体） */
-export interface StorageStat {
-  download_type: string;
-  cnt: number;
-  total_size: number;
-}
-
-/** DbHealth（对齐 Rust DbHealth 结构体） */
-export interface DbHealth {
-  download_count: number;
-  video_count: number;
-  user_count: number;
-  live_count: number;
-  music_count: number;
-  task_count: number;
-  db_size_bytes: number;
-}
-
-/** VideoInfo（对齐 Rust VideoInfo 结构体） */
+// VideoInfo：完整 DB 模型（61 字段）
+// bindings.ts 仅有 18 个核心字段（用于 task service），此处保留完整版本供 library 页面和 DB 查询使用
 export interface VideoInfo {
   aweme_id: string;
   desc: string | null;

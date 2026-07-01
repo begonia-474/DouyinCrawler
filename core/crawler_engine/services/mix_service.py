@@ -2,7 +2,7 @@
 
 import logging
 
-from core.filter import UserPostFilter, UserProfileFilter
+from core.crawler_engine.filter import UserPostFilter, UserProfileFilter
 from core.utils import MixIdFetcher
 
 from .base import BaseService

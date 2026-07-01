@@ -11,7 +11,7 @@ import { InfiniteScrollSentinel } from "@/components/shared/infinite-scroll-sent
 import { LoadingSpinner } from "@/components/shared/loading-spinner";
 import { ErrorBanner } from "@/components/shared/error-banner";
 import { getUserProfile, getUserLikes, downloadUserLikes } from "@/lib/api";
-import { useTaskStore } from "@/stores/task-store";
+import { useActiveTask } from "@/hooks/use-active-task";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import type { UserProfile as UserProfileType, VideoItem } from "@/lib/api-types";
 import { formatDurationSec } from "@/lib/utils";
@@ -24,7 +24,7 @@ export default function LikesPage() {
   const [downloadedCount, setDownloadedCount] = useState(0);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [currentUrl, setCurrentUrl] = useState("");
-  const batchTask = useTaskStore((s) => activeTaskId ? s.tasks[activeTaskId] : null);
+  const batchTask = useActiveTask(activeTaskId);
   const downloadProgress = batchTask ? ((batchTask.total ?? 0) > 0 ? Math.round(((batchTask.completed ?? 0) / (batchTask.total ?? 1)) * 100) : 0) : 0;
 
   const { items: likes, setItems: setLikes, hasMore, loadingMore, sentinelRef, reset } = useInfiniteScroll<VideoItem>({

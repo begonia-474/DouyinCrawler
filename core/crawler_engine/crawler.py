@@ -11,10 +11,10 @@ import random
 import logging
 from urllib.parse import urlencode
 
-from core.api import DouyinAPIEndpoints as ep
-from core.signature.abogus import ABogus
-from core.signature.xbogus import XBogus
-from core.signature.fingerprint import BrowserFingerprintGenerator
+from core.crawler_engine.api import DouyinAPIEndpoints as ep
+from core.crawler_engine.signature.abogus import ABogus
+from core.crawler_engine.signature.xbogus import XBogus
+from core.crawler_engine.signature.fingerprint import BrowserFingerprintGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +160,7 @@ class DouyinCrawler:
         return {"status_code": -1, "status_msg": f"request failed after {self.max_retries} retries: {last_error}"}
 
     def _get_token(self) -> str:
-        from core.tokens.token_manager import TokenManager
+        from core.crawler_engine.tokens.token_manager import TokenManager
         return TokenManager.gen_false_ms_token()
 
     # ============================================================

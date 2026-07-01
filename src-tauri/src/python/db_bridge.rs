@@ -50,6 +50,7 @@ pub fn register_db_bridge(app_handle: &AppHandle) {
             None,
             None,
             move |args: &Bound<'_, pyo3::types::PyTuple>, _kwargs: Option<&Bound<'_, pyo3::types::PyDict>>| -> PyResult<()> {
+                let py = args.py();
                 let data = args.get_item(0)?;
                 let state = h1.state::<crate::state::AppState>();
 
@@ -78,7 +79,8 @@ pub fn register_db_bridge(app_handle: &AppHandle) {
                     error_msg,
                 };
 
-                match state.db.save_download(&record) {
+                // 释放 GIL 后再锁 DB，避免 GIL+mutex 死锁
+                match py.allow_threads(|| state.db.save_download(&record)) {
                     Ok(id) => {
                         info!("[db_bridge] save_download_record 成功: id={}", id);
                     }
@@ -98,6 +100,7 @@ pub fn register_db_bridge(app_handle: &AppHandle) {
             None,
             None,
             move |args: &Bound<'_, pyo3::types::PyTuple>, _kwargs: Option<&Bound<'_, pyo3::types::PyDict>>| -> PyResult<()> {
+                let py = args.py();
                 let data = args.get_item(0)?;
                 let state = h2.state::<crate::state::AppState>();
 
@@ -107,7 +110,8 @@ pub fn register_db_bridge(app_handle: &AppHandle) {
                 let video_info: crate::db::VideoInfo = serde_json::from_value(json_value)
                     .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("反序列化 VideoInfo 失败: {}", e)))?;
 
-                match state.db.save_video(&video_info) {
+                // 释放 GIL 后再锁 DB，避免 GIL+mutex 死锁
+                match py.allow_threads(|| state.db.save_video(&video_info)) {
                     Ok(_) => {
                         info!("[db_bridge] save_video_info 成功: aweme_id={}", video_info.aweme_id);
                     }
@@ -127,6 +131,7 @@ pub fn register_db_bridge(app_handle: &AppHandle) {
             None,
             None,
             move |args: &Bound<'_, pyo3::types::PyTuple>, _kwargs: Option<&Bound<'_, pyo3::types::PyDict>>| -> PyResult<()> {
+                let py = args.py();
                 let data = args.get_item(0)?;
                 let state = h3.state::<crate::state::AppState>();
 
@@ -135,7 +140,8 @@ pub fn register_db_bridge(app_handle: &AppHandle) {
                 let user_info: crate::db::UserInfo = serde_json::from_value(json_value)
                     .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("反序列化 UserInfo 失败: {}", e)))?;
 
-                match state.db.save_user(&user_info) {
+                // 释放 GIL 后再锁 DB，避免 GIL+mutex 死锁
+                match py.allow_threads(|| state.db.save_user(&user_info)) {
                     Ok(_) => {
                         info!("[db_bridge] save_user_info 成功: sec_user_id={}", user_info.sec_user_id);
                     }
@@ -155,6 +161,7 @@ pub fn register_db_bridge(app_handle: &AppHandle) {
             None,
             None,
             move |args: &Bound<'_, pyo3::types::PyTuple>, _kwargs: Option<&Bound<'_, pyo3::types::PyDict>>| -> PyResult<()> {
+                let py = args.py();
                 let data = args.get_item(0)?;
                 let state = h4.state::<crate::state::AppState>();
 
@@ -186,7 +193,8 @@ pub fn register_db_bridge(app_handle: &AppHandle) {
                     cover_url,
                 };
 
-                match state.db.save_live_record(&record) {
+                // 释放 GIL 后再锁 DB，避免 GIL+mutex 死锁
+                match py.allow_threads(|| state.db.save_live_record(&record)) {
                     Ok(id) => {
                         info!("[db_bridge] save_live_record 成功: id={}", id);
                     }
@@ -206,10 +214,12 @@ pub fn register_db_bridge(app_handle: &AppHandle) {
             None,
             None,
             move |args: &Bound<'_, pyo3::types::PyTuple>, _kwargs: Option<&Bound<'_, pyo3::types::PyDict>>| -> PyResult<bool> {
+                let py = args.py();
                 let sec_user_id: String = args.get_item(0)?.extract()?;
                 let state = h5.state::<crate::state::AppState>();
 
-                match state.db.get_user_by_sec_uid(&sec_user_id) {
+                // 释放 GIL 后再锁 DB，避免 GIL+mutex 死锁
+                match py.allow_threads(|| state.db.get_user_by_sec_uid(&sec_user_id)) {
                     Ok(Some(_)) => Ok(true),
                     Ok(None) => Ok(false),
                     Err(e) => {

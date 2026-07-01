@@ -2,7 +2,7 @@
 
 import logging
 
-from core.filter import UserPostFilter, UserProfileFilter
+from core.crawler_engine.filter import UserPostFilter, UserProfileFilter
 from core.utils import (
     SecUserIdFetcher, filter_by_date_interval,
 )
@@ -151,7 +151,7 @@ class UserService(BaseService):
         async with self._make_crawler() as crawler:
             data = await crawler.fetch_user_following(sec_user_id, offset, count)
 
-        from core.filter import UserFollowingFilter
+        from core.crawler_engine.filter import UserFollowingFilter
         f = UserFollowingFilter(data)
         return {"success": True, "followings": f.followings, "has_more": f.has_more}
 
@@ -164,7 +164,7 @@ class UserService(BaseService):
         async with self._make_crawler() as crawler:
             data = await crawler.fetch_user_follower(sec_user_id, offset, count)
 
-        from core.filter import UserFollowerFilter
+        from core.crawler_engine.filter import UserFollowerFilter
         f = UserFollowerFilter(data)
         return {"success": True, "followers": f.followers, "has_more": f.has_more}
 

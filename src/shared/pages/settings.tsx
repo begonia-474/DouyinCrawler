@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useForm, Controller } from "react-hook-form";
 import { z } from "zod/v4";
+import { zodResolver } from "@hookform/resolvers/zod";
 import { Header } from "@/components/layout/header";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
@@ -94,6 +95,8 @@ function SettingItem({
 
 export default function SettingsPage() {
   const { register, handleSubmit, control, reset, formState: { isSubmitting } } = useForm<SettingsForm>({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- zodResolver 类型签名尚未完全兼容 zod v4
+    resolver: zodResolver(_settingsSchema as any),
     defaultValues: {
       cookie: "",
       downloadPath: "Download",

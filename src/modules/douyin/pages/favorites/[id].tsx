@@ -10,7 +10,7 @@ import { DownloadProgressOverlay } from "@/components/shared/download-progress-o
 import { InfiniteScrollSentinel } from "@/components/shared/infinite-scroll-sentinel";
 import { LoadingSpinner } from "@/components/shared/loading-spinner";
 import { getCollectsVideoList, downloadCollectsVideo } from "@/lib/api";
-import { useTaskStore } from "@/stores/task-store";
+import { useActiveTask } from "@/hooks/use-active-task";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import type { VideoItem } from "@/lib/api-types";
 import { ArrowLeft } from "lucide-react";
@@ -24,7 +24,7 @@ export default function CollectsDetailPage() {
   const [downloading, setDownloading] = useState(false);
   const [downloadedCount, setDownloadedCount] = useState(0);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
-  const batchTask = useTaskStore((s) => activeTaskId ? s.tasks[activeTaskId] : null);
+  const batchTask = useActiveTask(activeTaskId);
   const downloadProgress = batchTask ? ((batchTask.total ?? 0) > 0 ? Math.round(((batchTask.completed ?? 0) / (batchTask.total ?? 1)) * 100) : 0) : 0;
 
   const { items: videos, hasMore, loadingMore, initialLoading, sentinelRef, reset } = useInfiniteScroll<VideoItem>({

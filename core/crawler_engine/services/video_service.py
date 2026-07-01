@@ -2,8 +2,8 @@
 
 import logging
 
-from core.downloader import format_filename
-from core.filter import PostDetailFilter, UserProfileFilter
+from core.download.downloader import format_filename
+from core.crawler_engine.filter import PostDetailFilter, UserProfileFilter
 from core.utils import AwemeIdFetcher
 
 from .base import BaseService, run_concurrent

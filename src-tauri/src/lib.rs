@@ -63,24 +63,36 @@ fn set_config(
 // 共享工具函数
 // ============================================================
 
-/// 删除本地文件/目录（白名单校验：仅允许项目根目录下的路径，防止 ../ 穿越）
-pub(crate) fn delete_local_path(path: Option<String>) -> Result<(), String> {
-    let Some(path) = path.filter(|value| !value.trim().is_empty()) else {
-        return Ok(());
-    };
-    let local_path = Path::new(&path);
+/// 校验路径是否在项目根目录内（防止 ../ 穿越）
+///
+/// 处理不存在的路径：向上查找最近存在的祖先目录，校验其在项目根目录内，
+/// 再检查剩余路径段不含 `..`。
+pub(crate) fn validate_path_in_project(path: &str) -> Result<PathBuf, String> {
+    let local_path = Path::new(path);
 
-    // 先检查是否存在（canonicalize 对不存在的路径会返回 Err）
-    if !local_path.exists() {
-        return Ok(());
+    // 解析为绝对路径
+    let abs_path = if local_path.is_absolute() {
+        local_path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|e| format!("获取当前目录失败: {}", e))?
+            .join(local_path)
+    };
+
+    // 找到最近存在的祖先目录
+    let mut ancestor = abs_path.as_path();
+    while !ancestor.exists() {
+        match ancestor.parent() {
+            Some(p) => ancestor = p,
+            None => return Err("路径无法解析".to_string()),
+        }
     }
 
-    // 规范化路径，防止 ../ 穿越
-    let canonical = local_path
+    let canonical_ancestor = ancestor
         .canonicalize()
         .map_err(|e| format!("路径规范化失败: {}", e))?;
 
-    // 白名单：只允许删除项目根目录下的文件（覆盖 Download/、data/ 及用户自定义下载路径）
+    // 计算项目根目录
     let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let project_root = current_dir
         .parent()
@@ -88,9 +100,35 @@ pub(crate) fn delete_local_path(path: Option<String>) -> Result<(), String> {
         .canonicalize()
         .unwrap_or_else(|_| current_dir.clone());
 
-    if !canonical.starts_with(&project_root) {
-        return Err(format!("安全拒绝: 路径不在项目目录内: {:?}", canonical));
+    if !canonical_ancestor.starts_with(&project_root) {
+        return Err(format!("安全拒绝: 路径不在项目目录内: {:?}", abs_path));
     }
+
+    // 检查剩余路径段不含 ..
+    if let Ok(remainder) = abs_path.strip_prefix(ancestor) {
+        for component in remainder.components() {
+            if let std::path::Component::ParentDir = component {
+                return Err(format!("安全拒绝: 路径包含 .. 穿越: {:?}", abs_path));
+            }
+        }
+    }
+
+    Ok(abs_path)
+}
+
+/// 删除本地文件/目录（白名单校验：仅允许项目根目录下的路径，防止 ../ 穿越）
+pub(crate) fn delete_local_path(path: Option<String>) -> Result<(), String> {
+    let Some(path) = path.filter(|value| !value.trim().is_empty()) else {
+        return Ok(());
+    };
+
+    // 先检查是否存在（不存在的路径删除是 no-op）
+    if !Path::new(&path).exists() {
+        return Ok(());
+    }
+
+    // 校验路径在项目内
+    let canonical = validate_path_in_project(&path)?;
 
     if canonical.is_dir() {
         std::fs::remove_dir_all(&canonical).map_err(|e| format!("删除本地文件夹失败: {}", e))

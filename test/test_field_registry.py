@@ -78,18 +78,27 @@ class TestTauriTypesConsistency:
     """验证 tauri-types.ts 与 Rust struct 字段数一致"""
 
     def _count_interface_fields(self, ts_content: str, interface_name: str) -> int:
-        """统计 TS 接口中的字段数"""
+        """统计 TS 接口中的字段数（支持 inline 定义和 re-export）"""
         import re
         pattern = re.compile(
             rf"export interface {re.escape(interface_name)} \{{([^}}]+)\}}",
             re.DOTALL,
         )
         match = pattern.search(ts_content)
-        if not match:
-            return -1
-        body = match.group(1)
-        # 统计 "field: type;" 行数
-        return len(re.findall(r"^\s+\w+\s*:", body, re.MULTILINE))
+        if match:
+            body = match.group(1)
+            return len(re.findall(r"^\s+\w+\s*:", body, re.MULTILINE))
+        # 检查是否为 re-export（export type { X } from "..."）
+        reexport_pattern = re.compile(
+            rf"export type \{{[^}}]*\b{re.escape(interface_name)}\b[^}}]*\}} from [\"']\.\/bindings[\"']"
+        )
+        if reexport_pattern.search(ts_content):
+            # 从 bindings.ts 读取实际定义
+            bindings_path = Path(__file__).resolve().parent.parent / "src" / "lib" / "bindings.ts"
+            if bindings_path.exists():
+                bindings_content = bindings_path.read_text(encoding="utf-8")
+                return self._count_interface_fields(bindings_content, interface_name)
+        return -1
 
     def test_tauri_types_video_info_field_count(self):
         """tauri-types.ts VideoInfo 应有 61 个字段"""
@@ -133,8 +142,15 @@ class TestTauriTypesConsistency:
             pytest.skip("tauri-types.ts 不存在")
         import re
         content = ts_path.read_text(encoding="utf-8")
+        # 先找 inline 定义，再找 re-export
         pattern = re.compile(r"export interface UserInfo \{([^}]+)\}", re.DOTALL)
         match = pattern.search(content)
+        if not match:
+            # re-export：从 bindings.ts 读取
+            bindings_path = Path(__file__).resolve().parent.parent / "src" / "lib" / "bindings.ts"
+            if bindings_path.exists():
+                content = bindings_path.read_text(encoding="utf-8")
+                match = pattern.search(content)
         assert match, "找不到 UserInfo 接口"
         body = match.group(1)
         ts_fields = re.findall(r"^\s+(\w+)\s*:", body, re.MULTILINE)

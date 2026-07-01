@@ -3,8 +3,8 @@
 import asyncio
 import logging
 
-from core.crawler import DouyinCrawler
-from core.downloader import Downloader
+from core.crawler_engine.crawler import DouyinCrawler
+from core.download.downloader import Downloader
 from core.models import ServiceConfig
 
 logger = logging.getLogger(__name__)
@@ -74,7 +74,7 @@ class BaseService:
         Returns:
             PostDetail 对象列表
         """
-        from core.filter import UserPostFilter
+        from core.crawler_engine.filter import UserPostFilter
         import random
 
         downloaded = 0
@@ -122,7 +122,7 @@ class BaseService:
         Returns:
             {"success": bool, "count": int, "results": [{"path": str, "detail": dict}]}
         """
-        from core.downloader import format_filename
+        from core.download.downloader import format_filename
 
         download_tasks = []
         task_details = {}

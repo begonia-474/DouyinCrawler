@@ -3,6 +3,10 @@
 解析 db.rs 中的 struct 定义，生成 src/lib/tauri-types.ts。
 确保 Rust 和 TypeScript 的类型定义始终保持同步。
 
+类型来源策略：
+  - 与 bindings.ts（specta 生成）一致的类型 → re-export
+  - VideoInfo（62 字段完整 DB 模型）→ 本地定义
+
 用法：python scripts/gen_tauri_types.py
 """
 
@@ -12,7 +16,7 @@ from pathlib import Path
 
 # 项目根目录
 ROOT = Path(__file__).resolve().parent.parent
-DB_RS = ROOT / "src-tauri" / "src" / "db.rs"
+DB_RS = ROOT / "src-tauri" / "src" / "database" / "models.rs"
 OUT_TS = ROOT / "src" / "lib" / "tauri-types.ts"
 
 # Rust → TypeScript 类型映射
@@ -32,21 +36,28 @@ TYPE_MAP = {
 # Vec<T> → T[] 映射（运行时解析）
 VEC_PATTERN = re.compile(r"Vec<(\w+)>")
 
-# 只导出这些 struct（业务类型，不含内部类型）
-EXPORT_STRUCTS = {
-    "DownloadRecord",
-    "DownloadStats",
-    "TypeStat",
+# re-export 自 bindings.ts 的类型（specta 编译期生成，与 db.rs 定义一致）
+REEXPORT_TYPES = [
     "DayStat",
-    "LiveRecord",
-    "VideoInfo",
-    "VideoStats",
-    "VideoTypeStat",
     "UserStats",
+    "VideoTypeStat",
     "UserInfo",
+    "DownloadRecord",
+    "VideoStats",
     "MusicCollection",
-    "NewMusicCollection",
-}
+    "TypeStat",
+    "LiveRecord",
+    "DownloadStats",
+    "TrendPoint",
+    "AuthorStat",
+    "StorageStat",
+    "DbHealth",
+]
+
+# 本地定义的类型（与 bindings.ts 不同，需保留完整版本）
+LOCAL_TYPES = [
+    "VideoInfo",
+]
 
 
 def parse_structs(content: str) -> dict[str, list[tuple[str, str]]]:
@@ -59,9 +70,10 @@ def parse_structs(content: str) -> dict[str, list[tuple[str, str]]]:
         re.DOTALL,
     )
 
+    all_types = set(REEXPORT_TYPES) | set(LOCAL_TYPES)
     for match in struct_pattern.finditer(content):
         name = match.group(1)
-        if name not in EXPORT_STRUCTS:
+        if name not in all_types:
             continue
 
         body = match.group(2)
@@ -96,30 +108,47 @@ def rust_type_to_ts(rust_type: str) -> str:
         return f"{rust_type_to_ts(inner)}[]"
 
     # 已知 struct 名 → 直接使用（如 TypeStat、VideoTypeStat）
-    if t in EXPORT_STRUCTS:
+    all_types = set(REEXPORT_TYPES) | set(LOCAL_TYPES)
+    if t in all_types:
         return t
 
     return "unknown"
 
 
 def generate_ts(structs: dict[str, list[tuple[str, str]]]) -> str:
-    """生成 TypeScript 接口代码"""
+    """生成 TypeScript 代码（re-export + 本地定义）"""
     lines = [
         "// ============================================================",
         "// 此文件由 scripts/gen_tauri_types.py 自动生成",
-        "// 源头：src-tauri/src/db.rs",
+        "// 源头：src-tauri/src/db.rs + src-tauri/src/database/models.rs",
+        "//",
+        "// 类型来源：",
+        "//   - 12 个类型 re-export 自 bindings.ts（specta 编译期生成，权威来源）",
+        "//   - VideoInfo 本地定义（62 字段完整 DB 模型，bindings.ts 仅 18 字段）",
+        "//",
         "// 修改后请运行: python scripts/gen_tauri_types.py",
         "// ============================================================",
         "",
+        "// Re-export 与 bindings.ts 一致的类型（单一来源）",
     ]
 
-    # 按 EXPORT_STRUCTS 顺序输出
-    for struct_name in EXPORT_STRUCTS:
+    # 生成 re-export
+    reexport_names = [name for name in REEXPORT_TYPES if name in structs]
+    if reexport_names:
+        lines.append("export type {")
+        for name in reexport_names:
+            lines.append(f"  {name},")
+        lines.append('} from "./bindings";')
+    lines.append("")
+
+    # 生成本地定义的类型
+    for struct_name in LOCAL_TYPES:
         if struct_name not in structs:
             continue
 
         fields = structs[struct_name]
-        lines.append(f"/** {struct_name}（对齐 Rust {struct_name} 结构体） */")
+        lines.append(f"// {struct_name}：完整 DB 模型（{len(fields)} 字段）")
+        lines.append(f"// bindings.ts 仅有 18 个核心字段（用于 task service），此处保留完整版本供 library 页面和 DB 查询使用")
         lines.append(f"export interface {struct_name} {{")
 
         for field_name, rust_type in fields:
@@ -149,7 +178,8 @@ def main():
 
     print(f"已生成 {OUT_TS}")
     for name, fields in structs.items():
-        print(f"  {name}: {len(fields)} 个字段")
+        label = "re-export" if name in REEXPORT_TYPES else "本地定义"
+        print(f"  {name}: {len(fields)} 个字段 ({label})")
 
 
 if __name__ == "__main__":

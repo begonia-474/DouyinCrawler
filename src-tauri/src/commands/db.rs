@@ -314,6 +314,9 @@ pub fn export_data(
     data_type: String,
     save_path: String,
 ) -> Result<String, String> {
+    // 路径校验：防止 ../ 穿越写入任意文件
+    let safe_path = crate::validate_path_in_project(&save_path)?;
+
     let json = match data_type.as_str() {
         "downloads" => {
             let records = state.db.get_downloads(i64::MAX, 0, None, None)
@@ -344,16 +347,16 @@ pub fn export_data(
     };
 
     // 确保父目录存在
-    if let Some(parent) = std::path::Path::new(&save_path).parent() {
+    if let Some(parent) = safe_path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("创建目录失败: {}", e))?;
     }
 
-    std::fs::write(&save_path, &json)
+    std::fs::write(&safe_path, &json)
         .map_err(|e| format!("写入文件失败: {}", e))?;
 
-    info!("[export_data] 已导出 {} 到 {}", data_type, save_path);
-    Ok(save_path)
+    info!("[export_data] 已导出 {} 到 {}", data_type, safe_path.display());
+    Ok(safe_path.to_string_lossy().to_string())
 }
 
 // ============================================================
