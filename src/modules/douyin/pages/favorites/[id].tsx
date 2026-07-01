@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Header } from "@/components/layout/header";
 import { VideoCard } from "@/components/shared/video-card";
@@ -9,9 +9,9 @@ import { DownloadAllButton } from "@/components/shared/download-all-button";
 import { DownloadProgressOverlay } from "@/components/shared/download-progress-overlay";
 import { InfiniteScrollSentinel } from "@/components/shared/infinite-scroll-sentinel";
 import { LoadingSpinner } from "@/components/shared/loading-spinner";
-import { useCollectsVideosInfiniteQuery } from "@/lib/queries";
-import { downloadCollectsVideo } from "@/lib/api";
+import { getCollectsVideoList, downloadCollectsVideo } from "@/lib/api";
 import { useTaskStore } from "@/stores/task-store";
+import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import type { VideoItem } from "@/lib/api-types";
 import { ArrowLeft } from "lucide-react";
 import { ErrorBanner } from "@/components/shared/error-banner";
@@ -27,17 +27,28 @@ export default function CollectsDetailPage() {
   const batchTask = useTaskStore((s) => activeTaskId ? s.tasks[activeTaskId] : null);
   const downloadProgress = batchTask ? ((batchTask.total ?? 0) > 0 ? Math.round(((batchTask.completed ?? 0) / (batchTask.total ?? 1)) * 100) : 0) : 0;
 
-  const query = useCollectsVideosInfiniteQuery(id || null);
-  const videos: VideoItem[] = query.data?.pages.flatMap((p) => p.data?.videos ?? []) ?? [];
-  const hasMore = query.hasNextPage;
-  const loadingMore = query.isFetchingNextPage;
-  const initialLoading = query.isLoading;
+  const { items: videos, hasMore, loadingMore, initialLoading, sentinelRef, reset } = useInfiniteScroll<VideoItem>({
+    fetchPage: useCallback(async (cursor: number) => {
+      if (!id) return null;
+      const res = await getCollectsVideoList(id, cursor, 20);
+      if (res.success && res.data?.videos) {
+        return {
+          items: res.data.videos,
+          nextCursor: res.data.next_cursor ?? 0,
+          hasMore: res.data.has_more ?? false,
+        };
+      }
+      return null;
+    }, [id]),
+    enabled: !!id,
+  });
 
-  const fetchNextPage = useCallback(() => {
-    if (query.hasNextPage && !query.isFetchingNextPage) {
-      query.fetchNextPage();
-    }
-  }, [query]);
+  useEffect(() => {
+    if (!id) return;
+    setError(null);
+    // reset() 触发 useInfiniteScroll 内部重新加载，loading 由其内部状态管理
+    reset();
+  }, [id, reset]);
 
   const handleDownloadAll = async () => {
     if (!id) return;
@@ -113,11 +124,11 @@ export default function CollectsDetailPage() {
               ))}
             </div>
             <InfiniteScrollSentinel
+              sentinelRef={sentinelRef}
               loadingMore={loadingMore}
-              hasMore={!!hasMore}
+              hasMore={hasMore}
               total={videos.length}
               label="视频"
-              onVisible={fetchNextPage}
             />
           </>
         )}

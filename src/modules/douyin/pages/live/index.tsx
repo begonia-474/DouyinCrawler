@@ -8,8 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Bezel } from "@/components/shared/bezel";
-import { startLiveRecord, stopLiveRecord } from "@/lib/api";
-import { useLiveInfoQuery } from "@/lib/queries";
+import { getLiveInfo, startLiveRecord, stopLiveRecord, getLiveStatus } from "@/lib/api";
 import { useTaskStore } from "@/stores/task-store";
 import type { LiveInfo as LiveInfoType } from "@/lib/api-types";
 import {
@@ -28,15 +27,13 @@ export default function LivePage() {
   const location = useLocation();
   const initialUrl = (location.state as { url?: string })?.url || "";
 
-  const [currentUrl, setCurrentUrl] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [liveInfo, setLiveInfo] = useState<LiveInfoType | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [recordLoading, setRecordLoading] = useState(false);
 
   const lastParsedUrl = useRef("");
-
-  const liveInfoQuery = useLiveInfoQuery(currentUrl || null);
-  const liveInfo = liveInfoQuery.data?.data as LiveInfoType | undefined;
 
   // 使用全局 store
   const { tasks: allTasks, connect: connectLive, updateTask, removeTask } = useTaskStore();
@@ -57,9 +54,48 @@ export default function LivePage() {
   // 连接 Tauri 事件
   useEffect(() => {
     connectLive();
+
+    // 页面加载时检查后端是否有正在进行的录制任务
+    const checkExistingTask = async () => {
+      try {
+        const statusRes = await getLiveStatus();
+        if (statusRes.success && statusRes.data) {
+          const tasks = Object.values(statusRes.data);
+          for (const task of tasks) {
+            if (task.status === "recording" || task.status === "starting" || task.status === "stopping") {
+              // 添加到全局 store
+              useTaskStore.getState().addTask({
+                task_id: task.task_id,
+                task_type: "typed",
+                mode: "live",
+                url: task.url || "",
+                status: task.status as string,
+                title: task.title,
+                nickname: task.nickname,
+                room_id: task.room_id,
+                file: task.file,
+                file_size: task.file_size,
+                duration_sec: task.duration_sec,
+                started_at: task.started_at,
+                ended_at: task.ended_at,
+                cover_url: task.cover_url,
+                error: task.error,
+              });
+              if (task.url) {
+                lastParsedUrl.current = task.url;
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error("检查录制任务状态失败:", err);
+      }
+    };
+
+    checkExistingTask();
   }, [connectLive]);
 
-  // 监听任务完成/出错，显示错误并延迟清理
+  // 监听任务完成/出错，显示错误并延迟清理（DB 保存由后端完成）
   useEffect(() => {
     const doneTasks = Object.values(liveTasks).filter((t) => t.status === "completed" || t.status === "error");
     for (const task of doneTasks) {
@@ -69,14 +105,24 @@ export default function LivePage() {
       if (task.status === "error") {
         setError(task.error || "录制出错");
       }
+      // 延迟清理已完成/出错的任务
       setTimeout(() => removeTask(task.task_id), task.status === "completed" ? 3000 : 5000);
     }
   }, [liveTasks, removeTask]);
 
-  const handleParse = useCallback((url: string) => {
+  const handleParse = useCallback(async (url: string) => {
+    setLoading(true);
+    setLiveInfo(null);
     setError(null);
     lastParsedUrl.current = url;
-    setCurrentUrl(url);
+
+    const res = await getLiveInfo(url);
+    if (res.success && res.data) {
+      setLiveInfo(res.data);
+    } else {
+      setError(res.error || "获取直播信息失败");
+    }
+    setLoading(false);
   }, []);
 
   const handleCopy = (text: string, type: string) => {
@@ -90,6 +136,7 @@ export default function LivePage() {
     setRecordLoading(true);
     const res = await startLiveRecord(lastParsedUrl.current);
     if (res.success && res.data) {
+      // 添加到全局 store
       useTaskStore.getState().addTask({
         task_id: res.data.task_id,
         task_type: "typed",
@@ -109,16 +156,13 @@ export default function LivePage() {
     setRecordLoading(true);
     const res = await stopLiveRecord(recordTaskId);
     if (res.success) {
+      // 更新任务状态为 stopping
       updateTask(recordTaskId, { status: "stopping" });
     } else {
       setError(res.error || "停止录制失败");
     }
     setRecordLoading(false);
   }, [recordTaskId, updateTask]);
-
-  const queryError = liveInfoQuery.error?.message
-    || (!liveInfoQuery.data?.success ? (liveInfoQuery.data?.error ?? null) : null)
-    || error;
 
   return (
     <>
@@ -129,7 +173,7 @@ export default function LivePage() {
       <div className="space-y-6">
         <UrlInput
           onSubmit={handleParse}
-          loading={liveInfoQuery.isLoading}
+          loading={loading}
           placeholder="粘贴直播间链接..."
           allowedTypes={["live"]}
           defaultValue={initialUrl}
@@ -137,9 +181,9 @@ export default function LivePage() {
           autoDetect
         />
 
-        <ErrorBanner message={queryError} />
+        <ErrorBanner message={error} />
 
-        {liveInfoQuery.isLoading && (
+        {loading && (
           <div className="flex items-center justify-center py-16">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>

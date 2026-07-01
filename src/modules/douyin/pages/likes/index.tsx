@@ -10,47 +10,72 @@ import { DownloadProgressOverlay } from "@/components/shared/download-progress-o
 import { InfiniteScrollSentinel } from "@/components/shared/infinite-scroll-sentinel";
 import { LoadingSpinner } from "@/components/shared/loading-spinner";
 import { ErrorBanner } from "@/components/shared/error-banner";
-import { useUserProfileQuery, useUserLikesInfiniteQuery } from "@/lib/queries";
-import { downloadUserLikes } from "@/lib/api";
+import { getUserProfile, getUserLikes, downloadUserLikes } from "@/lib/api";
 import { useTaskStore } from "@/stores/task-store";
+import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import type { UserProfile as UserProfileType, VideoItem } from "@/lib/api-types";
 import { formatDurationSec } from "@/lib/utils";
 
 export default function LikesPage() {
-  const [currentUrl, setCurrentUrl] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [profile, setProfile] = useState<UserProfileType | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [downloadedCount, setDownloadedCount] = useState(0);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
+  const [currentUrl, setCurrentUrl] = useState("");
   const batchTask = useTaskStore((s) => activeTaskId ? s.tasks[activeTaskId] : null);
   const downloadProgress = batchTask ? ((batchTask.total ?? 0) > 0 ? Math.round(((batchTask.completed ?? 0) / (batchTask.total ?? 1)) * 100) : 0) : 0;
 
-  const profileQuery = useUserProfileQuery(currentUrl || null);
-  const likesQuery = useUserLikesInfiniteQuery(currentUrl || null);
+  const { items: likes, setItems: setLikes, hasMore, loadingMore, sentinelRef, reset } = useInfiniteScroll<VideoItem>({
+    fetchPage: useCallback(async (cursor: number) => {
+      if (!currentUrl) return null;
+      const res = await getUserLikes(currentUrl, cursor, 20);
+      if (res.success && res.data?.videos) {
+        return {
+          items: res.data.videos,
+          nextCursor: res.data.next_cursor ?? 0,
+          hasMore: res.data.has_more ?? false,
+        };
+      }
+      return null;
+    }, [currentUrl]),
+    enabled: !!currentUrl,
+  });
 
-  const profile = (profileQuery.data?.data?.profile as unknown as UserProfileType) || null;
-  const likes: VideoItem[] = likesQuery.data?.pages.flatMap((p) => p.data?.videos ?? []) ?? [];
-  const hasMore = likesQuery.hasNextPage;
-  const loadingMore = likesQuery.isFetchingNextPage;
-  const loading = profileQuery.isLoading;
-
-  const fetchNextPage = useCallback(() => {
-    if (likesQuery.hasNextPage && !likesQuery.isFetchingNextPage) {
-      likesQuery.fetchNextPage();
-    }
-  }, [likesQuery]);
-
-  const handleParse = useCallback((url: string) => {
+  const handleParse = useCallback(async (url: string) => {
+    setLoading(true);
+    setProfile(null);
+    setLikes([]);
     setError(null);
     setCurrentUrl(url);
-  }, []);
+
+    const profileRes = await getUserProfile(url);
+    if (profileRes.success && profileRes.data?.profile) {
+      setProfile(profileRes.data.profile as unknown as UserProfileType);
+    } else {
+      setError(profileRes.error || "获取用户信息失败");
+      setLoading(false);
+      return;
+    }
+
+    // 首次加载点赞列表
+    const likesRes = await getUserLikes(url, 0, 20);
+    if (likesRes.success && likesRes.data?.videos) {
+      reset(async () => ({
+        items: likesRes.data!.videos!,
+        nextCursor: likesRes.data!.next_cursor ?? 0,
+        hasMore: likesRes.data!.has_more ?? false,
+      }));
+    }
+
+    setLoading(false);
+  }, [reset, setLikes]);
 
   const handleDownloadAll = async () => {
     setDownloading(true);
     setDownloadedCount(0);
     setActiveTaskId(null);
-    setError(null);
 
     const res = await downloadUserLikes(profile?.sec_user_id ? `https://www.douyin.com/user/${profile.sec_user_id}` : "");
     if (res.success && res.task_id) {
@@ -62,10 +87,6 @@ export default function LikesPage() {
     }
     setDownloading(false);
   };
-
-  const queryError = profileQuery.error?.message || likesQuery.error?.message
-    || (!profileQuery.data?.success ? (profileQuery.data?.error ?? null) : null)
-    || error;
 
   return (
     <>
@@ -87,7 +108,7 @@ export default function LikesPage() {
       <div className="space-y-6">
         <UrlInput onSubmit={handleParse} loading={loading} placeholder="粘贴用户主页链接..." allowedTypes={["user"]} autoDetect />
 
-        <ErrorBanner message={queryError} />
+        <ErrorBanner message={error} />
 
         {loading && <LoadingSpinner size={24} />}
 
@@ -126,11 +147,11 @@ export default function LikesPage() {
               ))}
             </div>
             <InfiniteScrollSentinel
+              sentinelRef={sentinelRef}
               loadingMore={loadingMore}
-              hasMore={!!hasMore}
+              hasMore={hasMore}
               total={likes.length}
               label="点赞"
-              onVisible={fetchNextPage}
             />
           </>
         )}

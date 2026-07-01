@@ -21,8 +21,8 @@ setup_logging()
 
 logger = get_logger(__name__)
 
-# 项目根目录（backend 的父目录）
-PROJECT_ROOT = Path(__file__).parent.parent
+# 项目根目录（task_manager.py → task/ → core/ → 项目根目录）
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 CONFIG_DIR = PROJECT_ROOT / "config"
 CONFIG_PATH = CONFIG_DIR / "app.json"
 
@@ -58,12 +58,12 @@ class TaskManager:
                       max_connections: int = None, max_retries: int = None,
                       max_tasks: int = None, save: bool = True):
         if cookie is not None:
-            logger.info("[update_config] 收到 cookie (len={})", len(cookie))
+            logger.info("[update_config] 收到 cookie (len=%d)", len(cookie))
             if '\n' in cookie or '\r' in cookie:
-                logger.warning("[update_config] cookie 中包含换行符! \\n={}, \\r={}",
+                logger.warning("[update_config] cookie 中包含换行符! \\n=%d, \\r=%d",
                                cookie.count('\n'), cookie.count('\r'))
             self._cookie = " ".join(cookie.split())
-            logger.info("[update_config] cookie 已清理 (len={})", len(self._cookie))
+            logger.info("[update_config] cookie 已清理 (len=%d)", len(self._cookie))
         if download_path is not None:
             self._download_path = download_path
         if naming is not None:
@@ -159,9 +159,9 @@ class TaskManager:
             download_path = Path(self._download_path)
             if not download_path.is_absolute():
                 download_path = PROJECT_ROOT / download_path
-            logger.info("[handler] 创建 DouyinHandler (has_cookie={})", bool(self._cookie))
-            logger.info("[handler] download_path={} (原始={})", download_path, self._download_path)
-            logger.info("[handler] encryption={}, max_retries={}, timeout={}, max_connections={}",
+            logger.info("[handler] 创建 DouyinHandler (has_cookie=%s)", bool(self._cookie))
+            logger.info("[handler] download_path=%s (原始=%s)", download_path, self._download_path)
+            logger.info("[handler] encryption=%s, max_retries=%d, timeout=%d, max_connections=%d",
                         self._encryption, self._max_retries, self._timeout, self._max_connections)
             self._handler = DouyinHandler(
                 cookie=self._cookie,
@@ -182,7 +182,7 @@ class TaskManager:
                 max_retries=self._max_retries,
                 max_tasks=self._max_tasks,
             )
-            logger.info("已创建 DouyinHandler (path={})", self._download_path)
+            logger.info("已创建 DouyinHandler (path=%s)", self._download_path)
         return self._handler
 
     # ============================================================
@@ -214,12 +214,12 @@ class TaskManager:
         from core.models import DownloadMode
 
         task_id = str(uuid.uuid4())[:8]
-        logger.info("[start_download] task_id={}, mode={}", task_id, mode)
+        logger.info("[start_download] task_id=%s, mode=%s", task_id, mode)
 
         if mode == DownloadMode.LIVE:
             self._run_live_record(task_id, url)
         else:
-            logger.error("[start_download] mode={} 已迁移到 Rust TaskApplicationService，不应走此路径", mode)
+            logger.error("[start_download] mode=%s 已迁移到 Rust TaskApplicationService，不应走此路径", mode)
             return ""
 
         return task_id
@@ -288,17 +288,17 @@ class TaskManager:
                 clean_data["url"] = task_data["url"]
 
             emit_func = getattr(tb, '_emit_func', None)
-            logger.info("[broadcast] 广播 task_id={}, task_type={}, event_type={}, status={}, results={}, _emit_func={}",
+            logger.info("[broadcast] 广播 task_id=%s, task_type=%s, event_type=%s, status=%s, results=%d, _emit_func=%s",
                        task_id, task_type, event_type, status, len(clean_data.get("results", [])),
                        "已注册" if emit_func is not None else "未注册")
             if emit_func is None:
-                logger.error("[broadcast] _emit_func 为 None，无法广播！模块属性: {}", dir(tb))
+                logger.error("[broadcast] _emit_func 为 None，无法广播！模块属性: %s", dir(tb))
                 return
             logger.info("[broadcast] 调用 emit 函数...")
             tb.emit(task_id, task_type, clean_data)
             logger.info("[broadcast] emit 调用完成")
         except Exception as e:
-            logger.error("[broadcast] Tauri 事件发射失败: {}", e, exc_info=True)
+            logger.error("[broadcast] Tauri 事件发射失败: %s", e, exc_info=True)
 
     async def broadcast_task_update(self, task_id: str, task_data: dict, task_type: str = "unknown"):
         """广播任务状态更新到前端（异步版本，兼容）"""

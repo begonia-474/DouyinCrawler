@@ -13,7 +13,7 @@ pub fn init_config(config: &AppConfig) -> PyResult<()> {
     info!("[python/config] init_config 被调用, cookie 长度={}", cookie_len);
 
     Python::with_gil(|py| {
-        let module = py.import_bound("backend.task_manager")?;
+        let module = py.import_bound("core.task.task_manager")?;
         // 获取模块级单例 task_manager 实例（不是模块本身）
         let task_manager = module.getattr("task_manager")?;
 
