@@ -42,13 +42,6 @@ pub fn parse_video(url: &str) -> PyResult<VideoParseResult> {
     call_py_typed("parse_video", (url,))
 }
 
-/// 下载单个视频（仅下载，不写 DB，返回结果供 Rust 事务性完成）
-/// 保持返回 Value — 由 task_service.rs 反序列化为 PythonDownloadResult
-pub fn download_video(url: &str) -> PyResult<Value> {
-    info!("[handler.rs] download_video, url={}", &url[..url.len().min(60)]);
-    call_py_json("download_video", (url,))
-}
-
 /// 获取作品统计
 pub fn get_post_stats(url: &str) -> PyResult<PostStatsResult> {
     call_py_typed("get_post_stats", (url,))
@@ -109,11 +102,11 @@ pub fn start_download(mode: &str, url: &str) -> PyResult<Value> {
     call_py_json("start_download", (mode, url))
 }
 
-/// 批量下载（不写 task DB 表，返回结果供 Rust 处理）
-/// 保持返回 Value — 由 task_service.rs 反序列化为 PythonBatchDownloadResult
-pub fn download_batch(mode: &str, url: &str) -> PyResult<Value> {
-    info!("[handler.rs] download_batch, mode={}, url={}", mode, &url[..url.len().min(60)]);
-    call_py_json("download_batch", (mode, url))
+/// 解析下载 URL 列表（不执行下载）
+/// 返回下载所需的 URL + headers + 元数据，供 DownloadEngine 使用
+pub fn resolve_urls(mode: &str, url: &str) -> PyResult<Value> {
+    info!("[handler.rs] resolve_urls, mode={}, url={}", mode, &url[..url.len().min(60)]);
+    call_py_json("resolve_urls", (mode, url))
 }
 
 // ============================================================
@@ -186,13 +179,6 @@ pub fn get_music_collection(cursor: i64, count: i64) -> PyResult<MusicCollection
 /// 保持返回 Value — 由 task_service.rs 反序列化
 pub fn download_music(play_url: &str, title: &str, author: &str) -> PyResult<Value> {
     call_py_json("download_music", (play_url, title, author))
-}
-
-/// 下载全部音乐（不写 task DB 表，返回结果供 Rust 处理）
-/// 保持返回 Value — 由 task_service.rs 反序列化为 PythonMusicBatchResult
-pub fn download_music_batch(url: &str) -> PyResult<Value> {
-    info!("[handler.rs] download_music_batch, url={}", &url[..url.len().min(60)]);
-    call_py_json("download_music_batch", (url,))
 }
 
 // ============================================================

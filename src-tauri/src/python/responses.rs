@@ -1,28 +1,17 @@
-//! Python↔Rust 桥接响应结构体
+//! Python 返回值类型定义
 //!
-//! 每个结构体对应 core/models/responses.py 中的同名 dataclass。
-//! 修改时必须两边同步，否则 serde_json::from_value 会在运行时失败。
-//!
-//! 下载类结构体（PythonDownloadResult 等）定义在 services/download/mod.rs，
-//! 此文件仅定义查询类 + 直播类结构体。
+//! 对齐 core/models/responses.py 的 dataclass。
+//! 通过 tauri-specta 自动生成 TypeScript 类型。
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-
 use crate::error::{AppError, ErrorCode};
 
 // ============================================================
-// 默认值函数（serde 缺省字段）
+// 通用响应基类
 // ============================================================
 
-fn default_success() -> bool { false }
-fn default_error_code() -> String { "unknown".to_string() }
-fn default_empty_string() -> String { String::new() }
-fn default_false() -> bool { false }
-fn default_zero_i64() -> i64 { 0 }
-fn default_empty_vec_value() -> Vec<Value> { Vec::new() }
-
-/// 桥接响应 trait — 提供 success 检查和 AppError 转换
+/// 所有 Python 返回值的公共接口
 pub trait BridgeResponse: Sized {
     fn is_success(&self) -> bool;
     fn error_code_str(&self) -> &str;
@@ -54,15 +43,26 @@ fn parse_error_code(s: &str) -> ErrorCode {
         "content_deleted" => ErrorCode::ContentDeleted,
         "signature_error" => ErrorCode::SignatureError,
         "parse_error" => ErrorCode::ParseError,
-        "database_error" => ErrorCode::DatabaseError,
-        "file_system_error" => ErrorCode::FileSystemError,
-        "config_error" => ErrorCode::ConfigError,
         _ => ErrorCode::Unknown,
     }
 }
 
-/// 为所有包含 success/error_code/error 字段的结构体实现 BridgeResponse
-/// 使用宏减少重复代码
+// ============================================================
+// 默认值函数
+// ============================================================
+
+fn default_success() -> bool { true }
+fn default_error_code() -> String { "OK".to_string() }
+fn default_empty_string() -> String { String::new() }
+fn default_empty_vec() -> Vec<Value> { Vec::new() }
+fn default_empty_vec_value() -> Vec<Value> { Vec::new() }
+fn default_zero_i64() -> i64 { 0 }
+fn default_false() -> bool { false }
+
+// ============================================================
+// BridgeResponse 宏
+// ============================================================
+
 macro_rules! impl_bridge_response {
     ($struct_name:ident) => {
         impl BridgeResponse for $struct_name {
@@ -86,9 +86,8 @@ pub struct VideoParseResult {
     pub error_code: String,
     #[serde(default = "default_empty_string")]
     pub error: String,
+    #[serde(default)]
     pub detail: Option<Value>,
-    pub path: Option<String>,
-    pub paths: Option<Vec<String>>,
 }
 
 /// get_user_profile() 返回值 — 对齐 Python UserProfileResult
@@ -100,10 +99,11 @@ pub struct UserProfileResult {
     pub error_code: String,
     #[serde(default = "default_empty_string")]
     pub error: String,
+    #[serde(default)]
     pub profile: Option<Value>,
 }
 
-/// get_user_posts() / get_user_likes() 返回值 — 对齐 Python UserPostsResult / UserLikesResult
+/// get_user_posts() 返回值 — 对齐 Python UserPostsResult
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserPostsResult {
     #[serde(default = "default_success")]
@@ -112,12 +112,12 @@ pub struct UserPostsResult {
     pub error_code: String,
     #[serde(default = "default_empty_string")]
     pub error: String,
-    #[serde(default = "default_empty_vec_value")]
-    pub videos: Vec<Value>,
+    #[serde(default)]
+    pub videos: Option<Vec<Value>>,
     #[serde(default = "default_false")]
     pub has_more: bool,
     #[serde(default = "default_zero_i64")]
-    pub cursor: i64,
+    pub next_cursor: i64,
 }
 
 /// get_live_info() 返回值 — 对齐 Python LiveInfoResult
@@ -129,6 +129,7 @@ pub struct LiveInfoResult {
     pub error_code: String,
     #[serde(default = "default_empty_string")]
     pub error: String,
+    #[serde(default)]
     pub live_info: Option<Value>,
 }
 
@@ -141,8 +142,8 @@ pub struct MusicCollectionResult {
     pub error_code: String,
     #[serde(default = "default_empty_string")]
     pub error: String,
-    #[serde(default = "default_empty_vec_value")]
-    pub music_list: Vec<Value>,
+    #[serde(default)]
+    pub music_list: Option<Vec<Value>>,
     #[serde(default = "default_false")]
     pub has_more: bool,
     #[serde(default = "default_zero_i64")]
@@ -158,8 +159,8 @@ pub struct CommentsResult {
     pub error_code: String,
     #[serde(default = "default_empty_string")]
     pub error: String,
-    #[serde(default = "default_empty_vec_value")]
-    pub comments: Vec<Value>,
+    #[serde(default)]
+    pub comments: Option<Vec<Value>>,
     #[serde(default = "default_false")]
     pub has_more: bool,
     #[serde(default = "default_zero_i64")]
@@ -175,12 +176,12 @@ pub struct FollowingListResult {
     pub error_code: String,
     #[serde(default = "default_empty_string")]
     pub error: String,
-    #[serde(default = "default_empty_vec_value")]
-    pub followings: Vec<Value>,
+    #[serde(default)]
+    pub followings: Option<Vec<Value>>,
     #[serde(default = "default_false")]
     pub has_more: bool,
     #[serde(default = "default_zero_i64")]
-    pub cursor: i64,
+    pub offset: i64,
 }
 
 /// get_follower_list() 返回值 — 对齐 Python FollowerListResult
@@ -192,12 +193,12 @@ pub struct FollowerListResult {
     pub error_code: String,
     #[serde(default = "default_empty_string")]
     pub error: String,
-    #[serde(default = "default_empty_vec_value")]
-    pub followers: Vec<Value>,
+    #[serde(default)]
+    pub followers: Option<Vec<Value>>,
     #[serde(default = "default_false")]
     pub has_more: bool,
     #[serde(default = "default_zero_i64")]
-    pub cursor: i64,
+    pub offset: i64,
 }
 
 /// get_collects_list() 返回值 — 对齐 Python CollectsListResult
@@ -209,8 +210,8 @@ pub struct CollectsListResult {
     pub error_code: String,
     #[serde(default = "default_empty_string")]
     pub error: String,
-    #[serde(default = "default_empty_vec_value")]
-    pub collects: Vec<Value>,
+    #[serde(default)]
+    pub collects: Option<Vec<Value>>,
 }
 
 /// get_collects_video_list() 返回值 — 对齐 Python CollectsVideoListResult
@@ -222,8 +223,8 @@ pub struct CollectsVideoListResult {
     pub error_code: String,
     #[serde(default = "default_empty_string")]
     pub error: String,
-    #[serde(default = "default_empty_vec_value")]
-    pub videos: Vec<Value>,
+    #[serde(default)]
+    pub videos: Option<Vec<Value>>,
     #[serde(default = "default_false")]
     pub has_more: bool,
     #[serde(default = "default_zero_i64")]
@@ -239,8 +240,8 @@ pub struct MixInfoResult {
     pub error_code: String,
     #[serde(default = "default_empty_string")]
     pub error: String,
-    #[serde(default = "default_empty_vec_value")]
-    pub videos: Vec<Value>,
+    #[serde(default)]
+    pub videos: Option<Vec<Value>>,
     #[serde(default = "default_false")]
     pub has_more: bool,
     #[serde(default = "default_zero_i64")]
@@ -256,8 +257,8 @@ pub struct SearchResult {
     pub error_code: String,
     #[serde(default = "default_empty_string")]
     pub error: String,
-    #[serde(default = "default_empty_vec_value")]
-    pub videos: Vec<Value>,
+    #[serde(default)]
+    pub videos: Option<Vec<Value>>,
     #[serde(default = "default_false")]
     pub has_more: bool,
     #[serde(default = "default_zero_i64")]
@@ -273,8 +274,8 @@ pub struct TabFeedResult {
     pub error_code: String,
     #[serde(default = "default_empty_string")]
     pub error: String,
-    #[serde(default = "default_empty_vec_value")]
-    pub videos: Vec<Value>,
+    #[serde(default)]
+    pub videos: Option<Vec<Value>>,
     #[serde(default = "default_false")]
     pub has_more: bool,
     #[serde(default = "default_zero_i64")]
@@ -292,8 +293,8 @@ pub struct FollowFeedResult {
     pub error_code: String,
     #[serde(default = "default_empty_string")]
     pub error: String,
-    #[serde(default = "default_empty_vec_value")]
-    pub videos: Vec<Value>,
+    #[serde(default)]
+    pub videos: Option<Vec<Value>>,
     #[serde(default = "default_false")]
     pub has_more: bool,
     #[serde(default = "default_zero_i64")]
@@ -309,8 +310,8 @@ pub struct FriendFeedResult {
     pub error_code: String,
     #[serde(default = "default_empty_string")]
     pub error: String,
-    #[serde(default = "default_empty_vec_value")]
-    pub videos: Vec<Value>,
+    #[serde(default)]
+    pub videos: Option<Vec<Value>>,
     #[serde(default = "default_false")]
     pub has_more: bool,
     #[serde(default = "default_zero_i64")]
@@ -326,8 +327,8 @@ pub struct UserLikesResult {
     pub error_code: String,
     #[serde(default = "default_empty_string")]
     pub error: String,
-    #[serde(default = "default_empty_vec_value")]
-    pub videos: Vec<Value>,
+    #[serde(default)]
+    pub videos: Option<Vec<Value>>,
     #[serde(default = "default_false")]
     pub has_more: bool,
     #[serde(default = "default_zero_i64")]
@@ -343,58 +344,8 @@ pub struct PostStatsResult {
     pub error_code: String,
     #[serde(default = "default_empty_string")]
     pub error: String,
+    #[serde(default)]
     pub stats: Option<Value>,
-}
-
-// ============================================================
-// 下载类响应 — 对齐 Python DownloadResult / BatchDownloadResult / MusicBatchResult
-// ============================================================
-
-/// download_video() 返回值 — 对齐 Python DownloadResult
-#[allow(dead_code)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DownloadResult {
-    #[serde(default = "default_success")]
-    pub success: bool,
-    #[serde(default = "default_error_code")]
-    pub error_code: String,
-    #[serde(default = "default_empty_string")]
-    pub error: String,
-    pub detail: Option<Value>,
-    pub path: Option<String>,
-    pub paths: Option<Vec<String>>,
-}
-
-/// download_batch() 返回值 — 对齐 Python BatchDownloadResult
-#[allow(dead_code)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BatchDownloadResult {
-    #[serde(default = "default_success")]
-    pub success: bool,
-    #[serde(default = "default_error_code")]
-    pub error_code: String,
-    #[serde(default = "default_empty_string")]
-    pub error: String,
-    #[serde(default = "default_zero_i64")]
-    pub count: i64,
-    #[serde(default = "default_empty_vec_value")]
-    pub results: Vec<Value>,
-}
-
-/// download_music_batch() 返回值 — 对齐 Python MusicBatchResult
-#[allow(dead_code)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MusicBatchResult {
-    #[serde(default = "default_success")]
-    pub success: bool,
-    #[serde(default = "default_error_code")]
-    pub error_code: String,
-    #[serde(default = "default_empty_string")]
-    pub error: String,
-    #[serde(default = "default_empty_vec_value")]
-    pub music_list: Vec<Value>,
-    #[serde(default = "default_empty_vec_value")]
-    pub results: Vec<Value>,
 }
 
 // ============================================================
@@ -410,8 +361,8 @@ pub struct LiveRecordResult {
     pub error_code: String,
     #[serde(default = "default_empty_string")]
     pub error: String,
-    #[serde(default = "default_empty_string")]
-    pub task_id: String,
+    #[serde(default)]
+    pub task_id: Option<String>,
 }
 
 /// get_live_status() 返回值 — 对齐 Python LiveStatusResult
@@ -423,8 +374,8 @@ pub struct LiveStatusResult {
     pub error_code: String,
     #[serde(default = "default_empty_string")]
     pub error: String,
-    #[serde(default = "default_empty_vec_value")]
-    pub tasks: Vec<Value>,
+    #[serde(default)]
+    pub tasks: Option<Vec<Value>>,
 }
 
 /// get_following_live() 返回值 — 对齐 Python FollowingLiveResult
@@ -436,12 +387,12 @@ pub struct FollowingLiveResult {
     pub error_code: String,
     #[serde(default = "default_empty_string")]
     pub error: String,
-    #[serde(default = "default_empty_vec_value")]
-    pub lives: Vec<Value>,
+    #[serde(default)]
+    pub lives: Option<Vec<Value>>,
 }
 
 // ============================================================
-// BridgeResponse trait 实现
+// BridgeResponse 实现
 // ============================================================
 
 impl_bridge_response!(VideoParseResult);
@@ -461,9 +412,6 @@ impl_bridge_response!(FollowFeedResult);
 impl_bridge_response!(FriendFeedResult);
 impl_bridge_response!(UserLikesResult);
 impl_bridge_response!(PostStatsResult);
-impl_bridge_response!(DownloadResult);
-impl_bridge_response!(BatchDownloadResult);
-impl_bridge_response!(MusicBatchResult);
 impl_bridge_response!(LiveRecordResult);
 impl_bridge_response!(LiveStatusResult);
 impl_bridge_response!(FollowingLiveResult);

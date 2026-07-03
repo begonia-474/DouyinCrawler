@@ -17,16 +17,16 @@
 
 - 前端：React 19、TypeScript、Vite 7、Tailwind CSS 4、shadcn/ui、Zustand、React Query
 - 桌面：Tauri 2、Rust、PyO3
-- 爬虫核心：Python 3.12+、httpx、pydantic、ABogus/XBogus 签名算法
+- 爬虫核心：Python 3.13、httpx、pydantic、ABogus/XBogus 签名算法
 - 数据库：SQLite、rusqlite、WAL 模式
 - 测试：pytest、pytest-asyncio、前端 TypeScript 构建、Cargo check
 
 ## 环境准备
 
-Python 建议使用项目约定的 Conda 环境：
+Python 使用项目目录下的虚拟环境：
 
 ```bash
-conda activate projects-python
+source .venv/bin/activate
 pip install -r requirements.txt -c requirements.lock
 ```
 
@@ -78,10 +78,18 @@ PYTHONIOENCODING=utf-8 python test/e2e_verify.py
 
 ```text
 DouyinCrawler-desktop/
-├── backend/                 # 任务管理与日志
-│   ├── task_manager.py      # 配置、Handler 生命周期、事件广播门面
-│   ├── batch_manager.py     # 批量下载任务
-│   └── live_manager.py      # 直播录制任务
+├── src/                     # React 前端
+│   ├── modules/douyin/      # 抖音功能页面
+│   ├── components/          # UI 组件
+│   ├── hooks/               # 分页、无限滚动等 hooks
+│   ├── lib/                 # API、React Query、类型和工具
+│   └── stores/              # Zustand 实时任务状态
+├── src-tauri/               # Rust/Tauri 后端
+│   ├── src/lib.rs           # 应用初始化、共享命令、事件/DB/Python 注入
+│   ├── src/commands/        # Tauri commands，按 Python/DB 边界拆分
+│   ├── src/db.rs            # SQLite 数据库层与迁移
+│   ├── src/config.rs        # 配置管理
+│   └── src/python/          # PyO3 桥接封装
 ├── core/                    # Python 爬虫核心
 │   ├── handler.py           # 业务门面，保持 py_bridge 调用接口
 │   ├── services/            # 视频、用户、收藏、合集、直播、Feed、音乐等服务
@@ -92,20 +100,10 @@ DouyinCrawler-desktop/
 │   ├── db_bridge.py         # Rust 注入的 DB 写入桥
 │   ├── py_bridge.py         # PyO3 调用入口
 │   ├── tauri_bridge.py      # Tauri 事件桥
+│   ├── task/                # 任务管理
+│   │   ├── task_manager.py  # 配置、Handler 生命周期、事件广播门面
+│   │   └── live_manager.py  # 直播录制任务
 │   └── signature/           # ABogus/XBogus 签名算法
-├── src-tauri/               # Rust/Tauri 后端
-│   ├── src/lib.rs           # 应用初始化、共享命令、事件/DB/Python 注入
-│   ├── src/commands/        # Tauri commands，按 Python/DB 边界拆分
-│   ├── src/db.rs            # SQLite 数据库层与迁移
-│   ├── src/config.rs        # 配置管理
-│   └── src/python/          # PyO3 桥接封装
-├── src/                     # React 前端
-│   ├── modules/douyin/      # 抖音功能页面
-│   ├── shared/              # 共享页面
-│   ├── components/          # UI 组件
-│   ├── hooks/               # 分页、无限滚动等 hooks
-│   ├── lib/                 # API、React Query、类型和工具
-│   └── stores/              # Zustand 实时任务状态
 ├── scripts/                 # 辅助脚本
 ├── test/                    # 离线单测和集成验证
 ├── config/                  # 运行时配置，已忽略

@@ -378,3 +378,334 @@ def get_batch_status() -> dict:
     return {"success": True, "data": status}
 
 
+
+
+@_safe_call
+def resolve_urls(mode: str, url: str) -> dict:
+    """解析下载 URL 列表（不执行下载）
+    
+    将"知道下什么"和"执行下载"分离。
+    返回下载所需的 URL 列表 + 元数据，供 Rust DownloadEngine 使用。
+    
+    Args:
+        mode: 下载模式 (one/post/like/mix/collects/music)
+        url: 目标 URL
+        
+    Returns:
+        {
+            "success": True,
+            "items": [
+                {
+                    "aweme_id": "xxx",
+                    "download_url": "https://...",   # 视频/文件下载 URL（可能是列表）
+                    "filename": "描述_20240101",      # 文件名（不含扩展名）
+                    "suffix": ".mp4",                 # 扩展名
+                    "headers": {                      # 下载所需的 HTTP headers
+                        "User-Agent": "...",
+                        "Cookie": "...",
+                        "Referer": "..."
+                    },
+                    "content_type": "video",          # video / image / music / cover / desc
+                    "detail": { ... },                # 完整视频元数据（用于 DB 写入）
+                    "accessories": [                  # 附属文件（音乐、封面、文案）
+                        {"url": "...", "filename": "...", "suffix": ".mp3", "content_type": "music"},
+                    ]
+                },
+                ...
+            ],
+            "save_dir": "/path/to/save",          # 建议的保存目录
+            "total": 100                          # 总数
+        }
+    """
+    import asyncio
+    from pathlib import Path
+    from core.download.downloader import format_filename
+    
+    logger.info("[py_bridge] resolve_urls 调用, mode=%s, url=%s", mode, url[:80])
+    
+    handler = _get_task_manager().handler
+    task_manager = _get_task_manager()
+    
+    # 获取配置
+    cookie = task_manager._cookie
+    naming = task_manager._naming
+    download_path = Path(task_manager._download_path)
+    app_name = task_manager._app_name
+    folderize = task_manager._folderize
+    music_enabled = task_manager._music
+    cover_enabled = task_manager._cover
+    desc_enabled = task_manager._desc
+    
+    # 通用 headers
+    base_headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+        "Referer": "https://www.douyin.com/",
+        "Cookie": cookie,
+    }
+    
+    def build_download_url(detail, content_type="video"):
+        """构建单个下载项"""
+        aweme_id = detail.aweme_id
+        filename = format_filename(naming, detail.to_dict())
+        
+        # 根据内容类型确定 URL 和后缀
+        if content_type == "video":
+            url = detail.video_urls if detail.video_urls else detail.video_url
+            suffix = ".mp4"
+        elif content_type == "image":
+            url = detail.images[0] if detail.images else None
+            suffix = ".jpg"
+        elif content_type == "music":
+            url = detail.music_url
+            suffix = ".mp3"
+        elif content_type == "cover":
+            url = detail.cover_url
+            suffix = ".jpg"
+        elif content_type == "desc":
+            url = None
+            suffix = ".txt"
+        else:
+            return None
+        
+        if not url:
+            return None
+        
+        # 构建附属文件列表
+        accessories = []
+        if music_enabled and detail.music_url:
+            accessories.append({
+                "url": detail.music_url,
+                "filename": f"{filename}_music",
+                "suffix": ".mp3",
+                "content_type": "music",
+            })
+        if cover_enabled and detail.cover_url:
+            accessories.append({
+                "url": detail.cover_url,
+                "filename": f"{filename}_cover",
+                "suffix": ".jpg",
+                "content_type": "cover",
+            })
+        if desc_enabled and detail.desc:
+            accessories.append({
+                "url": None,
+                "filename": f"{filename}_desc",
+                "suffix": ".txt",
+                "content_type": "desc",
+                "content": detail.desc,  # 文案内容直接存储
+            })
+        
+        return {
+            "aweme_id": aweme_id,
+            "download_url": url,
+            "filename": f"{filename}_video",
+            "suffix": suffix,
+            "headers": base_headers.copy(),
+            "content_type": content_type,
+            "detail": detail.to_db_dict(),
+            "accessories": accessories,
+        }
+    
+    if mode == "one":
+        # 单视频解析
+        result = _run_async(handler._video.handle_parse_video(url))
+        if not result.get("success"):
+            return result
+        
+        # 重新获取完整 detail（handle_parse_video 返回的是 to_db_dict）
+        from core.utils import AwemeIdFetcher
+        from core.crawler_engine.filter import PostDetailFilter, UserProfileFilter
+        
+        aweme_id = _run_async(AwemeIdFetcher.get_aweme_id(url))
+        if not aweme_id:
+            return {"success": False, "error": "无法从 URL 提取 aweme_id"}
+        
+        async def fetch_detail():
+            async with handler._video._make_crawler() as crawler:
+                data = await crawler.fetch_post_detail(aweme_id)
+                return PostDetailFilter(data)
+        
+        detail = _run_async(fetch_detail())
+        
+        if detail.is_prohibited:
+            return {"success": False, "error": "视频侵权不可用"}
+        
+        # 确定保存目录
+        user_dir = download_path / app_name / "one" / (detail.author_nickname or "unknown")
+        save_dir = user_dir / format_filename(naming, detail.to_dict()) if folderize else user_dir
+        
+        # 构建下载项
+        if detail.is_image_post and (detail.images or detail.images_video):
+            # 图片帖子：多个图片
+            items = []
+            for i, img_url in enumerate(detail.images):
+                if img_url:
+                    item = {
+                        "aweme_id": detail.aweme_id,
+                        "download_url": img_url,
+                        "filename": f"{format_filename(naming, detail.to_dict())}_image_{i + 1}",
+                        "suffix": ".jpg",
+                        "headers": base_headers.copy(),
+                        "content_type": "image",
+                        "detail": detail.to_db_dict(),
+                        "accessories": [],
+                    }
+                    items.append(item)
+            
+            # 添加附属文件
+            if items:
+                first_item = items[0]
+                if music_enabled and detail.music_url:
+                    first_item["accessories"].append({
+                        "url": detail.music_url,
+                        "filename": f"{format_filename(naming, detail.to_dict())}_music",
+                        "suffix": ".mp3",
+                        "content_type": "music",
+                    })
+                if cover_enabled and detail.cover_url:
+                    first_item["accessories"].append({
+                        "url": detail.cover_url,
+                        "filename": f"{format_filename(naming, detail.to_dict())}_cover",
+                        "suffix": ".jpg",
+                        "content_type": "cover",
+                    })
+            
+            return {
+                "success": True,
+                "items": items,
+                "save_dir": str(save_dir),
+                "total": len(items),
+            }
+        else:
+            # 视频帖子
+            item = build_download_url(detail, "video")
+            if not item:
+                return {"success": False, "error": "无法获取视频下载链接"}
+            
+            return {
+                "success": True,
+                "items": [item],
+                "save_dir": str(save_dir),
+                "total": 1,
+            }
+    
+    elif mode in ("post", "like", "mix", "collects"):
+        # 批量解析
+        if mode == "post":
+            all_details = _run_async(handler._user.handle_user_post_list(url))
+        elif mode == "like":
+            all_details = _run_async(handler._user.handle_user_like(url))
+        elif mode == "mix":
+            all_details = _run_async(handler._mix.handle_user_mix(url))
+        elif mode == "collects":
+            all_details = _run_async(handler._collection.handle_collects_video(url))
+        
+        if not all_details.get("success"):
+            return all_details
+        
+        # handle_user_post_list 返回 {"success": True, "videos": [...]}
+        # videos中的每个item已经是简化格式，包含video_url字段
+        details = all_details.get("videos", all_details.get("results", []))
+        items = []
+        for detail in details:
+            if isinstance(detail, dict):
+                # 直接使用字典格式，不转换为PostDetailFilter
+                aweme_id = detail.get("aweme_id", "")
+                video_url = detail.get("video_url", "")
+                desc = detail.get("desc", "")
+                author = detail.get("author", {}).get("nickname", "") if isinstance(detail.get("author"), dict) else ""
+                
+                if not video_url:
+                    continue
+                
+                filename = format_filename(naming, detail)
+                
+                # 构建headers
+                headers = base_headers.copy()
+                
+                # 构建item
+                item = {
+                    "aweme_id": aweme_id,
+                    "download_url": video_url,
+                    "filename": filename,
+                    "suffix": ".mp4",
+                    "headers": headers,
+                    "content_type": "video",
+                    "detail": detail,
+                    "accessories": [],
+                }
+                
+                # 添加附属文件
+                if music_enabled and detail.get("music_url"):
+                    item["accessories"].append({
+                        "url": detail["music_url"],
+                        "filename": f"{filename}_music",
+                        "suffix": ".mp3",
+                        "content_type": "music",
+                    })
+                if cover_enabled and detail.get("cover_url"):
+                    item["accessories"].append({
+                        "url": detail["cover_url"],
+                        "filename": f"{filename}_cover",
+                        "suffix": ".jpg",
+                        "content_type": "cover",
+                    })
+                
+                items.append(item)
+        
+        # 确定保存目录
+        if mode == "post":
+            save_dir = download_path / app_name / "post"
+        elif mode == "like":
+            save_dir = download_path / app_name / "like"
+        elif mode == "mix":
+            save_dir = download_path / app_name / "mix"
+        elif mode == "collects":
+            save_dir = download_path / app_name / "collects"
+        
+        return {
+            "success": True,
+            "items": items,
+            "save_dir": str(save_dir),
+            "total": len(items),
+        }
+    
+    elif mode == "music":
+        # 音乐批量解析
+        from core.crawler_engine.filter import MusicCollectionFilter
+        
+        async def fetch_music_list():
+            async with handler._music._make_crawler() as crawler:
+                data = await crawler.get_music_collection(0, 1000)
+                music_filter = MusicCollectionFilter(data)
+                return music_filter.get_music_list()
+        
+        music_list = _run_async(fetch_music_list())
+        
+        save_dir = download_path / app_name / "music"
+        save_dir.mkdir(parents=True, exist_ok=True)
+        
+        items = []
+        for music in music_list:
+            if music.get("play_url"):
+                item = {
+                    "aweme_id": music.get("music_id", ""),
+                    "download_url": music["play_url"],
+                    "filename": f"{music.get('title', 'unknown')}_{music.get('author', 'unknown')}",
+                    "suffix": ".mp3",
+                    "headers": base_headers.copy(),
+                    "content_type": "music",
+                    "detail": music,
+                    "accessories": [],
+                }
+                items.append(item)
+        
+        return {
+            "success": True,
+            "items": items,
+            "save_dir": str(save_dir),
+            "total": len(items),
+        }
+    
+    else:
+        return {"success": False, "error": f"未知的下载模式: {mode}"}

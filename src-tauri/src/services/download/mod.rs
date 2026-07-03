@@ -3,11 +3,11 @@
 //! - `mod.rs`（本文件）：类型化 DTO 定义
 //! - `task_service.rs`：TaskApplicationService — 任务生命周期管理
 //! - `events.rs`：类型化事件发射
-//! - `python_adapter.rs`：PythonDownloadAdapter — 封装 GIL 管理
+//! - `engine.rs`：DownloadEngine — 核心下载引擎
 
 pub mod events;
 pub mod task_service;
-pub mod python_adapter;
+pub mod engine;
 
 use serde::{Deserialize, Serialize};
 
@@ -128,10 +128,6 @@ pub struct DownloadRequest {
 }
 
 // ============================================================
-// 任务快照（DB → 前端）
-// ============================================================
-
-// ============================================================
 // 任务补丁（事件 → 前端 store 合并）
 // ============================================================
 
@@ -183,73 +179,98 @@ pub struct TaskEvent {
 }
 
 // ============================================================
-// Python 返回值（Python → Rust）
+// resolve_urls 返回值（Python → Rust）
 // ============================================================
 
-/// Python 单视频下载/解析结果
-/// 对齐 core.py_bridge.download_video / parse_video 返回的 JSON
+/// resolve_urls 返回的附属文件
 #[derive(Debug, Clone, Deserialize)]
-pub struct PythonDownloadResult {
-    pub success: bool,
+pub struct ResolvedAccessory {
+    pub url: Option<String>,
+    pub filename: String,
+    pub suffix: String,
+    pub content_type: String,
     #[serde(default)]
-    pub error: Option<String>,
+    pub content: Option<String>,  // 文案内容
+}
+
+
+/// 自定义反序列化函数，支持字符串或字符串列表
+fn deserialize_download_url<'de, D>(deserializer: D) -> Result<serde_json::Value, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de;
+    use serde_json::Value;
+    
+    struct DownloadUrlVisitor;
+    
+    impl<'de> de::Visitor<'de> for DownloadUrlVisitor {
+        type Value = Value;
+        
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a string or array of strings")
+        }
+        
+        fn visit_str<E>(self, value: &str) -> Result<Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(Value::String(value.to_string()))
+        }
+        
+        fn visit_string<E>(self, value: String) -> Result<Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(Value::String(value))
+        }
+        
+        fn visit_seq<A>(self, seq: A) -> Result<Value, A::Error>
+        where
+            A: de::SeqAccess<'de>,
+        {
+            let vec: Vec<Value> = serde::Deserialize::deserialize(de::value::SeqAccessDeserializer::new(seq))?;
+            Ok(Value::Array(vec))
+        }
+    }
+    
+    deserializer.deserialize_any(DownloadUrlVisitor)
+}
+
+/// resolve_urls 返回的单个下载项
+#[derive(Debug, Clone, Deserialize)]
+pub struct ResolvedItem {
+    pub aweme_id: String,
+    #[serde(deserialize_with = "deserialize_download_url")]
+    pub download_url: serde_json::Value,
+    pub filename: String,
+    pub suffix: String,
     #[serde(default)]
-    pub path: Option<String>,
-    #[serde(default)]
-    pub paths: Option<Vec<String>>,
+    pub headers: std::collections::HashMap<String, String>,
+    pub content_type: String,
     #[serde(default)]
     pub detail: Option<serde_json::Value>,
     #[serde(default)]
-    pub user_profile: Option<serde_json::Value>,
+    pub accessories: Vec<ResolvedAccessory>,
 }
 
-
-/// Python 批量下载单条结果
+/// resolve_urls 返回的完整结果
 #[derive(Debug, Clone, Deserialize)]
-pub struct PythonBatchItem {
-    #[serde(default)]
-    pub path: Option<String>,
-    #[serde(default)]
-    pub detail: Option<serde_json::Value>,
-}
-
-/// Python 批量下载结果（新路径，不写 task DB 表）
-#[derive(Debug, Clone, Deserialize)]
-pub struct PythonBatchDownloadResult {
+pub struct ResolvedUrls {
     pub success: bool,
     #[serde(default)]
     pub error: Option<String>,
     #[serde(default)]
-    pub results: Option<Vec<PythonBatchItem>>,
+    pub items: Vec<ResolvedItem>,
+    /// 建议的保存目录
+    #[serde(default)]
+    pub save_dir: Option<String>,
+    /// 总数
+    #[serde(default)]
+    pub total: Option<i64>,
+    /// 用户资料（batch 模式下可能返回）
     #[serde(default)]
     pub user_profile: Option<serde_json::Value>,
-}
-
-/// Python 音乐批量下载单条结果
-#[derive(Debug, Clone, Deserialize)]
-pub struct PythonMusicItem {
-    pub music_id: String,
-    #[serde(default)]
-    pub title: Option<String>,
-    #[serde(default)]
-    pub author: Option<String>,
-    #[serde(default)]
-    pub path: Option<String>,
-    #[serde(default)]
-    pub file_size: Option<i64>,
-    pub success: bool,
-    #[serde(default)]
-    pub error: Option<String>,
-}
-
-/// Python 音乐批量下载结果
-#[derive(Debug, Clone, Deserialize)]
-pub struct PythonMusicBatchResult {
-    pub success: bool,
-    #[serde(default)]
-    pub error: Option<String>,
-    #[serde(default)]
-    pub results: Option<Vec<PythonMusicItem>>,
 }
 
 // ============================================================

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { listen } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
 import { queryClient } from "@/lib/query-client";
 
 export interface UnifiedTask {
@@ -39,6 +40,7 @@ interface TaskState {
   updateTask: (taskId: string, updates: Partial<UnifiedTask>) => void;
   removeTask: (taskId: string) => void;
   clearCompleted: () => void;
+  cancelTask: (taskId: string) => Promise<void>;
 
   connect: () => void;
   disconnect: () => void;
@@ -117,7 +119,7 @@ function mergePatch(
   return merged;
 }
 
-export const useTaskStore = create<TaskState>((set) => ({
+export const useTaskStore = create<TaskState>((set, get) => ({
   tasks: {},
   connected: false,
 
@@ -150,6 +152,18 @@ export const useTaskStore = create<TaskState>((set) => ({
       }
       return { tasks };
     }),
+
+  cancelTask: async (taskId: string) => {
+    try {
+      await invoke("cancel_task", { task_id: taskId });
+      // 更新本地状态
+      get().updateTask(taskId, { status: "cancelled" });
+      console.log("[task-store] 取消信号已发送:", taskId);
+    } catch (e) {
+      console.error("[task-store] 取消任务失败:", e);
+      throw e;
+    }
+  },
 
   connect: () => {
     if (unlisten) return;

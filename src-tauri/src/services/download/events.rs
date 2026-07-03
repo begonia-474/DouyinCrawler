@@ -50,6 +50,15 @@ pub fn emit_started(task_id: &str, mode: DownloadMode, url: &str) {
     emit_task_event(&event);
 }
 
+/// 发射任务进度事件
+///
+/// 用于实时更新下载进度到前端
+pub fn emit_progress(task_id: &str, downloaded: u64, total: u64) {
+    let patch = TaskPatch::new(task_id)
+        .with_counts(total as i64, downloaded as i64, 0, 0);
+    let event = TaskEvent::progress(patch);
+    emit_task_event(&event);
+}
 
 /// 发射任务完成事件
 pub fn emit_finished(patch: TaskPatch) {
@@ -62,6 +71,14 @@ pub fn emit_error(task_id: &str, error: &str) {
     let patch = TaskPatch::new(task_id)
         .with_status(TaskStatus::Error)
         .with_error(error);
+    let event = TaskEvent::finished(patch);
+    emit_task_event(&event);
+}
+
+/// 发射任务取消事件
+pub fn emit_cancelled(task_id: &str) {
+    let patch = TaskPatch::new(task_id)
+        .with_status(TaskStatus::Cancelled);
     let event = TaskEvent::finished(patch);
     emit_task_event(&event);
 }
