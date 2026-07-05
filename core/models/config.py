@@ -20,7 +20,7 @@ class ServiceConfig:
     naming: str = "{create}_{desc}"
     max_counts: float = float("inf")
     page_counts: int = 20
-    timeout: int = 10
+    timeout: int = 5
     encryption: str = "ab"
     proxies: Optional[dict] = None
     app_name: str = "douyin"

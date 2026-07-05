@@ -43,8 +43,8 @@ impl Default for EngineConfig {
     fn default() -> Self {
         Self {
             max_concurrent: 5,
-            max_retries: 3,
-            timeout: 30,
+            max_retries: 5,
+            timeout: 5,
             max_connections: 5,
             user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36".to_string(),
             referer: "https://www.douyin.com/".to_string(),
@@ -499,8 +499,8 @@ mod tests {
     fn test_engine_config_default() {
         let config = EngineConfig::default();
         assert_eq!(config.max_concurrent, 5);
-        assert_eq!(config.max_retries, 3);
-        assert_eq!(config.timeout, 30);
+        assert_eq!(config.max_retries, 5);
+        assert_eq!(config.timeout, 5);
         assert_eq!(config.max_connections, 5);
     }
 }

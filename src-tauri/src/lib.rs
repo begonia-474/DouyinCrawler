@@ -51,9 +51,9 @@ fn set_config(
     let mut manager = state.config.lock();
     manager.update_douyin_config(&updates)?;
 
-    // 2. 同步到 Python
+    // 2. 同步到 Python（Rust 下载引擎在每次下载任务创建时从 AppState.config 读取，无需额外同步）
     let config = manager.get_douyin_config();
-    info!("[set_config] 同步配置到 Python");
+    info!("[set_config] 同步配置到 Python (timeout={}, max_connections={}, max_retries={})", config.timeout, config.max_connections, config.max_retries);
     python::init_config(&config).map_err(|e| e.to_string())?;
 
     Ok(())

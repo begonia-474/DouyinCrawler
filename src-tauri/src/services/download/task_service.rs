@@ -97,10 +97,16 @@ fn build_download_item(item: &ResolvedItem, save_dir: &str, task_id: &str) -> Do
     }
 }
 
-/// 构建 EngineConfig（从配置或默认值）
-fn build_engine_config() -> EngineConfig {
-    // TODO: 从 AppState.config 读取用户配置
-    EngineConfig::default()
+/// 从 AppConfig 构建 EngineConfig
+fn build_engine_config(config: &crate::config::AppConfig) -> EngineConfig {
+    EngineConfig {
+        max_concurrent: config.max_connections as usize,
+        max_retries: config.max_retries,
+        timeout: config.timeout as u64,
+        max_connections: config.max_connections as usize,
+        cookie: config.cookie.clone(),
+        ..EngineConfig::default()
+    }
 }
 
 // ============================================================
@@ -184,8 +190,8 @@ impl<'a> TaskApplicationService<'a> {
     }
 
     /// 创建下载引擎并绑定取消信号
-    fn create_engine(cancel_signal: Arc<AtomicBool>) -> DownloadEngine {
-        let config = build_engine_config();
+    fn create_engine(app_config: &crate::config::AppConfig, cancel_signal: Arc<AtomicBool>) -> DownloadEngine {
+        let config = build_engine_config(app_config);
         DownloadEngine::new(config).with_cancel_signal(cancel_signal)
     }
 
@@ -277,9 +283,12 @@ impl<'a> TaskApplicationService<'a> {
     /// 写入任务结果到数据库（单个下载项）
     ///
     /// 创建 task_item + download_record + video_info
-    fn save_single_result(
+    /// 保存下载元数据（download_history + video_info + user_info）
+    ///
+    /// 不创建 task_item，仅写入元数据表。
+    /// 用于跳过和正常下载两种场景。
+    fn save_download_metadata(
         db: &Database,
-        task_id: &str,
         item: &ResolvedItem,
         file_path: &str,
         file_size: i64,
@@ -287,25 +296,6 @@ impl<'a> TaskApplicationService<'a> {
     ) -> Result<(), String> {
         let detail = item.detail.as_ref();
         let aweme_id = &item.aweme_id;
-
-        // 创建 task_item
-        let new_item = NewTaskItem {
-            task_id: task_id.to_string(),
-            aweme_id: Some(aweme_id.clone()),
-            title: json_str(detail, "desc"),
-            author_nickname: json_str(detail, "author_nickname"),
-            cover_url: json_str(detail, "cover_url"),
-        };
-        if let Err(e) = db.create_task_item(&new_item) {
-            error!("[TaskService] 创建任务子项失败: task_id={}, error={}", task_id, e);
-            return Err(format!("创建任务子项失败: {}", e));
-        }
-
-        // 更新 task_item 状态
-        if let Err(e) = db.update_task_item_status(task_id, aweme_id, "completed", Some(file_path), file_size, None) {
-            error!("[TaskService] 更新任务子项状态失败: task_id={}, error={}", task_id, e);
-            return Err(format!("更新任务子项状态失败: {}", e));
-        }
 
         // 构建 download_record
         let mut records = vec![NewDownloadRecord {
@@ -348,7 +338,8 @@ impl<'a> TaskApplicationService<'a> {
             });
         }
 
-        // 收集 video_info
+        // 收集 video_info（user_info 由 execute_download 的 user_profile 路径独立保存，
+        // 不从 detail 提取，避免不完整数据覆盖完整的 user_profile）
         let mut videos = Vec::new();
         if let Some(d) = detail {
             if d.get("aweme_id").and_then(|v| v.as_str()).is_some() {
@@ -360,9 +351,9 @@ impl<'a> TaskApplicationService<'a> {
             }
         }
 
-        // 保存到数据库
+        // 保存到数据库（只写 download_history + video_info，不写 user_info）
         if let Err(e) = db.save_batch_results(&records, &videos, &[]) {
-            error!("[TaskService] 保存下载记录失败: task_id={}, error={}", task_id, e);
+            error!("[TaskService] 保存下载记录失败: aweme_id={}, error={}", item.aweme_id, e);
             return Err(format!("保存下载记录失败: {}", e));
         }
 
@@ -377,6 +368,45 @@ impl<'a> TaskApplicationService<'a> {
 
     // ============================================================
     // 统一下载入口（mode=one）
+    // ============================================================
+
+    /// 保存单个下载项的完整结果（task_item + download_history + video_info + user_info）
+    ///
+    /// 正常下载完成后调用。跳过场景请直接调用 save_download_metadata。
+    fn save_single_result(
+        db: &Database,
+        task_id: &str,
+        item: &ResolvedItem,
+        file_path: &str,
+        file_size: i64,
+        accessory_paths: &[String],
+    ) -> Result<(), String> {
+        let detail = item.detail.as_ref();
+        let aweme_id = &item.aweme_id;
+
+        // 创建 task_item
+        let new_item = NewTaskItem {
+            task_id: task_id.to_string(),
+            aweme_id: Some(aweme_id.clone()),
+            title: json_str(detail, "desc"),
+            author_nickname: json_str(detail, "author_nickname"),
+            cover_url: json_str(detail, "cover_url"),
+        };
+        if let Err(e) = db.create_task_item(&new_item) {
+            error!("[TaskService] 创建任务子项失败: task_id={}, error={}", task_id, e);
+            return Err(format!("创建任务子项失败: {}", e));
+        }
+
+        // 更新 task_item 状态
+        if let Err(e) = db.update_task_item_status(task_id, aweme_id, "completed", Some(file_path), file_size, None) {
+            error!("[TaskService] 更新任务子项状态失败: task_id={}, error={}", task_id, e);
+            return Err(format!("更新任务子项状态失败: {}", e));
+        }
+
+        // 保存元数据
+        Self::save_download_metadata(db, item, file_path, file_size, accessory_paths)
+    }
+
     // ============================================================
 
     /// 统一下载入口（对齐 task_manager.start_download）
@@ -415,6 +445,7 @@ impl<'a> TaskApplicationService<'a> {
         // 4. 克隆数据用于后台任务
         let db = self.state.db.clone();
         let cancel_signals = self.state.cancel_signals.clone();
+        let app_config = self.state.config.lock().get_douyin_config();
         let task_id_clone = task_id.clone();
         let mode = request.mode;
         let url = request.url;
@@ -427,6 +458,7 @@ impl<'a> TaskApplicationService<'a> {
                 mode,
                 &url,
                 &cancel_signal,
+                &app_config,
             )
             .await;
 
@@ -493,6 +525,7 @@ impl<'a> TaskApplicationService<'a> {
         mode: DownloadMode,
         url: &str,
         cancel_signal: &Arc<AtomicBool>,
+        app_config: &crate::config::AppConfig,
     ) -> Result<(), String> {
         // 1. 解析下载 URL
         let resolved = Self::resolve_download_urls(mode.as_str(), url).await?;
@@ -511,7 +544,7 @@ impl<'a> TaskApplicationService<'a> {
         }
 
         // 2. 创建下载引擎
-        let engine = Self::create_engine(cancel_signal.clone());
+        let engine = Self::create_engine(app_config, cancel_signal.clone());
 
         // 3. 处理用户资料（batch 模式）
         if let Some(profile) = resolved.user_profile.as_ref() {
@@ -569,7 +602,7 @@ impl<'a> TaskApplicationService<'a> {
 
                     // 保存到数据库
                     if download_result.skipped {
-                        // 标记为跳过
+                        // 文件已存在，跳过下载但仍写入 download_history + video_info + user_info
                         let new_item = NewTaskItem {
                             task_id: task_id.to_string(),
                             aweme_id: Some(item.aweme_id.clone()),
@@ -586,8 +619,18 @@ impl<'a> TaskApplicationService<'a> {
                             file_size,
                             None,
                         );
+                        // 跳过也需要写入 download_history + video_info + user_info
+                        if let Err(e) = Self::save_download_metadata(
+                            db,
+                            item,
+                            &file_path,
+                            file_size,
+                            &accessory_paths,
+                        ) {
+                            warn!("[TaskService] 跳过项保存元数据失败: {}", e);
+                        }
                         info!(
-                            "[TaskService] 文件已存在，跳过: {}",
+                            "[TaskService] 文件已存在，跳过下载但已入库: {}",
                             download_result.path.display()
                         );
                     } else {
@@ -701,6 +744,7 @@ impl<'a> TaskApplicationService<'a> {
         // 4. 克隆数据用于后台任务
         let db = self.state.db.clone();
         let cancel_signals = self.state.cancel_signals.clone();
+        let app_config = self.state.config.lock().get_douyin_config();
         let task_id_clone = task_id.clone();
         let mode_val = mode;
         let url_val = url.to_string();
@@ -713,6 +757,7 @@ impl<'a> TaskApplicationService<'a> {
                 mode_val,
                 &url_val,
                 &cancel_signal,
+                &app_config,
             )
             .await;
 
@@ -807,6 +852,7 @@ impl<'a> TaskApplicationService<'a> {
         // 4. 克隆数据用于后台任务
         let db = self.state.db.clone();
         let cancel_signals = self.state.cancel_signals.clone();
+        let app_config = self.state.config.lock().get_douyin_config();
         let task_id_clone = task_id.clone();
         let url_val = url.to_string();
 
@@ -817,6 +863,7 @@ impl<'a> TaskApplicationService<'a> {
                 &task_id_clone,
                 &url_val,
                 &cancel_signal,
+                &app_config,
             )
             .await;
 
@@ -888,6 +935,7 @@ impl<'a> TaskApplicationService<'a> {
         task_id: &str,
         url: &str,
         cancel_signal: &Arc<AtomicBool>,
+        app_config: &crate::config::AppConfig,
     ) -> Result<(), String> {
         // 1. 解析下载 URL
         let resolved = Self::resolve_download_urls("music", url).await?;
@@ -904,7 +952,7 @@ impl<'a> TaskApplicationService<'a> {
         }
 
         // 2. 创建下载引擎
-        let engine = Self::create_engine(cancel_signal.clone());
+        let engine = Self::create_engine(app_config, cancel_signal.clone());
 
         // 3. 创建保存目录
         if let Err(e) = tokio::fs::create_dir_all(&save_dir).await {

@@ -72,7 +72,7 @@ def _get_task_manager():
         from core.task.task_manager import task_manager
         _task_manager = task_manager
 
-        logger.info("[py_bridge] task_manager 初始化完成, cookie 长度=%d", len(_task_manager._cookie))
+        logger.info("[py_bridge] task_manager 初始化完成")
     return _task_manager
 
 
@@ -424,17 +424,17 @@ def resolve_urls(mode: str, url: str) -> dict:
     logger.info("[py_bridge] resolve_urls 调用, mode=%s, url=%s", mode, url[:80])
     
     handler = _get_task_manager().handler
-    task_manager = _get_task_manager()
-    
-    # 获取配置
-    cookie = task_manager._cookie
-    naming = task_manager._naming
-    download_path = Path(task_manager._download_path)
-    app_name = task_manager._app_name
-    folderize = task_manager._folderize
-    music_enabled = task_manager._music
-    cover_enabled = task_manager._cover
-    desc_enabled = task_manager._desc
+
+    # 从 handler.config 统一读取配置
+    config = handler.config
+    cookie = config.cookie
+    naming = config.naming
+    download_path = config.download_path if isinstance(config.download_path, Path) else Path(config.download_path)
+    app_name = config.app_name
+    folderize = config.folderize
+    music_enabled = config.music
+    cover_enabled = config.cover
+    desc_enabled = config.desc
     
     # 通用 headers
     base_headers = {
@@ -590,84 +590,117 @@ def resolve_urls(mode: str, url: str) -> dict:
             }
     
     elif mode in ("post", "like", "mix", "collects"):
-        # 批量解析
-        if mode == "post":
-            all_details = _run_async(handler._user.handle_user_post_list(url))
-        elif mode == "like":
-            all_details = _run_async(handler._user.handle_user_like(url))
-        elif mode == "mix":
-            all_details = _run_async(handler._mix.handle_user_mix(url))
-        elif mode == "collects":
-            all_details = _run_async(handler._collection.handle_collects_video(url))
-        
-        if not all_details.get("success"):
-            return all_details
-        
-        # handle_user_post_list 返回 {"success": True, "videos": [...]}
-        # videos中的每个item已经是简化格式，包含video_url字段
-        details = all_details.get("videos", all_details.get("results", []))
+        # 批量解析 — 直接使用 crawler + PostDetailFilter 获取 to_db_dict() 格式
+        from core.crawler_engine.filter import PostDetailFilter, UserProfileFilter
+        from core.utils import SecUserIdFetcher, MixIdFetcher
+
+        user_profile = None
+
+        async def _fetch_batch_details():
+            nonlocal user_profile
+            async with handler._user._make_crawler() as crawler:
+                # post/mix 模式获取用户资料
+                if mode in ("post", "like"):
+                    sec_user_id = await SecUserIdFetcher.get_sec_user_id(url)
+                    if not sec_user_id:
+                        return None, "无法从 URL 提取 sec_user_id"
+                    if mode == "post":
+                        profile_data = await crawler.fetch_user_profile(sec_user_id)
+                        profile = UserProfileFilter(profile_data)
+                        user_profile = profile.to_dict()
+                        all_details = await handler._user._paginate_and_collect(
+                            lambda c, n: crawler.fetch_user_post(sec_user_id, c, n),
+                            skip_prohibited=True,
+                        )
+                    else:
+                        all_details = await handler._user._paginate_and_collect(
+                            lambda c, n: crawler.fetch_user_favorite(sec_user_id, c, n),
+                            skip_prohibited=False,
+                        )
+                elif mode == "mix":
+                    mix_id = await MixIdFetcher.get_mix_id(url)
+                    if not mix_id:
+                        return None, "无法从 URL 提取 mix_id"
+                    all_details = await handler._mix._paginate_and_collect(
+                        lambda c, n: crawler.fetch_mix_aweme(mix_id, c, n),
+                        skip_prohibited=True,
+                    )
+                elif mode == "collects":
+                    # collects 模式下 url 参数就是 collects_id
+                    collects_id = url
+                    all_details = await handler._collection._paginate_and_collect(
+                        lambda c, n: crawler.fetch_user_collects_video(collects_id, c, n),
+                        skip_prohibited=False,
+                    )
+                else:
+                    all_details = []
+                return all_details, None
+
+        batch_result, batch_error = _run_async(_fetch_batch_details())
+        if batch_error:
+            return {"success": False, "error": batch_error}
+
+        # 构建 items（使用 to_db_dict() 格式，对齐 Rust VideoInfo 结构体）
         items = []
-        for detail in details:
-            if isinstance(detail, dict):
-                # 直接使用字典格式，不转换为PostDetailFilter
-                aweme_id = detail.get("aweme_id", "")
-                video_url = detail.get("video_url", "")
-                desc = detail.get("desc", "")
-                author = detail.get("author", {}).get("nickname", "") if isinstance(detail.get("author"), dict) else ""
-                
-                if not video_url:
-                    continue
-                
-                filename = format_filename(naming, detail)
-                
-                # 构建headers
-                headers = base_headers.copy()
-                
-                # 构建item
+        for detail in batch_result:
+            if not isinstance(detail, PostDetailFilter):
+                continue
+
+            filename = format_filename(naming, detail.to_dict())
+            headers = base_headers.copy()
+
+            if detail.is_image_post and (detail.images or detail.images_video):
+                # 图集帖子：多个图片
+                for i, img_url in enumerate(detail.images):
+                    if img_url:
+                        items.append({
+                            "aweme_id": detail.aweme_id,
+                            "download_url": img_url,
+                            "filename": f"{filename}_image_{i + 1}",
+                            "suffix": ".jpg",
+                            "headers": headers,
+                            "content_type": "image",
+                            "detail": detail.to_db_dict(),
+                            "accessories": [],
+                        })
+            elif detail.video_urls or detail.video_url:
+                # 视频帖子
+                video_url = detail.video_urls if detail.video_urls else detail.video_url
                 item = {
-                    "aweme_id": aweme_id,
+                    "aweme_id": detail.aweme_id,
                     "download_url": video_url,
-                    "filename": filename,
+                    "filename": f"{filename}_video",
                     "suffix": ".mp4",
                     "headers": headers,
                     "content_type": "video",
-                    "detail": detail,
+                    "detail": detail.to_db_dict(),
                     "accessories": [],
                 }
-                
-                # 添加附属文件
-                if music_enabled and detail.get("music_url"):
+                if music_enabled and detail.music_url:
                     item["accessories"].append({
-                        "url": detail["music_url"],
+                        "url": detail.music_url,
                         "filename": f"{filename}_music",
                         "suffix": ".mp3",
                         "content_type": "music",
                     })
-                if cover_enabled and detail.get("cover_url"):
+                if cover_enabled and detail.cover_url:
                     item["accessories"].append({
-                        "url": detail["cover_url"],
+                        "url": detail.cover_url,
                         "filename": f"{filename}_cover",
                         "suffix": ".jpg",
                         "content_type": "cover",
                     })
-                
                 items.append(item)
-        
+
         # 确定保存目录
-        if mode == "post":
-            save_dir = download_path / app_name / "post"
-        elif mode == "like":
-            save_dir = download_path / app_name / "like"
-        elif mode == "mix":
-            save_dir = download_path / app_name / "mix"
-        elif mode == "collects":
-            save_dir = download_path / app_name / "collects"
-        
+        save_dir = download_path / app_name / mode
+
         return {
             "success": True,
             "items": items,
             "save_dir": str(save_dir),
             "total": len(items),
+            "user_profile": user_profile,
         }
     
     elif mode == "music":
