@@ -14,6 +14,13 @@ from core.models.responses import ErrorCode
 logger = logging.getLogger(__name__)
 
 
+def _cover_suffix(cover_url: str) -> str:
+    """根据封面 URL 判断扩展名（对齐 f2：动态封面 .webp，静态封面 .jpeg）"""
+    if cover_url and "animated_cover" in cover_url:
+        return ".webp"
+    return ".jpeg"
+
+
 def _safe_call(func):
     """装饰器：统一捕获异常，根据异常类型设置 error_code，返回 {success: False, error_code: ..., error: ...}"""
     def wrapper(*args, **kwargs):
@@ -454,13 +461,13 @@ def resolve_urls(mode: str, url: str) -> dict:
             suffix = ".mp4"
         elif content_type == "image":
             url = detail.images[0] if detail.images else None
-            suffix = ".jpg"
+            suffix = ".webp"
         elif content_type == "music":
             url = detail.music_url
             suffix = ".mp3"
         elif content_type == "cover":
             url = detail.cover_url
-            suffix = ".jpg"
+            suffix = _cover_suffix(detail.cover_url)
         elif content_type == "desc":
             url = None
             suffix = ".txt"
@@ -483,7 +490,7 @@ def resolve_urls(mode: str, url: str) -> dict:
             accessories.append({
                 "url": detail.cover_url,
                 "filename": f"{filename}_cover",
-                "suffix": ".jpg",
+                "suffix": _cover_suffix(detail.cover_url),
                 "content_type": "cover",
             })
         if desc_enabled and detail.desc:
@@ -536,22 +543,39 @@ def resolve_urls(mode: str, url: str) -> dict:
         
         # 构建下载项
         if detail.is_image_post and (detail.images or detail.images_video):
-            # 图片帖子：多个图片
+            # 图片帖子：先实况视频，再静态图（对齐 f2）
             items = []
+            base_name = format_filename(naming, detail.to_dict())
+
+            # 实况视频（对齐 f2: _live_{i+1}.mp4）
+            if detail.images_video:
+                for i, live_url in enumerate(detail.images_video):
+                    if live_url:
+                        items.append({
+                            "aweme_id": detail.aweme_id,
+                            "download_url": live_url,
+                            "filename": f"{base_name}_live_{i + 1}",
+                            "suffix": ".mp4",
+                            "headers": base_headers.copy(),
+                            "content_type": "live_photo",
+                            "detail": detail.to_db_dict(),
+                            "accessories": [],
+                        })
+
+            # 静态图（对齐 f2: _image_{i+1}.webp）
             for i, img_url in enumerate(detail.images):
                 if img_url:
-                    item = {
+                    items.append({
                         "aweme_id": detail.aweme_id,
                         "download_url": img_url,
-                        "filename": f"{format_filename(naming, detail.to_dict())}_image_{i + 1}",
-                        "suffix": ".jpg",
+                        "filename": f"{base_name}_image_{i + 1}",
+                        "suffix": ".webp",
                         "headers": base_headers.copy(),
                         "content_type": "image",
                         "detail": detail.to_db_dict(),
                         "accessories": [],
-                    }
-                    items.append(item)
-            
+                    })
+
             # 添加附属文件
             if items:
                 first_item = items[0]
@@ -566,7 +590,7 @@ def resolve_urls(mode: str, url: str) -> dict:
                     first_item["accessories"].append({
                         "url": detail.cover_url,
                         "filename": f"{format_filename(naming, detail.to_dict())}_cover",
-                        "suffix": ".jpg",
+                        "suffix": _cover_suffix(detail.cover_url),
                         "content_type": "cover",
                     })
             
@@ -648,20 +672,41 @@ def resolve_urls(mode: str, url: str) -> dict:
 
             filename = format_filename(naming, detail.to_dict())
             headers = base_headers.copy()
+            # folderize 子目录名（对齐 f2）
+            folder = filename if folderize else None
 
             if detail.is_image_post and (detail.images or detail.images_video):
-                # 图集帖子：多个图片
+                # 图集帖子：先实况视频，再静态图（对齐 f2）
+
+                # 实况视频（对齐 f2: _live_{i+1}.mp4）
+                if detail.images_video:
+                    for i, live_url in enumerate(detail.images_video):
+                        if live_url:
+                            items.append({
+                                "aweme_id": detail.aweme_id,
+                                "download_url": live_url,
+                                "filename": f"{filename}_live_{i + 1}",
+                                "suffix": ".mp4",
+                                "headers": headers,
+                                "content_type": "live_photo",
+                                "detail": detail.to_db_dict(),
+                                "accessories": [],
+                                "folder_name": folder,
+                            })
+
+                # 静态图（对齐 f2: _image_{i+1}.webp）
                 for i, img_url in enumerate(detail.images):
                     if img_url:
                         items.append({
                             "aweme_id": detail.aweme_id,
                             "download_url": img_url,
                             "filename": f"{filename}_image_{i + 1}",
-                            "suffix": ".jpg",
+                            "suffix": ".webp",
                             "headers": headers,
                             "content_type": "image",
                             "detail": detail.to_db_dict(),
                             "accessories": [],
+                            "folder_name": folder,
                         })
             elif detail.video_urls or detail.video_url:
                 # 视频帖子
@@ -675,6 +720,7 @@ def resolve_urls(mode: str, url: str) -> dict:
                     "content_type": "video",
                     "detail": detail.to_db_dict(),
                     "accessories": [],
+                    "folder_name": folder,
                 }
                 if music_enabled and detail.music_url:
                     item["accessories"].append({
@@ -687,13 +733,20 @@ def resolve_urls(mode: str, url: str) -> dict:
                     item["accessories"].append({
                         "url": detail.cover_url,
                         "filename": f"{filename}_cover",
-                        "suffix": ".jpg",
+                        "suffix": _cover_suffix(detail.cover_url),
                         "content_type": "cover",
                     })
                 items.append(item)
 
-        # 确定保存目录
-        save_dir = download_path / app_name / mode
+        # 确定保存目录（对齐 f2：download_path / app_name / mode / nickname）
+        nickname = "unknown"
+        if user_profile:
+            nickname = user_profile.get("nickname") or "unknown"
+        elif batch_result:
+            first = next((d for d in batch_result if isinstance(d, PostDetailFilter)), None)
+            if first:
+                nickname = first.author_nickname or "unknown"
+        save_dir = download_path / app_name / mode / nickname
 
         return {
             "success": True,
@@ -714,22 +767,26 @@ def resolve_urls(mode: str, url: str) -> dict:
                 return music_filter.get_music_list()
         
         music_list = _run_async(fetch_music_list())
-        
-        save_dir = download_path / app_name / "music"
+
+        # 对齐 f2：download_path / app_name / music / nickname
+        nickname = music_list[0].get("author", "unknown") if music_list else "unknown"
+        save_dir = download_path / app_name / "music" / nickname
         save_dir.mkdir(parents=True, exist_ok=True)
         
         items = []
         for music in music_list:
             if music.get("play_url"):
+                music_title = music.get("title", "unknown")
                 item = {
                     "aweme_id": music.get("music_id", ""),
                     "download_url": music["play_url"],
-                    "filename": f"{music.get('title', 'unknown')}_{music.get('author', 'unknown')}",
+                    "filename": f"{music_title}_{music.get('author', 'unknown')}",
                     "suffix": ".mp3",
                     "headers": base_headers.copy(),
                     "content_type": "music",
                     "detail": music,
                     "accessories": [],
+                    "folder_name": music_title if folderize else None,
                 }
                 items.append(item)
         
@@ -800,19 +857,38 @@ def resolve_page(mode: str, url: str, cursor: int = 0, count: int = 20) -> dict:
             if not hasattr(detail, 'aweme_id'):
                 continue
             filename = format_filename(naming, detail.to_dict())
+            folder = filename if folderize else None
 
             if detail.is_image_post and (detail.images or detail.images_video):
+                # 实况视频（对齐 f2: _live_{i+1}.mp4）
+                if detail.images_video:
+                    for i, live_url in enumerate(detail.images_video):
+                        if live_url:
+                            items.append({
+                                "aweme_id": detail.aweme_id,
+                                "download_url": live_url,
+                                "filename": f"{filename}_live_{i + 1}",
+                                "suffix": ".mp4",
+                                "headers": base_headers.copy(),
+                                "content_type": "live_photo",
+                                "detail": detail.to_db_dict(),
+                                "accessories": _build_accessories(detail, filename),
+                                "folder_name": folder,
+                            })
+
+                # 静态图（对齐 f2: _image_{i+1}.webp）
                 for i, img_url in enumerate(detail.images):
                     if img_url:
                         items.append({
                             "aweme_id": detail.aweme_id,
                             "download_url": img_url,
                             "filename": f"{filename}_image_{i + 1}",
-                            "suffix": ".jpg",
+                            "suffix": ".webp",
                             "headers": base_headers.copy(),
                             "content_type": "image",
                             "detail": detail.to_db_dict(),
                             "accessories": _build_accessories(detail, filename),
+                            "folder_name": folder,
                         })
             elif detail.video_urls or detail.video_url:
                 video_url = detail.video_urls if detail.video_urls else detail.video_url
@@ -825,6 +901,7 @@ def resolve_page(mode: str, url: str, cursor: int = 0, count: int = 20) -> dict:
                     "content_type": "video",
                     "detail": detail.to_db_dict(),
                     "accessories": _build_accessories(detail, filename),
+                    "folder_name": folder,
                 })
         return items
 
@@ -842,7 +919,7 @@ def resolve_page(mode: str, url: str, cursor: int = 0, count: int = 20) -> dict:
             accessories.append({
                 "url": detail.cover_url,
                 "filename": f"{filename}_cover",
-                "suffix": ".jpg",
+                "suffix": _cover_suffix(detail.cover_url),
                 "content_type": "cover",
             })
         if detail.desc:
@@ -916,7 +993,14 @@ def resolve_page(mode: str, url: str, cursor: int = 0, count: int = 20) -> dict:
             return {"success": False, "error": error}
 
         items = _build_items_from_details(all_details, mode)
-        save_dir = download_path / app_name / mode
+        # 对齐 f2：download_path / app_name / mode / nickname
+        nickname = "unknown"
+        if user_profile:
+            nickname = user_profile.get("nickname") or "unknown"
+        elif all_details:
+            first = all_details[0]
+            nickname = getattr(first, "author_nickname", None) or "unknown"
+        save_dir = download_path / app_name / mode / nickname
 
         result = {
             "success": True,

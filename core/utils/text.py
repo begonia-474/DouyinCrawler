@@ -20,15 +20,21 @@ def replaceT(obj):
 
 
 def sanitize_filename(name: str, max_len: int = 200) -> str:
-    """清理文件名，移除非法字符和 emoji，按字节截断"""
+    """清理文件名，移除非法字符和 emoji，按字节截断（对齐 f2 split_filename）"""
     name = re.sub(r'[\\/:*?"<>|\n\r\t]', '_', name)
     # 过滤 emoji（SMP 平面 U+10000 以上）
     name = re.sub(r'[\U00010000-\U0010ffff]+', '', name)
-    name = name.strip('. ')
-    # 按字节截断，避免中文截断产生乱码
+    # 合并连续空格（对齐 f2）
+    name = re.sub(r'\s+', ' ', name).strip('. ')
+    # 按字节截断，超长时保留首尾（对齐 f2 split_filename）
     encoded = name.encode('utf-8')
     if len(encoded) > max_len:
-        name = encoded[:max_len].decode('utf-8', errors='ignore')
+        # f2 策略：前 2/3 + "......" + 后 1/3
+        split_first = (max_len - 6) * 2 // 3
+        split_second = (max_len - 6) // 3
+        first_part = encoded[:split_first].decode('utf-8', errors='ignore')
+        second_part = encoded[-split_second:].decode('utf-8', errors='ignore')
+        name = f"{first_part}......{second_part}"
     return name
 
 
@@ -40,10 +46,13 @@ def format_filename(template: str, data: dict) -> str:
     """
     create_ts = data.get("create_time", 0)
     if isinstance(create_ts, str) and "-" in create_ts:
-        # 已经是格式化字符串（如 "2024-06-25 16-00-00"），直接用
-        create_str = create_ts.replace(" ", "_").replace(":", "").replace("-", "-", 2)
+        # 已经是格式化字符串，对齐 f2 格式：YYYY-MM-DD HH-MM-SS
+        create_str = create_ts.replace(":", "-")
+        # 确保日期和时间之间用空格分隔（f2 格式）
+        if "_" in create_str:
+            create_str = create_str.replace("_", " ")
     else:
-        create_str = time.strftime("%Y-%m-%d_%H%M%S", time.localtime(create_ts)) if create_ts else "unknown"
+        create_str = time.strftime("%Y-%m-%d %H-%M-%S", time.localtime(create_ts)) if create_ts else "unknown"
 
     # desc 和 caption 都指向 desc 字段（f2 兼容）
     # strip 尾部下划线，避免空 desc 时模板展开产生多余连接符

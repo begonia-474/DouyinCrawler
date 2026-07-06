@@ -80,8 +80,14 @@ fn build_download_url(url_value: &Value) -> DownloadUrl {
 }
 
 /// 从 ResolvedItem 构建 DownloadItem
+///
+/// 当 item.folder_name 存在时（folderize=True），在 save_dir 下创建子目录。
 fn build_download_item(item: &ResolvedItem, save_dir: &str, task_id: &str) -> DownloadItem {
-    let save_path = PathBuf::from(save_dir).join(format!("{}{}", item.filename, item.suffix));
+    let base_dir = match &item.folder_name {
+        Some(folder) if !folder.is_empty() => PathBuf::from(save_dir).join(folder),
+        _ => PathBuf::from(save_dir),
+    };
+    let save_path = base_dir.join(format!("{}{}", item.filename, item.suffix));
     let ext = item.suffix.trim_start_matches('.');
     let temp_path = save_path.with_extension(format!("{}.tmp", ext));
 
@@ -206,10 +212,16 @@ impl<'a> TaskApplicationService<'a> {
         engine: &DownloadEngine,
         accessories: &[ResolvedAccessory],
         save_dir: &str,
+        folder_name: &Option<String>,
         task_id: &str,
         app_config: &crate::config::AppConfig,
     ) -> Vec<String> {
         let mut downloaded_paths = Vec::new();
+
+        let base_dir = match folder_name {
+            Some(folder) if !folder.is_empty() => PathBuf::from(save_dir).join(folder),
+            _ => PathBuf::from(save_dir),
+        };
 
         for acc in accessories {
             // 根据配置过滤附属文件
@@ -222,7 +234,7 @@ impl<'a> TaskApplicationService<'a> {
             if !should_download {
                 continue;
             }
-            let acc_path = PathBuf::from(save_dir).join(format!("{}{}", acc.filename, acc.suffix));
+            let acc_path = base_dir.join(format!("{}{}", acc.filename, acc.suffix));
 
             match acc.content_type.as_str() {
                 "desc" => {
@@ -330,7 +342,9 @@ impl<'a> TaskApplicationService<'a> {
         for acc_path in accessory_paths {
             let acc_type = if acc_path.ends_with(".mp3") {
                 "music"
-            } else if acc_path.ends_with(".jpg") || acc_path.ends_with(".png") {
+            } else if acc_path.ends_with(".jpg") || acc_path.ends_with(".jpeg")
+                || acc_path.ends_with(".webp") || acc_path.ends_with(".png")
+            {
                 "cover"
             } else {
                 "accessory"
@@ -612,7 +626,7 @@ impl<'a> TaskApplicationService<'a> {
 
                     // 下载附属文件
                     let accessory_paths =
-                        Self::download_accessories(&engine, &item.accessories, &save_dir, task_id, app_config)
+                        Self::download_accessories(&engine, &item.accessories, &save_dir, &item.folder_name, task_id, app_config)
                             .await;
 
                     // 保存到数据库
@@ -851,7 +865,7 @@ impl<'a> TaskApplicationService<'a> {
 
                         // 下载附属文件（Rust 侧根据配置过滤）
                         let accessory_paths = Self::download_accessories(
-                            &engine, &item.accessories, &save_dir, task_id, app_config,
+                            &engine, &item.accessories, &save_dir, &item.folder_name, task_id, app_config,
                         ).await;
 
                         if download_result.skipped {

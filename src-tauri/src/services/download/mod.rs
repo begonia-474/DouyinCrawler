@@ -252,6 +252,9 @@ pub struct ResolvedItem {
     pub detail: Option<serde_json::Value>,
     #[serde(default)]
     pub accessories: Vec<ResolvedAccessory>,
+    /// folderize 子目录名（Python 侧在 folderize=True 时设置）
+    #[serde(default)]
+    pub folder_name: Option<String>,
 }
 
 /// resolve_urls 返回的完整结果

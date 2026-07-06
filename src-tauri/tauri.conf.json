@@ -5,7 +5,7 @@
   "identifier": "com.axiao.douyin-crawler",
   "build": {
     "beforeDevCommand": "pnpm dev",
-    "devUrl": "http://localhost:3000",
+    "devUrl": "http://localhost:5173",
     "beforeBuildCommand": "pnpm build",
     "frontendDist": "../dist"
   },

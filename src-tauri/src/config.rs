@@ -134,8 +134,20 @@ impl ConfigManager {
             match fs::read_to_string(config_path) {
                 Ok(content) => {
                     match serde_json::from_str::<ConfigFile>(&content) {
-                        Ok(config) => {
-                            if let Some(ref dc) = config.douyin {
+                        Ok(mut config) => {
+                            // 清理 cookie 中可能残留的换行符
+                            if let Some(ref mut dc) = config.douyin {
+                                let original_len = dc.cookie.len();
+                                dc.cookie = dc.cookie
+                                    .chars()
+                                    .filter(|c| *c != '\n' && *c != '\r')
+                                    .collect::<String>()
+                                    .split_whitespace()
+                                    .collect::<Vec<_>>()
+                                    .join(" ");
+                                if dc.cookie.len() != original_len {
+                                    info!("[config] cookie 已清理换行符 ({} -> {})", original_len, dc.cookie.len());
+                                }
                                 info!("[config] 已加载配置: {:?}", config_path);
                                 info!("[config] douyin.cookie loaded (len={})", dc.cookie.len());
                                 info!("[config] page_counts={}, max_counts={}, timeout={}, max_connections={}, max_retries={}, max_tasks={}",
@@ -175,8 +187,16 @@ impl ConfigManager {
         for (key, value) in updates {
             match key.as_str() {
                 "cookie" => {
-                    info!("[config] 更新 cookie (len={})", value.len());
-                    config.cookie = value.clone();
+                    // 清理粘贴时可能带入的换行符
+                    let cleaned: String = value
+                        .chars()
+                        .filter(|c| *c != '\n' && *c != '\r')
+                        .collect::<String>()
+                        .split_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    info!("[config] 更新 cookie (原始 len={}, 清理后 len={})", value.len(), cleaned.len());
+                    config.cookie = cleaned;
                 }
                 "download_path" => config.download_path = value.clone(),
                 "naming" => config.naming = value.clone(),
