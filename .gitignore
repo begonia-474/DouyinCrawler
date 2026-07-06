@@ -101,5 +101,9 @@ CONTEXT.md
 
 # 其他
 *.bak
+*.backup
 *.tmp
 *.temp
+
+# Rust 构建产物
+src-tauri/target/
