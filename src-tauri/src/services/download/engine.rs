@@ -23,13 +23,13 @@ use tokio::sync::Semaphore;
 /// 下载引擎配置
 #[derive(Debug, Clone)]
 pub struct EngineConfig {
-    /// 最大并发下载数
+    /// 最大并发下载任务数（对应 config.max_tasks）
     pub max_concurrent: usize,
     /// 最大重试次数
     pub max_retries: u32,
     /// 请求超时时间（秒）
     pub timeout: u64,
-    /// 最大 TCP 连接数
+    /// 最大 TCP 连接数（单个 URL 的并发连接数）
     pub max_connections: usize,
     /// User-Agent
     pub user_agent: String,
@@ -37,18 +37,21 @@ pub struct EngineConfig {
     pub referer: String,
     /// Cookie
     pub cookie: String,
+    /// 代理地址（空字符串表示不使用代理）
+    pub proxy: String,
 }
 
 impl Default for EngineConfig {
     fn default() -> Self {
         Self {
-            max_concurrent: 5,
+            max_concurrent: 10,
             max_retries: 5,
             timeout: 5,
             max_connections: 5,
             user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36".to_string(),
             referer: "https://www.douyin.com/".to_string(),
             cookie: String::new(),
+            proxy: String::new(),
         }
     }
 }
@@ -147,12 +150,19 @@ pub struct DownloadEngine {
 impl DownloadEngine {
     /// 创建新的下载引擎
     pub fn new(config: EngineConfig) -> Self {
-        let client = Client::builder()
+        let mut builder = Client::builder()
             .timeout(Duration::from_secs(config.timeout))
             .pool_max_idle_per_host(config.max_connections)
-            .user_agent(&config.user_agent)
-            .build()
-            .expect("Failed to create HTTP client");
+            .user_agent(&config.user_agent);
+
+        // 代理配置
+        if !config.proxy.is_empty() {
+            if let Ok(proxy) = reqwest::Proxy::all(&config.proxy) {
+                builder = builder.proxy(proxy);
+            }
+        }
+
+        let client = builder.build().expect("Failed to create HTTP client");
         
         Self {
             client,

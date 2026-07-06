@@ -742,3 +742,201 @@ def resolve_urls(mode: str, url: str) -> dict:
     
     else:
         return {"success": False, "error": f"未知的下载模式: {mode}"}
+
+
+@_safe_call
+def resolve_page(mode: str, url: str, cursor: int = 0, count: int = 20) -> dict:
+    """解析单页下载 URL（分页模式）
+
+    与 resolve_urls 的区别：只返回一页数据 + 分页元数据 (next_cursor, has_more)，
+    由 Rust 驱动分页循环，实现"边解析边下载"。
+
+    与 resolve_urls 的另一个区别：不根据 music/cover/desc 配置过滤附属文件，
+    返回所有可用的附属文件，由 Rust 侧根据配置决定是否下载。
+
+    Args:
+        mode: 下载模式 (one/post/like/mix/collects/music)
+        url: 目标 URL
+        cursor: 分页游标（首页传 0）
+        count: 每页数量
+
+    Returns:
+        {
+            "success": True,
+            "items": [...],
+            "save_dir": "/path/to/save",
+            "total": 10,
+            "next_cursor": 12345,    # 下一页游标，无更多数据时为 None
+            "has_more": True,         # 是否还有更多数据
+            "user_profile": { ... },  # 仅 post 模式首次返回
+        }
+    """
+    import asyncio
+    from pathlib import Path
+    from core.download.downloader import format_filename
+
+    logger.info("[py_bridge] resolve_page 调用, mode=%s, url=%s, cursor=%d, count=%d",
+                mode, url[:80], cursor, count)
+
+    handler = _get_task_manager().handler
+    config = handler.config
+    cookie = config.cookie
+    naming = config.naming
+    download_path = config.download_path if isinstance(config.download_path, Path) else Path(config.download_path)
+    app_name = config.app_name
+    folderize = config.folderize
+
+    # 通用 headers
+    base_headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+        "Referer": "https://www.douyin.com/",
+        "Cookie": cookie,
+    }
+
+    def _build_items_from_details(details, mode_for_dir):
+        """从 PostDetailFilter 列表构建 items（不过滤附属文件）"""
+        items = []
+        for detail in details:
+            if not hasattr(detail, 'aweme_id'):
+                continue
+            filename = format_filename(naming, detail.to_dict())
+
+            if detail.is_image_post and (detail.images or detail.images_video):
+                for i, img_url in enumerate(detail.images):
+                    if img_url:
+                        items.append({
+                            "aweme_id": detail.aweme_id,
+                            "download_url": img_url,
+                            "filename": f"{filename}_image_{i + 1}",
+                            "suffix": ".jpg",
+                            "headers": base_headers.copy(),
+                            "content_type": "image",
+                            "detail": detail.to_db_dict(),
+                            "accessories": _build_accessories(detail, filename),
+                        })
+            elif detail.video_urls or detail.video_url:
+                video_url = detail.video_urls if detail.video_urls else detail.video_url
+                items.append({
+                    "aweme_id": detail.aweme_id,
+                    "download_url": video_url,
+                    "filename": f"{filename}_video",
+                    "suffix": ".mp4",
+                    "headers": base_headers.copy(),
+                    "content_type": "video",
+                    "detail": detail.to_db_dict(),
+                    "accessories": _build_accessories(detail, filename),
+                })
+        return items
+
+    def _build_accessories(detail, filename):
+        """构建附属文件列表（不过滤，返回所有可用的）"""
+        accessories = []
+        if detail.music_url:
+            accessories.append({
+                "url": detail.music_url,
+                "filename": f"{filename}_music",
+                "suffix": ".mp3",
+                "content_type": "music",
+            })
+        if detail.cover_url:
+            accessories.append({
+                "url": detail.cover_url,
+                "filename": f"{filename}_cover",
+                "suffix": ".jpg",
+                "content_type": "cover",
+            })
+        if detail.desc:
+            accessories.append({
+                "url": None,
+                "filename": f"{filename}_desc",
+                "suffix": ".txt",
+                "content_type": "desc",
+                "content": detail.desc,
+            })
+        return accessories
+
+    if mode == "one":
+        # 单视频：无分页，委托给 resolve_urls
+        result = resolve_urls(mode, url)
+        if result.get("success"):
+            result["next_cursor"] = None
+            result["has_more"] = False
+        return result
+
+    elif mode in ("post", "like", "mix", "collects"):
+        from core.crawler_engine.filter import UserPostFilter, UserProfileFilter
+        from core.utils import SecUserIdFetcher, MixIdFetcher
+
+        user_profile = None
+        all_details = []
+        next_cursor = None
+        has_more = False
+
+        async def _fetch_single_page():
+            nonlocal user_profile, all_details, next_cursor, has_more
+            async with handler._user._make_crawler() as crawler:
+                if mode in ("post", "like"):
+                    sec_user_id = await SecUserIdFetcher.get_sec_user_id(url)
+                    if not sec_user_id:
+                        return "无法从 URL 提取 sec_user_id"
+                    if mode == "post":
+                        # 仅首页获取用户资料
+                        if cursor == 0:
+                            profile_data = await crawler.fetch_user_profile(sec_user_id)
+                            profile = UserProfileFilter(profile_data)
+                            user_profile = profile.to_dict()
+                        data = await crawler.fetch_user_post(sec_user_id, cursor, count)
+                    else:
+                        data = await crawler.fetch_user_favorite(sec_user_id, cursor, count)
+                elif mode == "mix":
+                    mix_id = await MixIdFetcher.get_mix_id(url)
+                    if not mix_id:
+                        return "无法从 URL 提取 mix_id"
+                    data = await crawler.fetch_mix_aweme(mix_id, cursor, count)
+                elif mode == "collects":
+                    collects_id = url
+                    data = await crawler.fetch_user_collects_video(collects_id, cursor, count)
+                else:
+                    data = None
+
+                if not data:
+                    has_more = False
+                    return None
+
+                video_filter = UserPostFilter(data)
+                for detail in video_filter.get_video_list():
+                    all_details.append(detail)
+
+                has_more = video_filter.has_more
+                next_cursor = video_filter.max_cursor if has_more else None
+                return None
+
+        error = _run_async(_fetch_single_page())
+        if error:
+            return {"success": False, "error": error}
+
+        items = _build_items_from_details(all_details, mode)
+        save_dir = download_path / app_name / mode
+
+        result = {
+            "success": True,
+            "items": items,
+            "save_dir": str(save_dir),
+            "total": len(items),
+            "next_cursor": next_cursor,
+            "has_more": has_more,
+        }
+        if user_profile:
+            result["user_profile"] = user_profile
+        return result
+
+    elif mode == "music":
+        # 音乐：单次拉取，无分页
+        result = resolve_urls(mode, url)
+        if result.get("success"):
+            result["next_cursor"] = None
+            result["has_more"] = False
+        return result
+
+    else:
+        return {"success": False, "error": f"未知的下载模式: {mode}"}

@@ -271,6 +271,12 @@ pub struct ResolvedUrls {
     /// 用户资料（batch 模式下可能返回）
     #[serde(default)]
     pub user_profile: Option<serde_json::Value>,
+    /// 下一页游标（resolve_page 返回）
+    #[serde(default)]
+    pub next_cursor: Option<i64>,
+    /// 是否还有更多数据（resolve_page 返回）
+    #[serde(default)]
+    pub has_more: Option<bool>,
 }
 
 // ============================================================

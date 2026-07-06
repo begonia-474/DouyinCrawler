@@ -100,11 +100,12 @@ fn build_download_item(item: &ResolvedItem, save_dir: &str, task_id: &str) -> Do
 /// 从 AppConfig 构建 EngineConfig
 fn build_engine_config(config: &crate::config::AppConfig) -> EngineConfig {
     EngineConfig {
-        max_concurrent: config.max_connections as usize,
+        max_concurrent: config.max_tasks as usize,   // 并发下载任务数 = max_tasks
         max_retries: config.max_retries,
         timeout: config.timeout as u64,
-        max_connections: config.max_connections as usize,
+        max_connections: config.max_connections as usize, // 单 URL 并发连接数
         cookie: config.cookie.clone(),
+        proxy: config.proxy.clone(),
         ..EngineConfig::default()
     }
 }
@@ -197,16 +198,30 @@ impl<'a> TaskApplicationService<'a> {
 
     /// 处理单个下载项的附属文件（音乐、封面、文案）
     ///
+    /// 根据 app_config 的 music/cover/desc 配置过滤附属文件，
+    /// 只下载用户启用的附属文件类型。
+    ///
     /// 返回成功下载的附属文件路径列表
     async fn download_accessories(
         engine: &DownloadEngine,
         accessories: &[ResolvedAccessory],
         save_dir: &str,
         task_id: &str,
+        app_config: &crate::config::AppConfig,
     ) -> Vec<String> {
         let mut downloaded_paths = Vec::new();
 
         for acc in accessories {
+            // 根据配置过滤附属文件
+            let should_download = match acc.content_type.as_str() {
+                "music" => app_config.music,
+                "cover" => app_config.cover,
+                "desc" => app_config.desc,
+                _ => true, // 未知类型默认下载
+            };
+            if !should_download {
+                continue;
+            }
             let acc_path = PathBuf::from(save_dir).join(format!("{}{}", acc.filename, acc.suffix));
 
             match acc.content_type.as_str() {
@@ -597,7 +612,7 @@ impl<'a> TaskApplicationService<'a> {
 
                     // 下载附属文件
                     let accessory_paths =
-                        Self::download_accessories(&engine, &item.accessories, &save_dir, task_id)
+                        Self::download_accessories(&engine, &item.accessories, &save_dir, task_id, app_config)
                             .await;
 
                     // 保存到数据库
@@ -703,6 +718,230 @@ impl<'a> TaskApplicationService<'a> {
     }
 
     // ============================================================
+    // 分页下载（post/like/mix/collects）
+    // ============================================================
+
+    /// 通过 Python resolve_page 解析单页下载 URL（异步，使用 spawn_blocking）
+    async fn resolve_download_page(mode: &str, url: &str, cursor: i64, count: i64) -> Result<ResolvedUrls, String> {
+        let mode = mode.to_string();
+        let url = url.to_string();
+
+        let json_value = tokio::task::spawn_blocking(move || {
+            crate::python::handler::resolve_page(&mode, &url, cursor, count)
+                .map_err(|e| format!("resolve_page 调用失败: {}", e))
+        })
+        .await
+        .map_err(|e| format!("spawn_blocking 失败: {}", e))??;
+
+        serde_json::from_value::<ResolvedUrls>(json_value)
+            .map_err(|e| format!("resolve_page 返回值解析失败: {}", e))
+    }
+
+    /// 分页下载执行流程（post/like/mix/collects）
+    ///
+    /// 核心变更：从"一次性解析所有 URL 再下载"改为"逐页解析 + 立即下载"。
+    /// - 用户点击下载后 2 秒内即可看到进度（而非等待全部解析完成）
+    /// - 内存占用恒定（不再随作品数线性增长）
+    /// - 与 f2 的 async for page in fetch_generator() 模式对齐
+    async fn execute_paged_download(
+        db: &Database,
+        task_id: &str,
+        mode: DownloadMode,
+        url: &str,
+        cancel_signal: &Arc<AtomicBool>,
+        app_config: &crate::config::AppConfig,
+    ) -> Result<(), String> {
+        let page_counts = app_config.page_counts as i64;
+        let mut cursor: i64 = 0;
+        let mut total_completed: i64 = 0;
+        let mut total_failed: i64 = 0;
+        let mut total_items: i64 = 0;
+        let mut page_index: i64 = 0;
+        let mut save_dir = String::new();
+        let mut user_saved = false;
+
+        // 创建下载引擎（整个任务共享一个引擎）
+        let engine = Self::create_engine(app_config, cancel_signal.clone());
+
+        loop {
+            // 检查取消信号
+            if cancel_signal.load(Ordering::Relaxed) {
+                info!("[TaskService] 分页下载被取消: task_id={}, 已完成 {} 项", task_id, total_completed);
+                return Err("下载已取消".to_string());
+            }
+
+            // 解析单页
+            page_index += 1;
+            info!(
+                "[TaskService] 解析第 {} 页: task_id={}, cursor={}, count={}",
+                page_index, task_id, cursor, page_counts
+            );
+
+            let resolved = Self::resolve_download_page(mode.as_str(), url, cursor, page_counts).await?;
+            if !resolved.success {
+                let err = resolved.error.unwrap_or_else(|| "解析失败".to_string());
+                // 首页失败直接报错；后续页失败则停止分页但保留已下载内容
+                if total_completed == 0 {
+                    return Err(err);
+                }
+                warn!("[TaskService] 第 {} 页解析失败，停止分页: {}", page_index, err);
+                break;
+            }
+
+            // 首页：初始化 save_dir、保存用户资料
+            if page_index == 1 {
+                save_dir = resolved.save_dir.unwrap_or_else(|| {
+                    format!("./Download/{}", mode.as_str())
+                });
+                if let Err(e) = tokio::fs::create_dir_all(&save_dir).await {
+                    warn!("[TaskService] 创建保存目录失败: {}, error={}", save_dir, e);
+                }
+
+                // 保存用户资料（仅 post 模式）
+                if !user_saved {
+                    if let Some(profile) = resolved.user_profile.as_ref() {
+                        if matches!(mode, DownloadMode::Post | DownloadMode::Mix) {
+                            if let Some(user_info) = parse_user_info(profile) {
+                                if db.get_user_by_sec_uid(&user_info.sec_user_id)
+                                    .ok().flatten().is_none()
+                                {
+                                    let _ = db.save_user(&user_info);
+                                }
+                            }
+                        }
+                    }
+                    user_saved = true;
+                }
+
+                // 发射进度事件：首页解析完成
+                events::emit_progress(task_id, 0, resolved.total.unwrap_or(0) as u64);
+            }
+
+            let items = resolved.items;
+            if items.is_empty() {
+                info!("[TaskService] 第 {} 页无数据，停止分页", page_index);
+                break;
+            }
+
+            let page_total = items.len() as i64;
+            total_items += page_total;
+
+            info!(
+                "[TaskService] 开始下载第 {} 页: {} 项 (累计 {}/{})",
+                page_index, page_total, total_completed, total_items
+            );
+
+            // 发射页面解析完成事件（让前端知道发现了多少项）
+            events::emit_progress(task_id, total_completed as u64, total_items as u64);
+
+            // 下载当前页的每个项目
+            for (_index, item) in items.iter().enumerate() {
+                if cancel_signal.load(Ordering::Relaxed) {
+                    return Err("下载已取消".to_string());
+                }
+
+                let download_item = build_download_item(item, &save_dir, task_id);
+
+                let result = engine.download(&download_item, |_, _| {}).await;
+
+                match result {
+                    Ok(download_result) => {
+                        let file_path = download_result.path.to_string_lossy().to_string();
+                        let file_size = download_result.file_size as i64;
+
+                        // 下载附属文件（Rust 侧根据配置过滤）
+                        let accessory_paths = Self::download_accessories(
+                            &engine, &item.accessories, &save_dir, task_id, app_config,
+                        ).await;
+
+                        if download_result.skipped {
+                            let new_item = NewTaskItem {
+                                task_id: task_id.to_string(),
+                                aweme_id: Some(item.aweme_id.clone()),
+                                title: json_str(item.detail.as_ref(), "desc"),
+                                author_nickname: json_str(item.detail.as_ref(), "author_nickname"),
+                                cover_url: json_str(item.detail.as_ref(), "cover_url"),
+                            };
+                            let _ = db.create_task_item(&new_item);
+                            let _ = db.update_task_item_status(
+                                task_id, &item.aweme_id, "skipped",
+                                Some(&file_path), file_size, None,
+                            );
+                            if let Err(e) = Self::save_download_metadata(
+                                db, item, &file_path, file_size, &accessory_paths,
+                            ) {
+                                warn!("[TaskService] 跳过项保存元数据失败: {}", e);
+                            }
+                        } else {
+                            if let Err(e) = Self::save_single_result(
+                                db, task_id, item, &file_path, file_size, &accessory_paths,
+                            ) {
+                                warn!("[TaskService] 保存结果失败: {}", e);
+                                total_failed += 1;
+                                continue;
+                            }
+                        }
+                        total_completed += 1;
+                    }
+                    Err(e) => {
+                        warn!("[TaskService] 下载失败: aweme_id={}, error={}", item.aweme_id, e);
+                        let new_item = NewTaskItem {
+                            task_id: task_id.to_string(),
+                            aweme_id: Some(item.aweme_id.clone()),
+                            title: json_str(item.detail.as_ref(), "desc"),
+                            author_nickname: json_str(item.detail.as_ref(), "author_nickname"),
+                            cover_url: json_str(item.detail.as_ref(), "cover_url"),
+                        };
+                        let _ = db.create_task_item(&new_item);
+                        let _ = db.update_task_item_status(
+                            task_id, &item.aweme_id, "failed", None, 0, Some(&e.to_string()),
+                        );
+                        total_failed += 1;
+                    }
+                }
+
+                // 发射进度
+                events::emit_progress(task_id, (total_completed + total_failed) as u64, total_items as u64);
+            }
+
+            info!(
+                "[TaskService] 第 {} 页下载完成: completed={}, failed={}",
+                page_index, total_completed, total_failed
+            );
+
+            // 检查是否还有更多数据
+            if resolved.has_more != Some(true) {
+                info!("[TaskService] 所有页面下载完成 (共 {} 页)", page_index);
+                break;
+            }
+
+            // 更新游标
+            if let Some(next) = resolved.next_cursor {
+                cursor = next;
+            } else {
+                info!("[TaskService] next_cursor 为空，停止分页");
+                break;
+            }
+        }
+
+        // 更新任务计数
+        if let Err(e) = db.update_task_counts(task_id) {
+            warn!("[TaskService] 更新任务计数失败: {}", e);
+        }
+
+        if total_failed > 0 && total_completed == 0 {
+            return Err(format!("所有下载均失败: {}/{} failed", total_failed, total_items));
+        }
+
+        info!(
+            "[TaskService] 分页下载完成: task_id={}, pages={}, total={}, completed={}, failed={}",
+            task_id, page_index, total_items, total_completed, total_failed
+        );
+
+        Ok(())
+    }
+
+    // ============================================================
     // 批量下载入口（post/like/mix/collects）
     // ============================================================
 
@@ -749,9 +988,9 @@ impl<'a> TaskApplicationService<'a> {
         let mode_val = mode;
         let url_val = url.to_string();
 
-        // 5. 启动后台下载任务
+        // 5. 启动后台下载任务（分页模式）
         tokio::spawn(async move {
-            let result = Self::execute_download(
+            let result = Self::execute_paged_download(
                 &db,
                 &task_id_clone,
                 mode_val,

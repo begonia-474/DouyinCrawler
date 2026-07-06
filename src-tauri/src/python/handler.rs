@@ -109,6 +109,15 @@ pub fn resolve_urls(mode: &str, url: &str) -> PyResult<Value> {
     call_py_json("resolve_urls", (mode, url))
 }
 
+/// 解析单页下载 URL（分页模式）
+///
+/// 与 resolve_urls 的区别：只返回一页数据 + 分页元数据 (next_cursor, has_more)，
+/// 由 Rust 驱动分页循环，实现"边解析边下载"。
+pub fn resolve_page(mode: &str, url: &str, cursor: i64, count: i64) -> PyResult<Value> {
+    info!("[handler.rs] resolve_page, mode={}, cursor={}, count={}", mode, cursor, count);
+    call_py_json("resolve_page", (mode, url, cursor, count))
+}
+
 // ============================================================
 // 搜索
 // ============================================================
