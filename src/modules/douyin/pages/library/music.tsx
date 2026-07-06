@@ -6,6 +6,11 @@ import { Header } from "@/components/layout/header";
 import { AnimateEntry } from "@/components/shared/animate-entry";
 import { Bezel } from "@/components/shared/bezel";
 import { Pagination } from "@/components/shared/pagination";
+import {
+  AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogFooter,
+  AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel,
+} from "@/components/ui/alert-dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Music, Loader2, Search, Clock, Download, CheckCircle2, Trash2 } from "lucide-react";
 import { useDeleteMusicCollection, useDownloadMusic, useUpdateMusicFilePath } from "@/lib/mutations";
 import { useMusicCollectionQuery, useMusicCountQuery } from "@/lib/queries";
@@ -17,6 +22,8 @@ export default function LibraryMusicPage() {
   const { page, pageSize, setPage, offset, resetPage } = usePagination();
   const [search, setSearch] = useState("");
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<MusicCollectionItem | null>(null);
+  const [deleteFile, setDeleteFile] = useState(false);
   const deleteMusic = useDeleteMusicCollection();
   const dlMusic = useDownloadMusic();
   const updatePath = useUpdateMusicFilePath();
@@ -47,14 +54,13 @@ export default function LibraryMusicPage() {
     );
   };
 
-  const handleDelete = (item: MusicCollectionItem) => {
-    if (!window.confirm("确定删除这条音乐记录？")) return;
-    const deleteFile = item.file_path
-      ? window.confirm("是否同时删除这条记录对应的本地文件？\n\n取消则只删除记录。")
-      : false;
-    deleteMusic.mutate({ musicId: item.music_id, deleteFile }, {
+  const handleConfirmDelete = () => {
+    if (!deleteTarget) return;
+    deleteMusic.mutate({ musicId: deleteTarget.music_id, deleteFile }, {
       onError: (err) => toast.error(err instanceof Error ? err.message : "删除失败"),
     });
+    setDeleteTarget(null);
+    setDeleteFile(false);
   };
 
   const totalPages = Math.ceil(total / pageSize);
@@ -136,7 +142,7 @@ export default function LibraryMusicPage() {
                       size="icon-sm"
                       className="shrink-0"
                       title="删除记录"
-                      onClick={() => handleDelete(item)}
+                      onClick={() => setDeleteTarget(item)}
                     >
                       <Trash2 className="h-4 w-4 text-destructive" />
                     </Button>
@@ -164,6 +170,27 @@ export default function LibraryMusicPage() {
           </div>
         )}
       </div>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除</AlertDialogTitle>
+            <AlertDialogDescription>
+              确定删除这条音乐记录？此操作不可撤销。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {deleteTarget?.file_path && (
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <Checkbox checked={deleteFile} onCheckedChange={(checked) => setDeleteFile(checked === true)} />
+              同时删除本地文件
+            </label>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setDeleteFile(false)}>取消</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={handleConfirmDelete}>删除</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

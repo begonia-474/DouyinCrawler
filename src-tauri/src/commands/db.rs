@@ -4,12 +4,12 @@
 //! 包含读取（get_*）、写入（save_*）、更新（update_*）、删除（delete_*）、查询（is_*）。
 
 use tauri::State;
-use log::{info, error};
+use log::info;
 
 use crate::state::AppState;
 use crate::db::{
-    DownloadRecord, DownloadStats, DownloadTask, DownloadTaskDetail,
-    LiveRecord, MusicCollection, NewDownloadRecord, NewDownloadTask,
+    DownloadTask, DownloadTaskDetail,
+    LiveRecord, MusicCollection, NewDownloadTask,
     NewLiveRecord, NewMusicCollection, NewTaskItem,
     TaskItem, TaskItemCounts, UserInfo, VideoInfo, VideoStats, UserStats,
     TrendPoint, AuthorStat, StorageStat, DbHealth,
@@ -18,23 +18,6 @@ use crate::db::{
 // ============================================================
 // 读取
 // ============================================================
-
-#[tauri::command(rename_all = "snake_case")]
-pub fn get_downloads(
-    state: State<'_, AppState>,
-    limit: i64,
-    offset: i64,
-    status: Option<String>,
-    download_type: Option<String>,
-) -> Result<Vec<DownloadRecord>, String> {
-    state.db.get_downloads(limit, offset, status, download_type)
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command(rename_all = "snake_case")]
-pub fn get_download_stats(state: State<'_, AppState>) -> Result<DownloadStats, String> {
-    state.db.get_download_stats().map_err(|e| e.to_string())
-}
 
 #[tauri::command(rename_all = "snake_case")]
 pub fn get_live_records(
@@ -145,18 +128,6 @@ pub fn get_music_collection_count(
 // ============================================================
 
 #[tauri::command(rename_all = "snake_case")]
-pub fn save_download_record(
-    state: State<'_, AppState>,
-    record: NewDownloadRecord,
-) -> Result<i64, String> {
-    info!("[save_download_record] 收到请求: aweme_id={:?}, file_path={:?}", record.aweme_id, record.file_path);
-    state.db.save_download(&record).map_err(|e| {
-        error!("[save_download_record] 保存失败: {}", e);
-        e.to_string()
-    })
-}
-
-#[tauri::command(rename_all = "snake_case")]
 pub fn save_live_record_record(
     state: State<'_, AppState>,
     record: NewLiveRecord,
@@ -178,14 +149,6 @@ pub fn save_video_info(
     video: VideoInfo,
 ) -> Result<(), String> {
     state.db.save_video(&video).map_err(|e| e.to_string())
-}
-
-#[tauri::command(rename_all = "snake_case")]
-pub fn is_video_downloaded(
-    state: State<'_, AppState>,
-    aweme_id: String,
-) -> Result<bool, String> {
-    state.db.is_video_downloaded(&aweme_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -213,22 +176,30 @@ pub fn update_music_file_path(
     state.db.update_music_file_path(&music_id, &file_path).map_err(|e| e.to_string())
 }
 
+/// 从下载文件路径中提取用户文件夹路径。
+///
+/// 路径格式: `{download_path}/{app_name}/{mode}/{nickname}/[{subfolder}/]{filename}`
+/// 向上查找已知 mode 目录名，其下一级即为用户文件夹。
+/// 返回 None 表示路径格式无法识别（回退到单文件删除）。
+fn extract_user_download_dir(file_path: &str) -> Option<String> {
+    const MODES: &[&str] = &["post", "like", "mix", "collects", "live", "music", "one"];
+    let path = std::path::Path::new(file_path);
+    let mut current = path;
+    while let Some(parent) = current.parent() {
+        if let Some(name) = parent.file_name() {
+            let lower = name.to_string_lossy().to_lowercase();
+            if MODES.contains(&lower.as_str()) {
+                return Some(current.to_string_lossy().to_string());
+            }
+        }
+        current = parent;
+    }
+    None
+}
+
 // ============================================================
 // 删除（使用 delete_local_path 白名单校验）
 // ============================================================
-
-#[tauri::command(rename_all = "snake_case")]
-pub fn delete_download_record(
-    state: State<'_, AppState>,
-    id: i64,
-    delete_file: bool,
-) -> Result<(), String> {
-    if delete_file {
-        let file_path = state.db.get_download_file_path(id).map_err(|e| e.to_string())?;
-        crate::delete_local_path(file_path)?;
-    }
-    state.db.delete_download(id).map_err(|e| e.to_string())
-}
 
 #[tauri::command(rename_all = "snake_case")]
 pub fn delete_live_record(
@@ -255,8 +226,37 @@ pub fn delete_video_info(
 pub fn delete_user_info(
     state: State<'_, AppState>,
     sec_user_id: String,
+    delete_file: bool,
 ) -> Result<(), String> {
-    state.db.delete_user(&sec_user_id).map_err(|e| e.to_string())
+    if delete_file {
+        // 直播录制：单文件删除
+        let live_paths = state.db.get_user_live_file_paths(&sec_user_id).map_err(|e| e.to_string())?;
+        for path in live_paths {
+            let _ = crate::delete_local_path(Some(path));
+        }
+
+        // 下载文件：删除整个用户文件夹（含附属文件、空文件夹）
+        let download_paths = state.db.get_user_download_file_paths(&sec_user_id).map_err(|e| e.to_string())?;
+        let mut user_dirs: Vec<String> = Vec::new();
+        for path in &download_paths {
+            if let Some(dir) = extract_user_download_dir(path) {
+                if !user_dirs.contains(&dir) {
+                    user_dirs.push(dir);
+                }
+            }
+        }
+        if user_dirs.is_empty() {
+            // 回退：无法识别文件夹结构，逐文件删除
+            for path in &download_paths {
+                let _ = crate::delete_local_path(Some(path.clone()));
+            }
+        } else {
+            for dir in user_dirs {
+                let _ = crate::delete_local_path(Some(dir));
+            }
+        }
+    }
+    state.db.delete_user_cascade(&sec_user_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -270,6 +270,86 @@ pub fn delete_music_collection(
         crate::delete_local_path(file_path)?;
     }
     state.db.delete_music_collection(&music_id).map_err(|e| e.to_string())
+}
+
+// ============================================================
+// 批量删除（事务保证原子性）
+// ============================================================
+
+#[tauri::command(rename_all = "snake_case")]
+pub fn delete_video_info_batch(
+    state: State<'_, AppState>,
+    aweme_ids: Vec<String>,
+) -> Result<(), String> {
+    state.db.delete_videos_batch(&aweme_ids).map_err(|e| e.to_string())
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub fn delete_user_info_batch(
+    state: State<'_, AppState>,
+    sec_user_ids: Vec<String>,
+    delete_file: bool,
+) -> Result<(), String> {
+    if delete_file {
+        for id in &sec_user_ids {
+            // 直播录制：单文件删除
+            let live_paths = state.db.get_user_live_file_paths(id).map_err(|e| e.to_string())?;
+            for path in live_paths {
+                let _ = crate::delete_local_path(Some(path));
+            }
+
+            // 下载文件：删除整个用户文件夹（含附属文件、空文件夹）
+            let download_paths = state.db.get_user_download_file_paths(id).map_err(|e| e.to_string())?;
+            let mut user_dirs: Vec<String> = Vec::new();
+            for path in &download_paths {
+                if let Some(dir) = extract_user_download_dir(path) {
+                    if !user_dirs.contains(&dir) {
+                        user_dirs.push(dir);
+                    }
+                }
+            }
+            if user_dirs.is_empty() {
+                for path in &download_paths {
+                    let _ = crate::delete_local_path(Some(path.clone()));
+                }
+            } else {
+                for dir in user_dirs {
+                    let _ = crate::delete_local_path(Some(dir));
+                }
+            }
+        }
+    }
+    state.db.delete_users_batch(&sec_user_ids).map_err(|e| e.to_string())
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub fn delete_live_record_batch(
+    state: State<'_, AppState>,
+    ids: Vec<i64>,
+    delete_file: bool,
+) -> Result<(), String> {
+    if delete_file {
+        let file_paths = state.db.get_live_record_file_paths_batch(&ids).map_err(|e| e.to_string())?;
+        for path in file_paths {
+            let _ = crate::delete_local_path(Some(path));
+        }
+    }
+    state.db.delete_live_records_batch(&ids).map_err(|e| e.to_string())
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub fn delete_music_collection_batch(
+    state: State<'_, AppState>,
+    music_ids: Vec<String>,
+    delete_file: bool,
+) -> Result<(), String> {
+    if delete_file {
+        let file_paths = state.db.get_music_file_paths_batch(&music_ids).map_err(|e| e.to_string())?;
+        for path in file_paths {
+            let _ = crate::delete_local_path(Some(path));
+        }
+    }
+    state.db.delete_music_collection_batch(&music_ids).map_err(|e| e.to_string())
 }
 
 // ============================================================
@@ -318,11 +398,6 @@ pub fn export_data(
     let safe_path = crate::validate_path_in_project(&save_path)?;
 
     let json = match data_type.as_str() {
-        "downloads" => {
-            let records = state.db.get_downloads(i64::MAX, 0, None, None)
-                .map_err(|e| e.to_string())?;
-            serde_json::to_string_pretty(&records).map_err(|e| e.to_string())?
-        }
         "videos" => {
             let records = state.db.get_videos(i64::MAX, 0, None, None, None, None, None)
                 .map_err(|e| e.to_string())?;

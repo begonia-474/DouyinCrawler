@@ -253,7 +253,6 @@ export default function LibraryPage() {
                   </span>
                   <div className="grid grid-cols-2 gap-x-6 gap-y-3">
                     {[
-                      { label: "下载记录", value: health.download_count },
                       { label: "视频", value: health.video_count },
                       { label: "用户", value: health.user_count },
                       { label: "直播录制", value: health.live_count },

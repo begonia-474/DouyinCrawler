@@ -7,8 +7,15 @@ import { Header } from "@/components/layout/header";
 import { AnimateEntry } from "@/components/shared/animate-entry";
 import { Bezel } from "@/components/shared/bezel";
 import { Pagination } from "@/components/shared/pagination";
+import {
+  AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogFooter,
+  AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel,
+} from "@/components/ui/alert-dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Radio, Loader2, FolderOpen, Clock, Search, Trash2 } from "lucide-react";
 import { useDeleteLiveRecord } from "@/lib/mutations";
+import { openFolder } from "@/lib/api";
+import { dirname } from "@tauri-apps/api/path";
 import { useLiveRecordsQuery } from "@/lib/queries";
 import { usePagination } from "@/hooks/use-pagination";
 import type { LiveRecord } from "@/lib/tauri-types";
@@ -17,6 +24,8 @@ import { formatFileSize, formatTimestamp, formatDuration } from "@/lib/utils";
 export default function LibraryLivePage() {
   const { page, pageSize, setPage, offset } = usePagination();
   const [search, setSearch] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<LiveRecord | null>(null);
+  const [deleteFile, setDeleteFile] = useState(false);
   const deleteLive = useDeleteLiveRecord();
   const liveRecordsQuery = useLiveRecordsQuery({ limit: pageSize, offset });
   const items = liveRecordsQuery.data ?? [];
@@ -30,14 +39,13 @@ export default function LibraryLivePage() {
       )
     : items;
 
-  const handleDelete = (item: LiveRecord) => {
-    if (!window.confirm("确定删除这条直播录制记录？")) return;
-    const deleteFile = item.file_path
-      ? window.confirm("是否同时删除这条记录对应的本地文件？\n\n取消则只删除记录。")
-      : false;
-    deleteLive.mutate({ id: item.id, deleteFile }, {
+  const handleConfirmDelete = () => {
+    if (!deleteTarget) return;
+    deleteLive.mutate({ id: deleteTarget.id, deleteFile }, {
       onError: (err) => toast.error(err instanceof Error ? err.message : "删除失败"),
     });
+    setDeleteTarget(null);
+    setDeleteFile(false);
   };
 
   return (
@@ -121,11 +129,19 @@ export default function LibraryLivePage() {
                         {item.status === "completed" ? "已完成" : item.status}
                       </Badge>
                       {item.file_path && (
-                        <Button variant="ghost" size="icon-sm" title="打开文件所在文件夹">
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          title="打开文件所在文件夹"
+                          onClick={async () => {
+                            const dir = await dirname(item.file_path!);
+                            await openFolder(dir);
+                          }}
+                        >
                           <FolderOpen className="h-4 w-4" />
                         </Button>
                       )}
-                      <Button variant="ghost" size="icon-sm" title="删除记录" onClick={() => handleDelete(item)}>
+                      <Button variant="ghost" size="icon-sm" title="删除记录" onClick={() => setDeleteTarget(item)}>
                         <Trash2 className="h-4 w-4 text-destructive" />
                       </Button>
                     </div>
@@ -138,6 +154,27 @@ export default function LibraryLivePage() {
           </div>
         )}
       </div>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除</AlertDialogTitle>
+            <AlertDialogDescription>
+              确定删除这条直播录制记录？此操作不可撤销。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {deleteTarget?.file_path && (
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <Checkbox checked={deleteFile} onCheckedChange={(checked) => setDeleteFile(checked === true)} />
+              同时删除本地文件
+            </label>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setDeleteFile(false)}>取消</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={handleConfirmDelete}>删除</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

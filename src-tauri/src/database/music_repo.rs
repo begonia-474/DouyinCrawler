@@ -183,4 +183,31 @@ impl super::connection::Database {
         conn.execute("DELETE FROM music_collection WHERE music_id = ?1", rusqlite::params![music_id])?;
         Ok(())
     }
+
+    /// 批量删除音乐收藏（事务保证原子性）
+    pub fn delete_music_collection_batch(&self, music_ids: &[String]) -> Result<()> {
+        self.with_transaction(|tx| {
+            let mut stmt = tx.prepare("DELETE FROM music_collection WHERE music_id = ?1")?;
+            for id in music_ids {
+                stmt.execute(rusqlite::params![id])?;
+            }
+            Ok(())
+        })
+    }
+
+    /// 批量查询音乐收藏的文件路径
+    pub fn get_music_file_paths_batch(&self, music_ids: &[String]) -> Result<Vec<String>> {
+        let conn = lock_conn!(self);
+        let mut stmt = conn.prepare(
+            "SELECT file_path FROM music_collection WHERE music_id = ?1 AND file_path IS NOT NULL AND file_path != ''"
+        )?;
+        let mut paths = Vec::new();
+        for id in music_ids {
+            let mut rows = stmt.query_map(rusqlite::params![id], |row| row.get::<_, String>(0))?;
+            if let Some(row) = rows.next() {
+                paths.push(row?);
+            }
+        }
+        Ok(paths)
+    }
 }

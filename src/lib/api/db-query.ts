@@ -1,30 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
-  DownloadRecord, DownloadStats, LiveRecord, VideoInfo, UserInfo,
+  LiveRecord, VideoInfo, UserInfo,
   VideoStats, UserStats, TrendPoint, AuthorStat, StorageStat, DbHealth,
 } from "../tauri-types";
 
 // ============================================================
 // 数据库查询 (Tauri 直接调用)
 // ============================================================
-
-export async function getDownloads(params: {
-  limit?: number;
-  offset?: number;
-  status?: string;
-  download_type?: string;
-}): Promise<DownloadRecord[]> {
-  return invoke("get_downloads", {
-    limit: params.limit ?? 20,
-    offset: params.offset ?? 0,
-    status: params.status ?? null,
-    download_type: params.download_type ?? null,
-  });
-}
-
-export async function getDownloadStats(): Promise<DownloadStats> {
-  return invoke("get_download_stats");
-}
 
 export async function getLiveRecords(params: {
   limit?: number;
@@ -128,6 +110,3 @@ export async function getDbPath(): Promise<string> {
   return invoke("get_db_path");
 }
 
-export async function isVideoDownloaded(awemeId: string): Promise<boolean> {
-  return invoke("is_video_downloaded", { aweme_id: awemeId });
-}

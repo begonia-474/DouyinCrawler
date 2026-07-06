@@ -7,6 +7,11 @@ import { AnimateEntry } from "@/components/shared/animate-entry";
 import { Bezel } from "@/components/shared/bezel";
 import { SortDropdown } from "@/components/shared/sort-dropdown";
 import { Pagination } from "@/components/shared/pagination";
+import {
+  AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogFooter,
+  AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel,
+} from "@/components/ui/alert-dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Users, Loader2, Search, Trash2 } from "lucide-react";
 import { useDeleteUserInfo } from "@/lib/mutations";
 import { useUsersQuery, useUserCountQuery } from "@/lib/queries";
@@ -27,6 +32,8 @@ export default function LibraryUserInfoPage() {
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState("updated_at");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  const [deleteTarget, setDeleteTarget] = useState<UserInfo | null>(null);
+  const [deleteFile, setDeleteFile] = useState(false);
   const deleteUser = useDeleteUserInfo();
 
   const itemsQuery = useUsersQuery({
@@ -46,11 +53,13 @@ export default function LibraryUserInfoPage() {
     resetPage();
   };
 
-  const handleDelete = (item: UserInfo) => {
-    if (!window.confirm("确定删除这条用户记录？")) return;
-    deleteUser.mutate(item.sec_user_id, {
+  const handleConfirmDelete = () => {
+    if (!deleteTarget) return;
+    deleteUser.mutate({ secUserId: deleteTarget.sec_user_id, deleteFile }, {
       onError: (err) => toast.error(err instanceof Error ? err.message : "删除失败"),
     });
+    setDeleteTarget(null);
+    setDeleteFile(false);
   };
 
   return (
@@ -153,7 +162,7 @@ export default function LibraryUserInfoPage() {
                         )}
                       </div>
                     </div>
-                    <Button variant="ghost" size="icon-sm" title="删除记录" onClick={() => handleDelete(item)}>
+                    <Button variant="ghost" size="icon-sm" title="删除记录" onClick={() => setDeleteTarget(item)}>
                       <Trash2 className="h-4 w-4 text-destructive" />
                     </Button>
                   </div>
@@ -165,6 +174,25 @@ export default function LibraryUserInfoPage() {
           </div>
         )}
       </div>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除</AlertDialogTitle>
+            <AlertDialogDescription>
+              确定删除这条用户记录？将同时清理该用户的视频/图片元数据和直播录制记录。此操作不可撤销。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <Checkbox checked={deleteFile} onCheckedChange={(checked) => setDeleteFile(checked === true)} />
+            同时删除本地文件
+          </label>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setDeleteFile(false)}>取消</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={handleConfirmDelete}>删除</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

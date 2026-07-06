@@ -47,20 +47,6 @@ pub const CREATE_TABLES_SQL: &str = "
         mix_name TEXT,
         updated_at INTEGER DEFAULT 0
     );
-    CREATE TABLE IF NOT EXISTS download_history (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        aweme_id TEXT,
-        download_type TEXT NOT NULL DEFAULT 'video',
-        title TEXT,
-        author_nickname TEXT,
-        author_sec_uid TEXT,
-        file_path TEXT,
-        file_size INTEGER DEFAULT 0,
-        cover_url TEXT,
-        status TEXT NOT NULL DEFAULT 'completed',
-        error_msg TEXT,
-        created_at INTEGER NOT NULL
-    );
     CREATE TABLE IF NOT EXISTS live_records (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         room_id TEXT,
@@ -88,10 +74,6 @@ pub const CREATE_TABLES_SQL: &str = "
         status TEXT NOT NULL DEFAULT 'collected',
         created_at INTEGER NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS idx_download_created ON download_history(created_at);
-    CREATE INDEX IF NOT EXISTS idx_download_type ON download_history(download_type);
-    CREATE INDEX IF NOT EXISTS idx_download_status ON download_history(status);
-    CREATE INDEX IF NOT EXISTS idx_download_author ON download_history(author_sec_uid);
     CREATE INDEX IF NOT EXISTS idx_live_started ON live_records(started_at);
     CREATE INDEX IF NOT EXISTS idx_music_created ON music_collection(created_at);
 ";
@@ -196,10 +178,6 @@ pub const MIGRATE_V4_LIVE_COVER: &[&str] = &[
     "ALTER TABLE live_records ADD COLUMN cover_url TEXT",
 ];
 
-pub const MIGRATE_V5_DOWNLOAD_UNIQUE: &[&str] = &[
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_download_unique ON download_history(aweme_id, file_path)",
-];
-
 pub const MIGRATE_V6_LIVE_UNIQUE: &[&str] = &[
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_live_unique ON live_records(room_id, started_at)",
 ];
@@ -243,6 +221,23 @@ pub const MIGRATE_V7_TASK_TABLES: &[&str] = &[
 
 pub const MIGRATE_V8_TASK_AUTHOR: &[&str] = &[
     "ALTER TABLE download_tasks ADD COLUMN author_nickname TEXT",
+];
+
+pub const MIGRATE_V9_LIVE_SEC_USER_INDEX: &[&str] = &[
+    "CREATE INDEX IF NOT EXISTS idx_live_sec_user_id ON live_records(sec_user_id)",
+];
+
+pub const MIGRATE_V10_TASK_ITEMS_AUTHOR: &[&str] = &[
+    "ALTER TABLE download_task_items ADD COLUMN author_sec_uid TEXT",
+];
+
+pub const MIGRATE_V10_DROP_DOWNLOAD_HISTORY: &[&str] = &[
+    "DROP TABLE IF EXISTS download_history",
+    "DROP INDEX IF EXISTS idx_download_created",
+    "DROP INDEX IF EXISTS idx_download_type",
+    "DROP INDEX IF EXISTS idx_download_status",
+    "DROP INDEX IF EXISTS idx_download_author",
+    "DROP INDEX IF EXISTS idx_download_unique",
 ];
 
 /// Execute migration SQLs, ignoring duplicate column/index errors
@@ -292,10 +287,6 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         info!("[DB] 迁移 v4: live_records 添加 cover_url");
         run_migration_sql(conn, MIGRATE_V4_LIVE_COVER)?;
     }
-    if version < 5 {
-        info!("[DB] 迁移 v5: download_history 添加唯一索引");
-        run_migration_sql(conn, MIGRATE_V5_DOWNLOAD_UNIQUE)?;
-    }
     if version < 6 {
         info!("[DB] 迁移 v6: live_records 添加唯一索引 (room_id + started_at)");
         run_migration_sql(conn, MIGRATE_V6_LIVE_UNIQUE)?;
@@ -308,13 +299,22 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         info!("[DB] 迁移 v8: download_tasks 添加 author_nickname");
         run_migration_sql(conn, MIGRATE_V8_TASK_AUTHOR)?;
     }
+    if version < 9 {
+        info!("[DB] 迁移 v9: live_records 添加 sec_user_id 索引");
+        run_migration_sql(conn, MIGRATE_V9_LIVE_SEC_USER_INDEX)?;
+    }
+    if version < 10 {
+        info!("[DB] 迁移 v10: task_items 添加 author_sec_uid，移除 download_history");
+        run_migration_sql(conn, MIGRATE_V10_TASK_ITEMS_AUTHOR)?;
+        run_migration_sql(conn, MIGRATE_V10_DROP_DOWNLOAD_HISTORY)?;
+    }
 
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64;
     conn.execute(
-        "INSERT OR REPLACE INTO _metadata (name, value) VALUES ('schema_version', '8')",
+        "INSERT OR REPLACE INTO _metadata (name, value) VALUES ('schema_version', '10')",
         [],
     )?;
     conn.execute(

@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   deleteVideoInfo, deleteUserInfo, deleteLiveRecord,
   deleteDownloadTask, deleteMusicCollection,
+  deleteVideoInfoBatch, deleteUserInfoBatch, deleteLiveRecordBatch, deleteMusicCollectionBatch,
   downloadMusic, saveMusicCollectionBatch, updateMusicFilePath,
 } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
@@ -27,11 +28,18 @@ export function useDeleteVideoInfo() {
 export function useDeleteUserInfo() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (secUserId: string) => deleteUserInfo(secUserId),
+    mutationFn: ({ secUserId, deleteFile }: { secUserId: string; deleteFile?: boolean }) =>
+      deleteUserInfo(secUserId, deleteFile),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.users() });
       qc.invalidateQueries({ queryKey: queryKeys.userCount() });
       qc.invalidateQueries({ queryKey: queryKeys.userStats() });
+      // 级联删除会同时清理 video_info 和 live_records
+      qc.invalidateQueries({ queryKey: queryKeys.videos() });
+      qc.invalidateQueries({ queryKey: queryKeys.videoCount() });
+      qc.invalidateQueries({ queryKey: queryKeys.videoStats() });
+      qc.invalidateQueries({ queryKey: queryKeys.liveRecords() });
+      qc.invalidateQueries({ queryKey: queryKeys.liveRecordCount() });
     },
   });
 }
@@ -104,6 +112,65 @@ export function useUpdateMusicFilePath() {
   return useMutation({
     mutationFn: ({ musicId, filePath }: { musicId: string; filePath: string }) =>
       updateMusicFilePath(musicId, filePath),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.musicCollection() });
+      qc.invalidateQueries({ queryKey: queryKeys.musicCount() });
+    },
+  });
+}
+
+// ============================================================
+// 批量删除 mutations
+// ============================================================
+
+export function useDeleteVideoInfoBatch() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (awemeIds: string[]) => deleteVideoInfoBatch(awemeIds),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.videos() });
+      qc.invalidateQueries({ queryKey: queryKeys.videoCount() });
+      qc.invalidateQueries({ queryKey: queryKeys.videoStats() });
+      qc.invalidateQueries({ queryKey: queryKeys.userStats() });
+    },
+  });
+}
+
+export function useDeleteUserInfoBatch() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ secUserIds, deleteFile }: { secUserIds: string[]; deleteFile?: boolean }) =>
+      deleteUserInfoBatch(secUserIds, deleteFile),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.users() });
+      qc.invalidateQueries({ queryKey: queryKeys.userCount() });
+      qc.invalidateQueries({ queryKey: queryKeys.userStats() });
+      qc.invalidateQueries({ queryKey: queryKeys.videos() });
+      qc.invalidateQueries({ queryKey: queryKeys.videoCount() });
+      qc.invalidateQueries({ queryKey: queryKeys.videoStats() });
+      qc.invalidateQueries({ queryKey: queryKeys.liveRecords() });
+      qc.invalidateQueries({ queryKey: queryKeys.liveRecordCount() });
+    },
+  });
+}
+
+export function useDeleteLiveRecordBatch() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ids, deleteFile }: { ids: number[]; deleteFile?: boolean }) =>
+      deleteLiveRecordBatch(ids, deleteFile),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.liveRecords() });
+      qc.invalidateQueries({ queryKey: queryKeys.liveRecordCount() });
+    },
+  });
+}
+
+export function useDeleteMusicCollectionBatch() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ musicIds, deleteFile }: { musicIds: string[]; deleteFile?: boolean }) =>
+      deleteMusicCollectionBatch(musicIds, deleteFile),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.musicCollection() });
       qc.invalidateQueries({ queryKey: queryKeys.musicCount() });

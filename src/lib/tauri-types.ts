@@ -11,16 +11,12 @@
 
 // Re-export 与 bindings.ts 一致的类型（单一来源）
 export type {
-  DayStat,
   UserStats,
   VideoTypeStat,
   UserInfo,
-  DownloadRecord,
   VideoStats,
   MusicCollection,
-  TypeStat,
   LiveRecord,
-  DownloadStats,
   TrendPoint,
   AuthorStat,
   StorageStat,

@@ -16,7 +16,7 @@ from core.bridge.py_bridge import (
     start_live_record, stop_live_record, get_live_status,
 )
 from core.bridge.db_bridge import (
-    save_download_record, save_video_info, save_user_info,
+    save_video_info, save_user_info,
     save_live_record, has_user,
 )
 from core.bridge.events import emit, set_emit_func
@@ -34,6 +34,6 @@ __all__ = [
     "get_tab_feed", "get_follow_feed", "get_friend_feed",
     "get_post_stats", "search_videos",
     "emit", "set_emit_func",
-    "save_download_record", "save_video_info", "save_user_info",
+    "save_video_info", "save_user_info",
     "save_live_record", "has_user",
 ]

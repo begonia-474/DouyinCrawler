@@ -62,39 +62,6 @@ export interface AppError {
 // 数据库模型（对齐 Rust database::models）
 // ============================================================
 
-export interface DownloadRecord {
-  id: number;
-  aweme_id: string | null;
-  download_type: string;
-  title: string | null;
-  author_nickname: string | null;
-  author_sec_uid: string | null;
-  file_path: string | null;
-  file_size: number;
-  cover_url: string | null;
-  status: string;
-  error_msg: string | null;
-  created_at: number;
-}
-
-export interface TypeStat {
-  download_type: string;
-  cnt: number;
-  size: number;
-}
-
-export interface DayStat {
-  day: string;
-  cnt: number;
-}
-
-export interface DownloadStats {
-  total_count: number;
-  total_size: number;
-  by_type: TypeStat[];
-  by_day: DayStat[];
-}
-
 export interface LiveRecord {
   id: number;
   room_id: string | null;
@@ -247,7 +214,6 @@ export interface StorageStat {
 }
 
 export interface DbHealth {
-  download_count: number;
   video_count: number;
   user_count: number;
   live_count: number;

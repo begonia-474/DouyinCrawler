@@ -52,7 +52,6 @@ from core.download.downloader import Downloader, format_filename
 # ── 桥接层 (bridge/) ──
 from core.bridge.handler import DouyinHandler
 from core.bridge.db_bridge import (
-    save_download_record,
     save_video_info,
     save_user_info,
     save_live_record,
@@ -153,7 +152,7 @@ __all__ = [
     # 桥接层 — handler
     "DouyinHandler",
     # 桥接层 — db_bridge（过渡路径，新代码走 Rust 写入）
-    "save_download_record", "save_video_info", "save_user_info",
+    "save_video_info", "save_user_info",
     "save_live_record", "has_user",
     # 桥接层 — events
     "emit", "set_emit_func",

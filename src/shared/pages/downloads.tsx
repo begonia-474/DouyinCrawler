@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useMergedTasks } from "@/hooks/use-merged-tasks";
 import { Header } from "@/components/layout/header";
@@ -14,6 +14,11 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import { TaskCard } from "@/components/shared/task-card";
+import {
+  AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogFooter,
+  AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel,
+} from "@/components/ui/alert-dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Download,
   CheckCircle2,
@@ -38,6 +43,9 @@ export default function DownloadsPage() {
   const { tasks: liveTasks, connect, clearCompleted, removeTask } = useTaskStore();
   const deleteLive = useDeleteLiveRecord();
   const deleteTask = useDeleteDownloadTask();
+
+  const [deleteLiveTarget, setDeleteLiveTarget] = useState<LiveRecord | null>(null);
+  const [deleteFile, setDeleteFile] = useState(false);
 
   useEffect(() => {
     connect();
@@ -72,16 +80,13 @@ export default function DownloadsPage() {
     }
   };
 
-  const askDeleteFile = (filePath: string | null) => {
-    if (!filePath) return false;
-    return window.confirm("是否同时删除这条记录对应的本地文件？\n\n取消则只删除记录。");
-  };
-
-  const handleDeleteLiveRecord = (item: LiveRecord) => {
-    if (!window.confirm("确定删除这条直播录制记录？")) return;
-    deleteLive.mutate({ id: item.id, deleteFile: askDeleteFile(item.file_path) }, {
+  const handleConfirmDeleteLive = () => {
+    if (!deleteLiveTarget) return;
+    deleteLive.mutate({ id: deleteLiveTarget.id, deleteFile }, {
       onError: (err) => toast.error(err instanceof Error ? err.message : "删除失败"),
     });
+    setDeleteLiveTarget(null);
+    setDeleteFile(false);
   };
 
   const handleRemoveTask = (taskId: string) => {
@@ -246,7 +251,7 @@ export default function DownloadsPage() {
                       variant="ghost"
                       size="icon-sm"
                       title="删除记录"
-                      onClick={() => handleDeleteLiveRecord(item)}
+                      onClick={() => setDeleteLiveTarget(item)}
                     >
                       <Trash2 className="h-4 w-4 text-destructive" />
                     </Button>
@@ -257,6 +262,27 @@ export default function DownloadsPage() {
           )}
         </TabsContent>
       </Tabs>
+
+      <AlertDialog open={!!deleteLiveTarget} onOpenChange={(open) => !open && setDeleteLiveTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除</AlertDialogTitle>
+            <AlertDialogDescription>
+              确定删除这条直播录制记录？此操作不可撤销。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {deleteLiveTarget?.file_path && (
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <Checkbox checked={deleteFile} onCheckedChange={(checked) => setDeleteFile(checked === true)} />
+              同时删除本地文件
+            </label>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setDeleteFile(false)}>取消</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={handleConfirmDeleteLive}>删除</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

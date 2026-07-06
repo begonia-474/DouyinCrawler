@@ -46,13 +46,7 @@ impl Database {
         conn.execute_batch(super::migration::CREATE_TABLES_SQL)?;
         // Schema 迁移
         super::migration::migrate(&conn)?;
-        // 验证数据
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM download_history",
-            [],
-            |row| row.get(0),
-        ).unwrap_or(0);
-        info!("[DB] 数据库打开成功，download_history 表有 {} 条记录", count);
+        info!("[DB] 数据库打开成功");
         Ok(Database {
             conn: Mutex::new(conn),
             db_path: path.clone(),

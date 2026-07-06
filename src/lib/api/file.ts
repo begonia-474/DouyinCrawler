@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { openPath } from "@tauri-apps/plugin-opener";
+import { resolve } from "@tauri-apps/api/path";
 
 // ============================================================
 // 文件管理
@@ -7,7 +8,8 @@ import { openPath } from "@tauri-apps/plugin-opener";
 
 /** 在系统文件管理器中打开路径 */
 export async function openFolder(path: string): Promise<void> {
-  await openPath(path);
+  const absolutePath = await resolve(path);
+  await openPath(absolutePath);
 }
 
 /** 导出数据为 JSON 文件 */

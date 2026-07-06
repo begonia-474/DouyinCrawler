@@ -168,4 +168,31 @@ impl super::connection::Database {
         conn.execute("DELETE FROM user_info WHERE sec_user_id = ?1", rusqlite::params![sec_user_id])?;
         Ok(())
     }
+
+    /// 级联删除用户及其关联的资料库记录（video_info + live_records + user_info）
+    ///
+    /// 在单个事务中执行，保证原子性。download_history 不受影响。
+    pub fn delete_user_cascade(&self, sec_user_id: &str) -> Result<()> {
+        self.with_transaction(|tx| {
+            tx.execute("DELETE FROM video_info WHERE author_sec_uid = ?1", rusqlite::params![sec_user_id])?;
+            tx.execute("DELETE FROM live_records WHERE sec_user_id = ?1", rusqlite::params![sec_user_id])?;
+            tx.execute("DELETE FROM user_info WHERE sec_user_id = ?1", rusqlite::params![sec_user_id])?;
+            Ok(())
+        })
+    }
+
+    /// 批量级联删除用户及其关联记录（事务保证原子性）
+    pub fn delete_users_batch(&self, sec_user_ids: &[String]) -> Result<()> {
+        self.with_transaction(|tx| {
+            let mut stmt_video = tx.prepare("DELETE FROM video_info WHERE author_sec_uid = ?1")?;
+            let mut stmt_live = tx.prepare("DELETE FROM live_records WHERE sec_user_id = ?1")?;
+            let mut stmt_user = tx.prepare("DELETE FROM user_info WHERE sec_user_id = ?1")?;
+            for id in sec_user_ids {
+                stmt_video.execute(rusqlite::params![id])?;
+                stmt_live.execute(rusqlite::params![id])?;
+                stmt_user.execute(rusqlite::params![id])?;
+            }
+            Ok(())
+        })
+    }
 }

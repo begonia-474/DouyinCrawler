@@ -41,7 +41,6 @@ pub trait TaskRepository {
         item: &NewTaskItem,
         file_path: Option<&str>,
         file_size: i64,
-        download_record: &NewDownloadRecord,
         video_info: Option<&VideoInfo>,
         user_info: Option<&UserInfo>,
     ) -> Result<()>;
@@ -205,10 +204,10 @@ impl super::connection::Database {
             .as_secs() as i64;
         conn.execute(
             "INSERT OR IGNORE INTO download_task_items \
-             (task_id, aweme_id, title, author_nickname, cover_url, status, created_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6)",
+             (task_id, aweme_id, title, author_nickname, author_sec_uid, cover_url, status, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7)",
             rusqlite::params![
-                item.task_id, item.aweme_id, item.title, item.author_nickname, item.cover_url, now,
+                item.task_id, item.aweme_id, item.title, item.author_nickname, item.author_sec_uid, item.cover_url, now,
             ],
         )?;
         Ok(())
@@ -276,11 +275,10 @@ impl super::connection::Database {
     /// 事务覆盖：
     /// 1. 创建任务子项 (download_task_items INSERT)
     /// 2. 更新任务子项状态为 completed
-    /// 3. 保存下载记录 (download_history)
-    /// 4. 保存视频信息 (video_info)
-    /// 5. 保存用户信息 (user_info) — 仅当用户不存在时
-    /// 6. 更新任务计数 (download_tasks)
-    /// 7. 更新任务状态为 completed (download_tasks)
+    /// 3. 保存视频信息 (video_info)
+    /// 4. 保存用户信息 (user_info) — 仅当用户不存在时
+    /// 5. 更新任务计数 (download_tasks)
+    /// 6. 更新任务状态为 completed (download_tasks)
     ///
     /// 任何一步失败，整个事务回滚。
     pub fn complete_single_download(
@@ -289,7 +287,6 @@ impl super::connection::Database {
         item: &NewTaskItem,
         file_path: Option<&str>,
         file_size: i64,
-        download_record: &NewDownloadRecord,
         video_info: Option<&VideoInfo>,
         user_info: Option<&UserInfo>,
     ) -> Result<()> {
@@ -301,9 +298,9 @@ impl super::connection::Database {
         self.with_transaction(|tx| {
             // 1. 创建任务子项
             tx.execute(
-                "INSERT INTO download_task_items (task_id, aweme_id, title, author_nickname, cover_url, created_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                rusqlite::params![item.task_id, item.aweme_id, item.title, item.author_nickname, item.cover_url, now],
+                "INSERT INTO download_task_items (task_id, aweme_id, title, author_nickname, author_sec_uid, cover_url, created_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![item.task_id, item.aweme_id, item.title, item.author_nickname, item.author_sec_uid, item.cover_url, now],
             )?;
 
             // 2. 更新任务子项状态为 completed
@@ -314,15 +311,12 @@ impl super::connection::Database {
                 rusqlite::params![file_path, file_size, task_id, aweme_id],
             )?;
 
-            // 3. 保存下载记录
-            Self::save_download_inner(tx, download_record)?;
-
-            // 4. 保存视频信息
+            // 3. 保存视频信息
             if let Some(video) = video_info {
                 Self::save_video_inner(tx, video)?;
             }
 
-            // 5. 保存用户信息（仅当用户不存在时）
+            // 4. 保存用户信息（仅当用户不存在时）
             if let Some(user) = user_info {
                 let sec_uid = &user.sec_user_id;
                 if !sec_uid.is_empty() {
@@ -337,7 +331,7 @@ impl super::connection::Database {
                 }
             }
 
-            // 6. 更新任务计数
+            // 5. 更新任务计数
             tx.execute(
                 "UPDATE download_tasks SET \
                  completed = (SELECT COUNT(*) FROM download_task_items WHERE task_id = ?1 AND status = 'completed'), \
@@ -349,7 +343,7 @@ impl super::connection::Database {
                 rusqlite::params![task_id, now],
             )?;
 
-            // 7. 更新任务状态为 completed
+            // 6. 更新任务状态为 completed
             tx.execute(
                 "UPDATE download_tasks SET status = 'completed', updated_at = ?1 WHERE id = ?2",
                 rusqlite::params![now, task_id],
@@ -362,7 +356,7 @@ impl super::connection::Database {
     pub fn get_task_items(&self, task_id: &str, status: Option<String>) -> Result<Vec<TaskItem>> {
         let conn = lock_conn!(self);
         let mut sql = String::from(
-            "SELECT id, task_id, aweme_id, title, author_nickname, cover_url, file_path, file_size, status, error_msg, created_at \
+            "SELECT id, task_id, aweme_id, title, author_nickname, author_sec_uid, cover_url, file_path, file_size, status, error_msg, created_at \
              FROM download_task_items WHERE task_id = ?1"
         );
         let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -385,6 +379,7 @@ impl super::connection::Database {
                 aweme_id: row.get("aweme_id")?,
                 title: row.get("title")?,
                 author_nickname: row.get("author_nickname")?,
+                author_sec_uid: row.get("author_sec_uid")?,
                 cover_url: row.get("cover_url")?,
                 file_path: row.get("file_path")?,
                 file_size: row.get("file_size")?,
@@ -474,10 +469,9 @@ impl TaskRepository for super::connection::Database {
         item: &NewTaskItem,
         file_path: Option<&str>,
         file_size: i64,
-        download_record: &NewDownloadRecord,
         video_info: Option<&VideoInfo>,
         user_info: Option<&UserInfo>,
     ) -> Result<()> {
-        self.complete_single_download(task_id, item, file_path, file_size, download_record, video_info, user_info)
+        self.complete_single_download(task_id, item, file_path, file_size, video_info, user_info)
     }
 }

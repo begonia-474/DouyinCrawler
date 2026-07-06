@@ -1,10 +1,16 @@
 import { useState } from "react";
+import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Header } from "@/components/layout/header";
 import { AnimateEntry } from "@/components/shared/animate-entry";
 import { Bezel } from "@/components/shared/bezel";
-import { Image, Music, Loader2, Search, Clock, Heart, MessageCircle, Share2, Bookmark } from "lucide-react";
+import {
+  AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogFooter,
+  AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel,
+} from "@/components/ui/alert-dialog";
+import { Image, Music, Loader2, Search, Clock, Heart, MessageCircle, Share2, Bookmark, Trash2 } from "lucide-react";
+import { useDeleteVideoInfo } from "@/lib/mutations";
 import { useVideosQuery, useVideoCountQuery } from "@/lib/queries";
 import type { VideoInfo } from "@/lib/tauri-types";
 import { formatTimestamp } from "@/lib/utils";
@@ -22,9 +28,20 @@ interface VideoListProps {
 export function VideoList({ postType, title }: VideoListProps) {
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<VideoInfo | null>(null);
   const pageSize = 20;
+  const deleteVideo = useDeleteVideoInfo();
 
   const Icon = typeIcons[postType] || Image;
+
+  const handleConfirmDelete = () => {
+    if (!deleteTarget) return;
+    deleteVideo.mutate(deleteTarget.aweme_id, {
+      onError: (err) => toast.error(err instanceof Error ? err.message : "删除失败"),
+    });
+    setDeleteTarget(null);
+  };
+
   const itemsQuery = useVideosQuery({
     limit: pageSize,
     offset: page * pageSize,
@@ -131,6 +148,9 @@ export function VideoList({ postType, title }: VideoListProps) {
                         )}
                       </div>
                     </div>
+                    <Button variant="ghost" size="icon-sm" title="删除记录" onClick={() => setDeleteTarget(item)}>
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
                   </div>
                 </Bezel>
               </AnimateEntry>
@@ -150,6 +170,21 @@ export function VideoList({ postType, title }: VideoListProps) {
           </div>
         )}
       </div>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除</AlertDialogTitle>
+            <AlertDialogDescription>
+              确定删除这条记录？此操作不可撤销。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={handleConfirmDelete}>删除</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

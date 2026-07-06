@@ -12,12 +12,6 @@
 注意：任务生命周期函数（create_task, update_task_status, create_task_item, update_task_item_status）
 已迁移到 Rust TaskApplicationService，不再通过 Python 桥接注册。
 
-P2-07 过渡状态：
-- save_live_record: [deprecated] 不再被 live_manager.py 调用，所有 live 记录通过 Rust emit 持久化。
-- save_download_record / save_video_info / save_user_info: 过渡路径，
-  P2-07 后新代码应通过 Rust TaskApplicationService 写入。
-- save_batch_results: 仍是下载流程的活跃路径，Phase 3 将迁移到 Rust。
-
 数据流：
     Python 业务逻辑 → db.py（透传）→ db_bridge.py（转发）→ Rust PyO3 closure（清洗+写入）→ db.rs（SQL）
 """
@@ -28,33 +22,6 @@ from pathlib import Path
 from core import db_bridge
 
 logger = logging.getLogger(__name__)
-
-
-def save_download_record(
-    aweme_id: str = None,
-    download_type: str = "video",
-    title: str = None,
-    author_nickname: str = None,
-    author_sec_uid: str = None,
-    file_path: str = None,
-    file_size: int = 0,
-    cover_url: str = None,
-    status: str = "completed",
-    error_msg: str = None,
-) -> bool:
-    """保存下载记录（通过 Rust 桥接）"""
-    return db_bridge.save_download_record({
-        "aweme_id": aweme_id,
-        "download_type": download_type,
-        "title": title,
-        "author_nickname": author_nickname,
-        "author_sec_uid": author_sec_uid,
-        "file_path": file_path,
-        "file_size": file_size,
-        "cover_url": cover_url,
-        "status": status,
-        "error_msg": error_msg,
-    })
 
 
 def save_video_info(video_data: dict) -> bool:
@@ -90,52 +57,30 @@ def save_live_record(record: dict) -> bool:
 
 
 def save_batch_results(results: list, download_type: str = "batch") -> dict:
-    """批量保存下载结果
+    """批量保存下载结果（video_info + user_info）
 
     Args:
         results: [{"path": str, "detail": dict}, ...]
-        download_type: 下载类型
+        download_type: 下载类型（已废弃，保留参数兼容）
 
     Returns:
         {"saved": int, "failed": int}
     """
     saved = 0
     failed = 0
-    seen_users = set()  # 问题3修复：避免同一用户重复 upsert
+    seen_users = set()
 
     for item in results:
         detail = item.get("detail", {})
-        file_path = item.get("path")
 
-        # 问题2修复：从文件获取实际大小
-        file_size = 0
-        if file_path:
-            try:
-                file_size = Path(file_path).stat().st_size
-            except (OSError, ValueError):
-                pass
-
-        # 1. 保存下载记录
-        if save_download_record(
-            aweme_id=detail.get("aweme_id"),
-            download_type=download_type,
-            title=detail.get("desc"),
-            author_nickname=detail.get("author_nickname"),
-            author_sec_uid=detail.get("author_sec_uid"),
-            file_path=file_path,
-            file_size=file_size,
-            cover_url=detail.get("cover_url"),
-            status="completed",
-        ):
+        # 1. 保存视频信息
+        if detail.get("aweme_id"):
+            save_video_info(detail)
             saved += 1
         else:
             failed += 1
 
-        # 2. 保存视频信息
-        if detail.get("aweme_id"):
-            save_video_info(detail)
-
-        # 3. 保存用户信息（问题1+3修复：去重 + has_user 检查，避免不完整数据覆盖）
+        # 2. 保存用户信息（去重 + has_user 检查，避免不完整数据覆盖）
         sec_uid = detail.get("author_sec_uid")
         if sec_uid and sec_uid not in seen_users:
             seen_users.add(sec_uid)

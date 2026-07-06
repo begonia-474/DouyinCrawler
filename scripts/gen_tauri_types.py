@@ -38,16 +38,12 @@ VEC_PATTERN = re.compile(r"Vec<(\w+)>")
 
 # re-export 自 bindings.ts 的类型（specta 编译期生成，与 db.rs 定义一致）
 REEXPORT_TYPES = [
-    "DayStat",
     "UserStats",
     "VideoTypeStat",
     "UserInfo",
-    "DownloadRecord",
     "VideoStats",
     "MusicCollection",
-    "TypeStat",
     "LiveRecord",
-    "DownloadStats",
     "TrendPoint",
     "AuthorStat",
     "StorageStat",

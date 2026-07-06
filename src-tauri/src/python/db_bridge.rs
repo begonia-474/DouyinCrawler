@@ -1,7 +1,6 @@
 //! 数据库桥接模块 — Rust 侧注入
 //!
-//! 在应用启动时（`register_db_bridge()`），将 5 个 PyO3 闭包注入到 Python 的 `core.db_bridge` 模块：
-//! - `_save_download_record`: 提取字段 → `NewDownloadRecord` → `db.save_download()`
+//! 在应用启动时（`register_db_bridge()`），将 4 个 PyO3 闭包注入到 Python 的 `core.db_bridge` 模块：
 //! - `_save_video_info`: JSON 中转 → `VideoInfo` → `db.save_video()`
 //! - `_save_user_info`: JSON 中转 → `UserInfo` → `db.save_user()`
 //! - `_save_live_record`: 提取字段 → `NewLiveRecord` → `db.save_live_record()`
@@ -42,56 +41,6 @@ pub fn register_db_bridge(app_handle: &AppHandle) {
                 return;
             }
         };
-
-        // 注册 save_download_record
-        let h1 = app_handle.clone();
-        let save_download_fn = pyo3::types::PyCFunction::new_closure_bound(
-            py,
-            None,
-            None,
-            move |args: &Bound<'_, pyo3::types::PyTuple>, _kwargs: Option<&Bound<'_, pyo3::types::PyDict>>| -> PyResult<()> {
-                let py = args.py();
-                let data = args.get_item(0)?;
-                let state = h1.state::<crate::state::AppState>();
-
-                // 从 Python dict 提取字段
-                let aweme_id: Option<String> = data.get_item("aweme_id").ok().and_then(|v| v.extract().ok());
-                let download_type: String = data.get_item("download_type")?.extract()?;
-                let title: Option<String> = data.get_item("title").ok().and_then(|v| v.extract().ok());
-                let author_nickname: Option<String> = data.get_item("author_nickname").ok().and_then(|v| v.extract().ok());
-                let author_sec_uid: Option<String> = data.get_item("author_sec_uid").ok().and_then(|v| v.extract().ok());
-                let file_path: Option<String> = data.get_item("file_path").ok().and_then(|v| v.extract().ok());
-                let file_size: i64 = data.get_item("file_size").ok().and_then(|v| v.extract().ok()).unwrap_or(0);
-                let cover_url: Option<String> = data.get_item("cover_url").ok().and_then(|v| v.extract().ok());
-                let status: String = data.get_item("status")?.extract()?;
-                let error_msg: Option<String> = data.get_item("error_msg").ok().and_then(|v| v.extract().ok());
-
-                let record = crate::db::NewDownloadRecord {
-                    aweme_id,
-                    download_type,
-                    title,
-                    author_nickname,
-                    author_sec_uid,
-                    file_path,
-                    file_size,
-                    cover_url,
-                    status,
-                    error_msg,
-                };
-
-                // 释放 GIL 后再锁 DB，避免 GIL+mutex 死锁
-                match py.allow_threads(|| state.db.save_download(&record)) {
-                    Ok(id) => {
-                        info!("[db_bridge] save_download_record 成功: id={}", id);
-                    }
-                    Err(e) => {
-                        return Err(pyo3::exceptions::PyRuntimeError::new_err(format!("保存下载记录失败: {}", e)));
-                    }
-                }
-
-                Ok(())
-            },
-        ).expect("创建 save_download_record 闭包失败");
 
         // 注册 save_video_info
         let h2 = app_handle.clone();
@@ -231,9 +180,6 @@ pub fn register_db_bridge(app_handle: &AppHandle) {
         ).expect("创建 has_user 闭包失败");
 
         // 注入到 db_bridge 模块
-        if let Err(e) = db_bridge.setattr("_save_download_record", save_download_fn) {
-            warn!("[db_bridge] 注入 save_download_record 失败: {}", e);
-        }
         if let Err(e) = db_bridge.setattr("_save_video_info", save_video_fn) {
             warn!("[db_bridge] 注入 save_video_info 失败: {}", e);
         }

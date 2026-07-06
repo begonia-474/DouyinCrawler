@@ -26,16 +26,6 @@ pytestmark = [pytest.mark.offline]
 class TestDbBridgeUnregistered:
     """测试 db_bridge 在 Rust 未注入 stub 时的行为"""
 
-    def test_save_download_record_returns_false_when_unregistered(self):
-        """_save_download_record 为 None 时应返回 False"""
-        original = db_bridge._save_download_record
-        db_bridge._save_download_record = None
-        try:
-            result = db_bridge.save_download_record({"aweme_id": "123"})
-            assert result is False
-        finally:
-            db_bridge._save_download_record = original
-
     def test_save_video_info_returns_false_when_unregistered(self):
         """_save_video_info 为 None 时应返回 False"""
         original = db_bridge._save_video_info
@@ -73,18 +63,6 @@ class TestDbBridgeUnregistered:
 
 class TestDbBridgeMocked:
     """测试 db_bridge 在 stub 注册后正确转发调用"""
-
-    def test_save_download_record_calls_stub(self):
-        calls = []
-        original = db_bridge._save_download_record
-        db_bridge._save_download_record = lambda data: calls.append(data)
-        try:
-            result = db_bridge.save_download_record({"aweme_id": "test123"})
-            assert result is True
-            assert len(calls) == 1
-            assert calls[0]["aweme_id"] == "test123"
-        finally:
-            db_bridge._save_download_record = original
 
     def test_save_video_info_calls_stub(self):
         calls = []
@@ -137,38 +115,6 @@ class TestDbBridgeMocked:
 class TestDbFacade:
     """测试 db.py 的参数组装逻辑"""
 
-    def test_save_download_record_builds_correct_dict(self):
-        """save_download_record 应正确组装参数字典"""
-        captured = {}
-        original_fn = db_bridge._save_download_record
-        db_bridge._save_download_record = lambda data: captured.update(data)
-        try:
-            result = db.save_download_record(
-                aweme_id="123",
-                download_type="video",
-                title="测试视频",
-                author_nickname="作者",
-                author_sec_uid="sec_abc",
-                file_path="/path/to/file.mp4",
-                file_size=1024,
-                cover_url="http://example.com/cover.jpg",
-                status="completed",
-                error_msg=None,
-            )
-            assert result is True
-            assert captured["aweme_id"] == "123"
-            assert captured["download_type"] == "video"
-            assert captured["title"] == "测试视频"
-            assert captured["author_nickname"] == "作者"
-            assert captured["author_sec_uid"] == "sec_abc"
-            assert captured["file_path"] == "/path/to/file.mp4"
-            assert captured["file_size"] == 1024
-            assert captured["cover_url"] == "http://example.com/cover.jpg"
-            assert captured["status"] == "completed"
-            assert captured["error_msg"] is None
-        finally:
-            db_bridge._save_download_record = original_fn
-
     def test_save_video_info_passthrough(self):
         """save_video_info 应原样传递字典"""
         captured = {}
@@ -197,11 +143,7 @@ class TestDbFacade:
 
     def test_save_batch_results_counts(self):
         """save_batch_results 应正确计数成功/失败"""
-        call_count = {"download": 0, "video": 0, "user": 0}
-
-        def mock_download(data):
-            call_count["download"] += 1
-            return True
+        call_count = {"video": 0, "user": 0}
 
         def mock_video(data):
             call_count["video"] += 1
@@ -211,12 +153,12 @@ class TestDbFacade:
             call_count["user"] += 1
             return True
 
-        orig_dl = db_bridge._save_download_record
         orig_vi = db_bridge._save_video_info
         orig_ui = db_bridge._save_user_info
-        db_bridge._save_download_record = mock_download
+        orig_hu = db_bridge._has_user
         db_bridge._save_video_info = mock_video
         db_bridge._save_user_info = mock_user
+        db_bridge._has_user = lambda uid: False
         try:
             results = [
                 {"path": "/a.mp4", "detail": {"aweme_id": "1", "desc": "v1", "author_sec_uid": "u1"}},
@@ -226,10 +168,9 @@ class TestDbFacade:
             stats = db.save_batch_results(results, download_type="video")
             assert stats["saved"] == 3
             assert stats["failed"] == 0
-            assert call_count["download"] == 3
             assert call_count["video"] == 3
             assert call_count["user"] == 2  # 第3条无 author_sec_uid
         finally:
-            db_bridge._save_download_record = orig_dl
             db_bridge._save_video_info = orig_vi
             db_bridge._save_user_info = orig_ui
+            db_bridge._has_user = orig_hu

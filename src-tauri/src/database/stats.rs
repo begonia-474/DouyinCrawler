@@ -50,25 +50,26 @@ impl super::connection::Database {
 
         let (group_expr, label_expr, limit_clause) = match range {
             "week" => (
-                "strftime('%Y-W%W', created_at, 'unixepoch', 'localtime')",
-                "strftime('%Y-W%W', created_at, 'unixepoch', 'localtime')",
+                "strftime('%Y-W%W', i.created_at, 'unixepoch', 'localtime')",
+                "strftime('%Y-W%W', i.created_at, 'unixepoch', 'localtime')",
                 "12",
             ),
             "month" => (
-                "strftime('%Y-%m', created_at, 'unixepoch', 'localtime')",
-                "strftime('%Y-%m', created_at, 'unixepoch', 'localtime')",
+                "strftime('%Y-%m', i.created_at, 'unixepoch', 'localtime')",
+                "strftime('%Y-%m', i.created_at, 'unixepoch', 'localtime')",
                 "12",
             ),
             _ => (
-                "DATE(created_at, 'unixepoch', 'localtime')",
-                "DATE(created_at, 'unixepoch', 'localtime')",
+                "DATE(i.created_at, 'unixepoch', 'localtime')",
+                "DATE(i.created_at, 'unixepoch', 'localtime')",
                 "30",
             ),
         };
 
         let sql = format!(
-            "SELECT {} as period, COUNT(*), COALESCE(SUM(file_size), 0) \
-             FROM download_history WHERE status = 'completed' \
+            "SELECT {} as period, COUNT(*), COALESCE(SUM(i.file_size), 0) \
+             FROM download_task_items i \
+             WHERE i.status = 'completed' \
              GROUP BY {} ORDER BY period DESC LIMIT {}",
             label_expr, group_expr, limit_clause,
         );
@@ -93,7 +94,7 @@ impl super::connection::Database {
         let conn = crate::lock_conn!(self);
         let mut stmt = conn.prepare(
             "SELECT author_nickname, COUNT(*), COALESCE(SUM(file_size), 0) \
-             FROM download_history \
+             FROM download_task_items \
              WHERE status = 'completed' AND author_nickname IS NOT NULL AND author_nickname != '' \
              GROUP BY author_nickname ORDER BY COUNT(*) DESC LIMIT ?1",
         )?;
@@ -114,9 +115,11 @@ impl super::connection::Database {
     pub fn get_storage_analysis(&self) -> Result<Vec<StorageStat>> {
         let conn = crate::lock_conn!(self);
         let mut stmt = conn.prepare(
-            "SELECT download_type, COUNT(*), COALESCE(SUM(file_size), 0) \
-             FROM download_history WHERE status = 'completed' \
-             GROUP BY download_type ORDER BY SUM(file_size) DESC",
+            "SELECT t.mode as download_type, COUNT(*), COALESCE(SUM(i.file_size), 0) \
+             FROM download_task_items i \
+             JOIN download_tasks t ON i.task_id = t.id \
+             WHERE i.status = 'completed' \
+             GROUP BY t.mode ORDER BY SUM(i.file_size) DESC",
         )?;
         let stats = stmt
             .query_map([], |row| {
@@ -147,7 +150,6 @@ impl super::connection::Database {
             .unwrap_or(0);
 
         Ok(DbHealth {
-            download_count: count("download_history")?,
             video_count: count("video_info")?,
             user_count: count("user_info")?,
             live_count: count("live_records")?,

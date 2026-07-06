@@ -4,44 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
-// === 下载记录 ===
-
-#[derive(Serialize, Clone, specta::Type)]
-pub struct DownloadRecord {
-    pub id: i64,
-    pub aweme_id: Option<String>,
-    pub download_type: String,
-    pub title: Option<String>,
-    pub author_nickname: Option<String>,
-    pub author_sec_uid: Option<String>,
-    pub file_path: Option<String>,
-    pub file_size: i64,
-    pub cover_url: Option<String>,
-    pub status: String,
-    pub error_msg: Option<String>,
-    pub created_at: i64,
-}
-
-#[derive(Serialize, Clone, specta::Type)]
-pub struct DownloadStats {
-    pub total_count: i64,
-    pub total_size: i64,
-    pub by_type: Vec<TypeStat>,
-    pub by_day: Vec<DayStat>,
-}
-
-#[derive(Serialize, Clone, specta::Type)]
-pub struct TypeStat {
-    pub download_type: String,
-    pub cnt: i64,
-    pub size: i64,
-}
-
-#[derive(Serialize, Clone, specta::Type)]
-pub struct DayStat {
-    pub day: String,
-    pub cnt: i64,
-}
+// === 直播记录 ===
 
 #[derive(Serialize, Clone, specta::Type)]
 pub struct LiveRecord {
@@ -58,20 +21,6 @@ pub struct LiveRecord {
     pub started_at: Option<i64>,
     pub ended_at: Option<i64>,
     pub cover_url: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Clone, specta::Type)]
-pub struct NewDownloadRecord {
-    pub aweme_id: Option<String>,
-    pub download_type: String,
-    pub title: Option<String>,
-    pub author_nickname: Option<String>,
-    pub author_sec_uid: Option<String>,
-    pub file_path: Option<String>,
-    pub file_size: i64,
-    pub cover_url: Option<String>,
-    pub status: String,
-    pub error_msg: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, specta::Type)]
@@ -125,6 +74,7 @@ pub struct TaskItem {
     pub aweme_id: Option<String>,
     pub title: Option<String>,
     pub author_nickname: Option<String>,
+    pub author_sec_uid: Option<String>,
     pub cover_url: Option<String>,
     pub file_path: Option<String>,
     pub file_size: i64,
@@ -139,6 +89,7 @@ pub struct NewTaskItem {
     pub aweme_id: Option<String>,
     pub title: Option<String>,
     pub author_nickname: Option<String>,
+    pub author_sec_uid: Option<String>,
     pub cover_url: Option<String>,
 }
 
@@ -333,7 +284,6 @@ pub struct StorageStat {
 
 #[derive(Serialize, Clone, specta::Type)]
 pub struct DbHealth {
-    pub download_count: i64,
     pub video_count: i64,
     pub user_count: i64,
     pub live_count: i64,

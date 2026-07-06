@@ -356,8 +356,6 @@ def check_python_db_writes():
                 continue
 
             for i, line in enumerate(content.split('\n'), 1):
-                if 'save_download_record(' in line:
-                    hard_violations.append(f"{file_path.relative_to(PROJECT_ROOT)}:{i} 调用了 save_download_record")
                 if 'save_live_record(' in line:
                     if file_path.resolve() == live_manager_path:
                         allowed_violations.append(f"{file_path.relative_to(PROJECT_ROOT)}:{i} 调用了 save_live_record")

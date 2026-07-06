@@ -17,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { setConfig, getConfig } from "@/lib/api";
+import { setConfig, getConfig, openFolder } from "@/lib/api";
 import {
   Cookie,
   FolderOpen,
@@ -94,7 +94,7 @@ function SettingItem({
 }
 
 export default function SettingsPage() {
-  const { register, handleSubmit, control, reset, formState: { isSubmitting } } = useForm<SettingsForm>({
+  const { register, handleSubmit, control, reset, getValues, formState: { isSubmitting } } = useForm<SettingsForm>({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- zodResolver 类型签名尚未完全兼容 zod v4
     resolver: zodResolver(_settingsSchema as any),
     defaultValues: {
@@ -260,7 +260,12 @@ export default function SettingsPage() {
                       {...register("downloadPath")}
                       className="flex-1 h-9 text-sm rounded-xl border-foreground/[0.08] bg-foreground/[0.03]"
                     />
-                    <Button variant="capsule" size="icon" className="h-9 w-9 shrink-0">
+                    <Button
+                      variant="capsule"
+                      size="icon"
+                      className="h-9 w-9 shrink-0"
+                      onClick={() => openFolder(getValues("downloadPath"))}
+                    >
                       <FolderOpen className="h-3.5 w-3.5" />
                     </Button>
                   </div>

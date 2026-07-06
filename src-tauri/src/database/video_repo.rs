@@ -253,22 +253,13 @@ impl super::connection::Database {
         Self::save_video_inner(&conn, video)
     }
 
-    /// 批量保存下载结果（单次事务：download_history + video_info + user_info）
-    ///
-    /// items 中每个元素包含:
-    /// - `download`: NewDownloadRecord
-    /// - `video`: Option<VideoInfo>
-    /// - `user`: Option<UserInfo>
+    /// 批量保存下载结果（单次事务：video_info + user_info）
     pub fn save_batch_results(
         &self,
-        downloads: &[NewDownloadRecord],
         videos: &[VideoInfo],
         users: &[UserInfo],
     ) -> Result<()> {
         self.with_transaction(|tx| {
-            for record in downloads {
-                Self::save_download_inner(tx, record)?;
-            }
             for video in videos {
                 Self::save_video_inner(tx, video)?;
             }
@@ -285,13 +276,15 @@ impl super::connection::Database {
         Ok(())
     }
 
-    pub fn is_video_downloaded(&self, aweme_id: &str) -> Result<bool> {
-        let conn = lock_conn!(self);
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM download_history WHERE aweme_id = ?1 AND status = 'completed'",
-            rusqlite::params![aweme_id],
-            |row| row.get(0),
-        )?;
-        Ok(count > 0)
+    /// 批量删除视频记录（事务保证原子性）
+    pub fn delete_videos_batch(&self, aweme_ids: &[String]) -> Result<()> {
+        self.with_transaction(|tx| {
+            let mut stmt = tx.prepare("DELETE FROM video_info WHERE aweme_id = ?1")?;
+            for id in aweme_ids {
+                stmt.execute(rusqlite::params![id])?;
+            }
+            Ok(())
+        })
     }
+
 }

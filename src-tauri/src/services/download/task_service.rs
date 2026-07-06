@@ -4,7 +4,7 @@
 //! 1. 创建任务（Rust 拥有 DB 写入）
 //! 2. 通过 resolve_urls 获取下载 URL（Python 解析）
 //! 3. 通过 DownloadEngine 执行实际下载（Rust 原生 HTTP）
-//! 4. 写入 DB 事务（task + items + download_record + video_info + user_info）
+//! 4. 写入 DB 事务（task + items + video_info + user_info）
 //! 5. 发射类型化事件（TaskEvent → 前端）
 //! 6. 返回类型化响应
 //!
@@ -27,7 +27,7 @@ use log::{error, info, warn};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::db::{Database, NewDownloadRecord, NewTaskItem, UserInfo, VideoInfo};
+use crate::db::{Database, NewTaskItem, UserInfo, VideoInfo};
 use crate::state::AppState;
 
 use super::{
@@ -309,63 +309,13 @@ impl<'a> TaskApplicationService<'a> {
 
     /// 写入任务结果到数据库（单个下载项）
     ///
-    /// 创建 task_item + download_record + video_info
-    /// 保存下载元数据（download_history + video_info + user_info）
-    ///
-    /// 不创建 task_item，仅写入元数据表。
+    /// 保存 video_info。不创建 task_item，仅写入元数据表。
     /// 用于跳过和正常下载两种场景。
     fn save_download_metadata(
         db: &Database,
         item: &ResolvedItem,
-        file_path: &str,
-        file_size: i64,
-        accessory_paths: &[String],
     ) -> Result<(), String> {
         let detail = item.detail.as_ref();
-        let aweme_id = &item.aweme_id;
-
-        // 构建 download_record
-        let mut records = vec![NewDownloadRecord {
-            aweme_id: Some(aweme_id.clone()),
-            download_type: "video".to_string(),
-            title: json_str(detail, "desc"),
-            author_nickname: json_str(detail, "author_nickname"),
-            author_sec_uid: json_str(detail, "author_sec_uid"),
-            file_path: Some(file_path.to_string()),
-            file_size,
-            cover_url: json_str(detail, "cover_url"),
-            status: "completed".to_string(),
-            error_msg: None,
-        }];
-
-        // 为附属文件添加 download_record
-        for acc_path in accessory_paths {
-            let acc_type = if acc_path.ends_with(".mp3") {
-                "music"
-            } else if acc_path.ends_with(".jpg") || acc_path.ends_with(".jpeg")
-                || acc_path.ends_with(".webp") || acc_path.ends_with(".png")
-            {
-                "cover"
-            } else {
-                "accessory"
-            };
-            let acc_size = std::fs::metadata(acc_path)
-                .map(|m| m.len() as i64)
-                .unwrap_or(0);
-
-            records.push(NewDownloadRecord {
-                aweme_id: Some(aweme_id.clone()),
-                download_type: acc_type.to_string(),
-                title: json_str(detail, "desc"),
-                author_nickname: json_str(detail, "author_nickname"),
-                author_sec_uid: json_str(detail, "author_sec_uid"),
-                file_path: Some(acc_path.clone()),
-                file_size: acc_size,
-                cover_url: None,
-                status: "completed".to_string(),
-                error_msg: None,
-            });
-        }
 
         // 收集 video_info（user_info 由 execute_download 的 user_profile 路径独立保存，
         // 不从 detail 提取，避免不完整数据覆盖完整的 user_profile）
@@ -380,10 +330,12 @@ impl<'a> TaskApplicationService<'a> {
             }
         }
 
-        // 保存到数据库（只写 download_history + video_info，不写 user_info）
-        if let Err(e) = db.save_batch_results(&records, &videos, &[]) {
-            error!("[TaskService] 保存下载记录失败: aweme_id={}, error={}", item.aweme_id, e);
-            return Err(format!("保存下载记录失败: {}", e));
+        // 保存到数据库（只写 video_info，不写 user_info）
+        if !videos.is_empty() {
+            if let Err(e) = db.save_batch_results(&videos, &[]) {
+                error!("[TaskService] 保存视频信息失败: aweme_id={}, error={}", item.aweme_id, e);
+                return Err(format!("保存视频信息失败: {}", e));
+            }
         }
 
         Ok(())
@@ -399,7 +351,7 @@ impl<'a> TaskApplicationService<'a> {
     // 统一下载入口（mode=one）
     // ============================================================
 
-    /// 保存单个下载项的完整结果（task_item + download_history + video_info + user_info）
+    /// 保存单个下载项的完整结果（task_item + video_info）
     ///
     /// 正常下载完成后调用。跳过场景请直接调用 save_download_metadata。
     fn save_single_result(
@@ -408,7 +360,6 @@ impl<'a> TaskApplicationService<'a> {
         item: &ResolvedItem,
         file_path: &str,
         file_size: i64,
-        accessory_paths: &[String],
     ) -> Result<(), String> {
         let detail = item.detail.as_ref();
         let aweme_id = &item.aweme_id;
@@ -419,6 +370,7 @@ impl<'a> TaskApplicationService<'a> {
             aweme_id: Some(aweme_id.clone()),
             title: json_str(detail, "desc"),
             author_nickname: json_str(detail, "author_nickname"),
+            author_sec_uid: json_str(detail, "author_sec_uid"),
             cover_url: json_str(detail, "cover_url"),
         };
         if let Err(e) = db.create_task_item(&new_item) {
@@ -433,7 +385,7 @@ impl<'a> TaskApplicationService<'a> {
         }
 
         // 保存元数据
-        Self::save_download_metadata(db, item, file_path, file_size, accessory_paths)
+        Self::save_download_metadata(db, item)
     }
 
     // ============================================================
@@ -625,18 +577,19 @@ impl<'a> TaskApplicationService<'a> {
                     let file_size = download_result.file_size as i64;
 
                     // 下载附属文件
-                    let accessory_paths =
+                    let _accessory_paths =
                         Self::download_accessories(&engine, &item.accessories, &save_dir, &item.folder_name, task_id, app_config)
                             .await;
 
                     // 保存到数据库
                     if download_result.skipped {
-                        // 文件已存在，跳过下载但仍写入 download_history + video_info + user_info
+                        // 文件已存在，跳过下载但仍写入 video_info
                         let new_item = NewTaskItem {
                             task_id: task_id.to_string(),
                             aweme_id: Some(item.aweme_id.clone()),
                             title: json_str(item.detail.as_ref(), "desc"),
                             author_nickname: json_str(item.detail.as_ref(), "author_nickname"),
+                            author_sec_uid: json_str(item.detail.as_ref(), "author_sec_uid"),
                             cover_url: json_str(item.detail.as_ref(), "cover_url"),
                         };
                         let _ = db.create_task_item(&new_item);
@@ -648,14 +601,8 @@ impl<'a> TaskApplicationService<'a> {
                             file_size,
                             None,
                         );
-                        // 跳过也需要写入 download_history + video_info + user_info
-                        if let Err(e) = Self::save_download_metadata(
-                            db,
-                            item,
-                            &file_path,
-                            file_size,
-                            &accessory_paths,
-                        ) {
+                        // 跳过也需要写入 video_info
+                        if let Err(e) = Self::save_download_metadata(db, item) {
                             warn!("[TaskService] 跳过项保存元数据失败: {}", e);
                         }
                         info!(
@@ -669,7 +616,6 @@ impl<'a> TaskApplicationService<'a> {
                             item,
                             &file_path,
                             file_size,
-                            &accessory_paths,
                         ) {
                             warn!("[TaskService] 保存结果失败: {}", e);
                             failed += 1;
@@ -696,6 +642,7 @@ impl<'a> TaskApplicationService<'a> {
                         aweme_id: Some(item.aweme_id.clone()),
                         title: json_str(item.detail.as_ref(), "desc"),
                         author_nickname: json_str(item.detail.as_ref(), "author_nickname"),
+                        author_sec_uid: json_str(item.detail.as_ref(), "author_sec_uid"),
                         cover_url: json_str(item.detail.as_ref(), "cover_url"),
                     };
                     let _ = db.create_task_item(&new_item);
@@ -864,7 +811,7 @@ impl<'a> TaskApplicationService<'a> {
                         let file_size = download_result.file_size as i64;
 
                         // 下载附属文件（Rust 侧根据配置过滤）
-                        let accessory_paths = Self::download_accessories(
+                        let _accessory_paths = Self::download_accessories(
                             &engine, &item.accessories, &save_dir, &item.folder_name, task_id, app_config,
                         ).await;
 
@@ -874,6 +821,7 @@ impl<'a> TaskApplicationService<'a> {
                                 aweme_id: Some(item.aweme_id.clone()),
                                 title: json_str(item.detail.as_ref(), "desc"),
                                 author_nickname: json_str(item.detail.as_ref(), "author_nickname"),
+                                author_sec_uid: json_str(item.detail.as_ref(), "author_sec_uid"),
                                 cover_url: json_str(item.detail.as_ref(), "cover_url"),
                             };
                             let _ = db.create_task_item(&new_item);
@@ -881,14 +829,12 @@ impl<'a> TaskApplicationService<'a> {
                                 task_id, &item.aweme_id, "skipped",
                                 Some(&file_path), file_size, None,
                             );
-                            if let Err(e) = Self::save_download_metadata(
-                                db, item, &file_path, file_size, &accessory_paths,
-                            ) {
+                            if let Err(e) = Self::save_download_metadata(db, item) {
                                 warn!("[TaskService] 跳过项保存元数据失败: {}", e);
                             }
                         } else {
                             if let Err(e) = Self::save_single_result(
-                                db, task_id, item, &file_path, file_size, &accessory_paths,
+                                db, task_id, item, &file_path, file_size,
                             ) {
                                 warn!("[TaskService] 保存结果失败: {}", e);
                                 total_failed += 1;
@@ -904,6 +850,7 @@ impl<'a> TaskApplicationService<'a> {
                             aweme_id: Some(item.aweme_id.clone()),
                             title: json_str(item.detail.as_ref(), "desc"),
                             author_nickname: json_str(item.detail.as_ref(), "author_nickname"),
+                            author_sec_uid: json_str(item.detail.as_ref(), "author_sec_uid"),
                             cover_url: json_str(item.detail.as_ref(), "cover_url"),
                         };
                         let _ = db.create_task_item(&new_item);
@@ -1261,6 +1208,7 @@ impl<'a> TaskApplicationService<'a> {
                             aweme_id: Some(music_id.clone()),
                             title: title.clone(),
                             author_nickname: author.clone(),
+                            author_sec_uid: None,
                             cover_url: None,
                         };
                         let _ = db.create_task_item(&new_item);
@@ -1280,6 +1228,7 @@ impl<'a> TaskApplicationService<'a> {
                             aweme_id: Some(music_id.clone()),
                             title: title.clone(),
                             author_nickname: author.clone(),
+                            author_sec_uid: None,
                             cover_url: None,
                         };
                         if let Err(e) = db.create_task_item(&new_item) {
@@ -1298,23 +1247,6 @@ impl<'a> TaskApplicationService<'a> {
                             None,
                         ) {
                             warn!("[TaskService] 更新音乐子项状态失败: {}", e);
-                        }
-
-                        // 保存 download_record
-                        let record = NewDownloadRecord {
-                            aweme_id: Some(music_id.clone()),
-                            download_type: "music".to_string(),
-                            title: title.clone(),
-                            author_nickname: author.clone(),
-                            author_sec_uid: None,
-                            file_path: Some(file_path),
-                            file_size,
-                            cover_url: None,
-                            status: "completed".to_string(),
-                            error_msg: None,
-                        };
-                        if let Err(e) = db.save_batch_results(&[record], &[], &[]) {
-                            warn!("[TaskService] 保存音乐下载记录失败: {}", e);
                         }
                     }
 
@@ -1335,6 +1267,7 @@ impl<'a> TaskApplicationService<'a> {
                         aweme_id: Some(item.aweme_id.clone()),
                         title: None,
                         author_nickname: None,
+                        author_sec_uid: None,
                         cover_url: None,
                     };
                     let _ = db.create_task_item(&new_item);

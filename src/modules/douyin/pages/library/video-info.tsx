@@ -7,13 +7,19 @@ import { AnimateEntry } from "@/components/shared/animate-entry";
 import { Bezel } from "@/components/shared/bezel";
 import { SortDropdown } from "@/components/shared/sort-dropdown";
 import { Pagination } from "@/components/shared/pagination";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogFooter,
+  AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel,
+} from "@/components/ui/alert-dialog";
 import {
   Film, Loader2, Search, Clock, Heart, MessageCircle,
   Share2, Bookmark, Trash2,
 } from "lucide-react";
-import { useDeleteVideoInfo } from "@/lib/mutations";
+import { useDeleteVideoInfo, useDeleteVideoInfoBatch } from "@/lib/mutations";
 import { useVideoCountQuery, useVideosQuery } from "@/lib/queries";
 import { usePagination } from "@/hooks/use-pagination";
+import { useSelection } from "@/hooks/use-selection";
 import type { VideoInfo } from "@/lib/tauri-types";
 import { formatDuration, formatTimestamp, formatCount } from "@/lib/utils";
 
@@ -31,7 +37,11 @@ export default function LibraryVideoInfoPage() {
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState("updated_at");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  const [deleteTarget, setDeleteTarget] = useState<VideoInfo | null>(null);
+  const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
   const deleteVideo = useDeleteVideoInfo();
+  const deleteVideoBatch = useDeleteVideoInfoBatch();
+  const selection = useSelection();
 
   const itemsQuery = useVideosQuery({
     limit: pageSize,
@@ -45,17 +55,32 @@ export default function LibraryVideoInfoPage() {
   const items = itemsQuery.data ?? [];
   const total = countQuery.data ?? 0;
   const loading = itemsQuery.isLoading || countQuery.isLoading;
+  const itemIds = items.map((item) => item.aweme_id);
 
   const handleSearch = (value: string) => {
     setSearch(value);
     resetPage();
+    selection.clearSelection();
   };
 
-  const handleDelete = (item: VideoInfo) => {
-    if (!window.confirm("确定删除这条视频记录？")) return;
-    deleteVideo.mutate(item.aweme_id, {
+  const handleConfirmDelete = () => {
+    if (!deleteTarget) return;
+    deleteVideo.mutate(deleteTarget.aweme_id, {
       onError: (err) => toast.error(err instanceof Error ? err.message : "删除失败"),
     });
+    setDeleteTarget(null);
+  };
+
+  const handleBatchDelete = () => {
+    const ids = Array.from(selection.selected);
+    deleteVideoBatch.mutate(ids, {
+      onSuccess: () => {
+        toast.success(`已删除 ${ids.length} 条记录`);
+        selection.clearSelection();
+      },
+      onError: (err) => toast.error(err instanceof Error ? err.message : "批量删除失败"),
+    });
+    setBatchDeleteOpen(false);
   };
 
   return (
@@ -80,11 +105,33 @@ export default function LibraryVideoInfoPage() {
               options={SORT_OPTIONS}
               sortBy={sortBy}
               sortOrder={sortOrder}
-              onSortByChange={(v) => { setSortBy(v); resetPage(); }}
-              onSortOrderChange={(v) => { setSortOrder(v); resetPage(); }}
+              onSortByChange={(v) => { setSortBy(v); resetPage(); selection.clearSelection(); }}
+              onSortOrderChange={(v) => { setSortOrder(v); resetPage(); selection.clearSelection(); }}
             />
           </div>
         </AnimateEntry>
+
+        {selection.selectedCount > 0 && (
+          <AnimateEntry>
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-foreground/[0.04] ring-1 ring-foreground/[0.08]">
+              <Checkbox
+                checked={selection.isAllSelected(itemIds)}
+                indeterminate={selection.isIndeterminate(itemIds)}
+                onCheckedChange={(checked) => {
+                  if (checked) selection.selectAll(itemIds);
+                  else selection.clearSelection();
+                }}
+              />
+              <span className="text-sm text-muted-foreground">
+                已选 {selection.selectedCount} 项
+              </span>
+              <Button variant="destructive" size="sm" onClick={() => setBatchDeleteOpen(true)}>
+                <Trash2 className="h-3.5 w-3.5 mr-1" />
+                删除选中
+              </Button>
+            </div>
+          </AnimateEntry>
+        )}
 
         {loading ? (
           <div className="flex justify-center py-16">
@@ -105,6 +152,10 @@ export default function LibraryVideoInfoPage() {
               <AnimateEntry key={item.aweme_id} delay={i * 30}>
                 <Bezel radius="lg" padding="sm">
                   <div className="flex items-center gap-4 p-4 bg-card hover:bg-foreground/[0.02] transition-all duration-300">
+                    <Checkbox
+                      checked={selection.isSelected(item.aweme_id)}
+                      onCheckedChange={() => selection.toggle(item.aweme_id)}
+                    />
                     {item.cover_url ? (
                       <img
                         src={item.cover_url}
@@ -159,7 +210,7 @@ export default function LibraryVideoInfoPage() {
                         </span>
                       </div>
                     </div>
-                    <Button variant="ghost" size="icon-sm" title="删除记录" onClick={() => handleDelete(item)}>
+                    <Button variant="ghost" size="icon-sm" title="删除记录" onClick={() => setDeleteTarget(item)}>
                       <Trash2 className="h-4 w-4 text-destructive" />
                     </Button>
                   </div>
@@ -167,10 +218,42 @@ export default function LibraryVideoInfoPage() {
               </AnimateEntry>
             ))}
 
-            <Pagination page={page} totalPages={Math.ceil(total / pageSize)} onPageChange={setPage} />
+            <Pagination page={page} totalPages={Math.ceil(total / pageSize)} onPageChange={(p) => { setPage(p); selection.clearSelection(); }} />
           </div>
         )}
       </div>
+
+      {/* 单条删除确认 */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除</AlertDialogTitle>
+            <AlertDialogDescription>
+              确定删除这条视频记录？此操作不可撤销。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={handleConfirmDelete}>删除</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* 批量删除确认 */}
+      <AlertDialog open={batchDeleteOpen} onOpenChange={setBatchDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认批量删除</AlertDialogTitle>
+            <AlertDialogDescription>
+              确定删除选中的 {selection.selectedCount} 条视频记录？此操作不可撤销。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={handleBatchDelete}>删除</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

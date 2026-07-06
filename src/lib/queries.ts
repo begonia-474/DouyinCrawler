@@ -1,25 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { getDownloadStats, getDownloads, getLiveRecordCount, getLiveRecords, getMusicCollectionCountFromDB, getMusicCollectionFromDB, getUserCount, getUserStats, getUsers, getVideoCount, getVideos, getVideoStats, getDownloadTasks, getDownloadTaskDetail, getDownloadTaskItems, getDownloadTaskItemCounts, getDownloadTrend, getTopAuthors, getStorageAnalysis, dbHealthCheck, getPostDetail, getTabFeed, getFollowFeed, getFriendFeed, getUserCollects, getFollowingLive } from "@/lib/api";
+import { getLiveRecordCount, getLiveRecords, getMusicCollectionCountFromDB, getMusicCollectionFromDB, getUserCount, getUserStats, getUsers, getVideoCount, getVideos, getVideoStats, getDownloadTasks, getDownloadTaskDetail, getDownloadTaskItems, getDownloadTaskItemCounts, getDownloadTrend, getTopAuthors, getStorageAnalysis, dbHealthCheck, getPostDetail, getTabFeed, getFollowFeed, getFriendFeed, getUserCollects, getFollowingLive } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
-
-export function useDownloadsQuery(params: {
-  limit?: number;
-  offset?: number;
-  status?: string;
-  download_type?: string;
-}) {
-  return useQuery({
-    queryKey: queryKeys.downloads(params),
-    queryFn: () => getDownloads(params),
-  });
-}
-
-export function useDownloadStatsQuery() {
-  return useQuery({
-    queryKey: queryKeys.downloadStats(),
-    queryFn: () => getDownloadStats(),
-  });
-}
 
 export function useLiveRecordsQuery(params: { limit?: number; offset?: number }) {
   return useQuery({
