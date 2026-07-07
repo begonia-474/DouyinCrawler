@@ -266,6 +266,10 @@ pub fn run() {
             commands::db::db_health_check,
             // 数据导出（commands/db.rs）
             commands::db::export_data,
+            // 打开文件夹（commands/db.rs）
+            commands::db::get_download_dir_by_music_id,
+            commands::db::get_download_dir_by_aweme_id,
+            commands::db::get_user_download_dir,
             // 下载任务（commands/db.rs）
             commands::db::create_download_task,
             commands::db::get_download_tasks,

@@ -9,7 +9,7 @@ import {
   AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogFooter,
   AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel,
 } from "@/components/ui/alert-dialog";
-import { Image, Music, Loader2, Search, Clock, Heart, MessageCircle, Share2, Bookmark, Trash2 } from "lucide-react";
+import { Image, Music, Loader2, Search, Clock, Heart, MessageCircle, Share2, Bookmark, Trash2, FolderOpen } from "lucide-react";
 import { useDeleteVideoInfo } from "@/lib/mutations";
 import { useVideosQuery, useVideoCountQuery } from "@/lib/queries";
 import type { VideoInfo } from "@/lib/tauri-types";
@@ -23,9 +23,10 @@ const typeIcons: Record<string, typeof Image> = {
 interface VideoListProps {
   postType: "images" | "music";
   title: string;
+  onOpenFolder?: (item: VideoInfo) => void;
 }
 
-export function VideoList({ postType, title }: VideoListProps) {
+export function VideoList({ postType, title, onOpenFolder }: VideoListProps) {
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<VideoInfo | null>(null);
@@ -148,6 +149,11 @@ export function VideoList({ postType, title }: VideoListProps) {
                         )}
                       </div>
                     </div>
+                    {onOpenFolder && (
+                      <Button variant="ghost" size="icon-sm" title="打开文件所在文件夹" onClick={() => onOpenFolder(item)}>
+                        <FolderOpen className="h-4 w-4" />
+                      </Button>
+                    )}
                     <Button variant="ghost" size="icon-sm" title="删除记录" onClick={() => setDeleteTarget(item)}>
                       <Trash2 className="h-4 w-4 text-destructive" />
                     </Button>

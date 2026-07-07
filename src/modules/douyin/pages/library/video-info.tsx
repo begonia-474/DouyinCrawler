@@ -14,9 +14,10 @@ import {
 } from "@/components/ui/alert-dialog";
 import {
   Film, Loader2, Search, Clock, Heart, MessageCircle,
-  Share2, Bookmark, Trash2,
+  Share2, Bookmark, Trash2, FolderOpen,
 } from "lucide-react";
 import { useDeleteVideoInfo, useDeleteVideoInfoBatch } from "@/lib/mutations";
+import { getDownloadDirByAwemeId, openFolder } from "@/lib/api";
 import { useVideoCountQuery, useVideosQuery } from "@/lib/queries";
 import { usePagination } from "@/hooks/use-pagination";
 import { useSelection } from "@/hooks/use-selection";
@@ -69,6 +70,19 @@ export default function LibraryVideoInfoPage() {
       onError: (err) => toast.error(err instanceof Error ? err.message : "删除失败"),
     });
     setDeleteTarget(null);
+  };
+
+  const handleOpenFolder = async (item: VideoInfo) => {
+    try {
+      const dir = await getDownloadDirByAwemeId(item.aweme_id);
+      if (dir) {
+        await openFolder(dir);
+      } else {
+        toast.error("未找到下载文件");
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "打开文件夹失败");
+    }
   };
 
   const handleBatchDelete = () => {
@@ -210,6 +224,9 @@ export default function LibraryVideoInfoPage() {
                         </span>
                       </div>
                     </div>
+                    <Button variant="ghost" size="icon-sm" title="打开文件所在文件夹" onClick={() => handleOpenFolder(item)}>
+                      <FolderOpen className="h-4 w-4" />
+                    </Button>
                     <Button variant="ghost" size="icon-sm" title="删除记录" onClick={() => setDeleteTarget(item)}>
                       <Trash2 className="h-4 w-4 text-destructive" />
                     </Button>

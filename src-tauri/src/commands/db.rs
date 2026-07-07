@@ -197,6 +197,64 @@ fn extract_user_download_dir(file_path: &str) -> Option<String> {
     None
 }
 
+/// 从文件路径提取所在目录（安全校验后返回）
+fn resolve_parent_dir(file_path: &str) -> Result<Option<String>, String> {
+    let path = crate::validate_path_in_project(file_path)?;
+    match path.parent() {
+        Some(parent) => Ok(Some(parent.to_string_lossy().to_string())),
+        None => Ok(None),
+    }
+}
+
+// ============================================================
+// 打开文件夹（返回目录路径供前端 openFolder）
+// ============================================================
+
+/// 根据 music_id 查询音乐文件所在目录
+#[tauri::command(rename_all = "snake_case")]
+pub fn get_download_dir_by_music_id(
+    state: State<'_, AppState>,
+    music_id: String,
+) -> Result<Option<String>, String> {
+    let file_path = state.db.get_music_file_path(&music_id).map_err(|e| e.to_string())?;
+    match file_path {
+        Some(fp) => resolve_parent_dir(&fp),
+        None => Ok(None),
+    }
+}
+
+/// 根据 aweme_id 查询下载文件所在目录
+#[tauri::command(rename_all = "snake_case")]
+pub fn get_download_dir_by_aweme_id(
+    state: State<'_, AppState>,
+    aweme_id: String,
+) -> Result<Option<String>, String> {
+    let file_path = state.db.get_task_item_file_path(&aweme_id).map_err(|e| e.to_string())?;
+    match file_path {
+        Some(fp) => resolve_parent_dir(&fp),
+        None => Ok(None),
+    }
+}
+
+/// 根据 sec_user_id 查询用户下载目录
+#[tauri::command(rename_all = "snake_case")]
+pub fn get_user_download_dir(
+    state: State<'_, AppState>,
+    sec_user_id: String,
+) -> Result<Option<String>, String> {
+    let paths = state.db.get_user_download_file_paths(&sec_user_id).map_err(|e| e.to_string())?;
+    for path in &paths {
+        if let Some(dir) = extract_user_download_dir(path) {
+            return Ok(Some(dir));
+        }
+    }
+    // 回退：取第一个文件的父目录
+    if let Some(first) = paths.first() {
+        return resolve_parent_dir(first);
+    }
+    Ok(None)
+}
+
 // ============================================================
 // 删除（使用 delete_local_path 白名单校验）
 // ============================================================

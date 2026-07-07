@@ -418,6 +418,19 @@ impl super::connection::Database {
         Ok(counts)
     }
 
+    /// 根据 aweme_id 查询下载文件路径
+    pub fn get_task_item_file_path(&self, aweme_id: &str) -> Result<Option<String>> {
+        let conn = lock_conn!(self);
+        let mut stmt = conn.prepare(
+            "SELECT file_path FROM download_task_items WHERE aweme_id = ?1 AND file_path IS NOT NULL AND file_path != '' LIMIT 1"
+        )?;
+        let mut rows = stmt.query_map(rusqlite::params![aweme_id], |row| row.get::<_, String>(0))?;
+        match rows.next() {
+            Some(row) => row.map(Some),
+            None => Ok(None),
+        }
+    }
+
     pub fn get_task_detail(&self, task_id: &str) -> Result<Option<DownloadTaskDetail>> {
         let task = self.get_task_by_id(task_id)?;
         match task {

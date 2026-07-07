@@ -26,6 +26,6 @@ export { search } from "./search";
 
 export { getLiveRecords, getLiveRecordCount, getVideos, getVideoCount, getUsers, getUserCount, getUserBySecUid, getVideoStats, getUserStats, getDownloadTrend, getTopAuthors, getStorageAnalysis, dbHealthCheck, getDbPath } from "./db-query";
 
-export { openFolder, exportData } from "./file";
+export { openFolder, exportData, getDownloadDirByMusicId, getDownloadDirByAwemeId, getUserDownloadDir } from "./file";
 
 export { deleteLiveRecord, deleteVideoInfo, deleteUserInfo, deleteVideoInfoBatch, deleteUserInfoBatch, deleteLiveRecordBatch, deleteMusicCollectionBatch } from "./delete";

@@ -11,8 +11,9 @@ import {
   AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel,
 } from "@/components/ui/alert-dialog";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Music, Loader2, Search, Clock, Download, CheckCircle2, Trash2 } from "lucide-react";
+import { Music, Loader2, Search, Clock, Download, CheckCircle2, Trash2, FolderOpen } from "lucide-react";
 import { useDeleteMusicCollection, useDownloadMusic, useUpdateMusicFilePath } from "@/lib/mutations";
+import { getDownloadDirByMusicId, openFolder } from "@/lib/api";
 import { useMusicCollectionQuery, useMusicCountQuery } from "@/lib/queries";
 import { usePagination } from "@/hooks/use-pagination";
 import type { MusicCollectionItem } from "@/lib/api";
@@ -61,6 +62,19 @@ export default function LibraryMusicPage() {
     });
     setDeleteTarget(null);
     setDeleteFile(false);
+  };
+
+  const handleOpenFolder = async (item: MusicCollectionItem) => {
+    try {
+      const dir = await getDownloadDirByMusicId(item.music_id);
+      if (dir) {
+        await openFolder(dir);
+      } else {
+        toast.error("未找到下载文件");
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "打开文件夹失败");
+    }
   };
 
   const totalPages = Math.ceil(total / pageSize);
@@ -137,6 +151,17 @@ export default function LibraryMusicPage() {
                         )}
                       </div>
                     </div>
+                    {item.file_path && (
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="shrink-0"
+                        title="打开文件所在文件夹"
+                        onClick={() => handleOpenFolder(item)}
+                      >
+                        <FolderOpen className="h-4 w-4" />
+                      </Button>
+                    )}
                     <Button
                       variant="ghost"
                       size="icon-sm"

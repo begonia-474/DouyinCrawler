@@ -12,9 +12,10 @@ import {
   AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel,
 } from "@/components/ui/alert-dialog";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Users, Loader2, Search, Trash2 } from "lucide-react";
+import { Users, Loader2, Search, Trash2, FolderOpen } from "lucide-react";
 import { useDeleteUserInfo } from "@/lib/mutations";
 import { useUsersQuery, useUserCountQuery } from "@/lib/queries";
+import { getUserDownloadDir, openFolder } from "@/lib/api";
 import { usePagination } from "@/hooks/use-pagination";
 import type { UserInfo } from "@/lib/tauri-types";
 import { formatCount } from "@/lib/utils";
@@ -60,6 +61,19 @@ export default function LibraryUserInfoPage() {
     });
     setDeleteTarget(null);
     setDeleteFile(false);
+  };
+
+  const handleOpenFolder = async (item: UserInfo) => {
+    try {
+      const dir = await getUserDownloadDir(item.sec_user_id);
+      if (dir) {
+        await openFolder(dir);
+      } else {
+        toast.error("未找到下载文件");
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "打开文件夹失败");
+    }
   };
 
   return (
@@ -162,6 +176,9 @@ export default function LibraryUserInfoPage() {
                         )}
                       </div>
                     </div>
+                    <Button variant="ghost" size="icon-sm" title="打开用户下载目录" onClick={() => handleOpenFolder(item)}>
+                      <FolderOpen className="h-4 w-4" />
+                    </Button>
                     <Button variant="ghost" size="icon-sm" title="删除记录" onClick={() => setDeleteTarget(item)}>
                       <Trash2 className="h-4 w-4 text-destructive" />
                     </Button>
