@@ -6,6 +6,7 @@ mod commands;
 mod services;
 mod state;
 mod error;
+mod firefox_cookie;
 
 use config::{AppConfig, ConfigManager};
 use python::PythonBridge;
@@ -282,6 +283,11 @@ pub fn run() {
             commands::db::delete_download_task,
             // 任务系统（Rust-owned，Phase 3 新增）
             commands::tasks::start_download,
+            // Firefox Cookie 自动获取
+            firefox_cookie::get_firefox_profiles_command,
+            firefox_cookie::get_douyin_cookie_command,
+            firefox_cookie::get_douyin_cookie_from_profile_command,
+            firefox_cookie::get_firefox_cookie_command,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

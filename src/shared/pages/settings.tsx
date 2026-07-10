@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { setConfig, getConfig, openFolder } from "@/lib/api";
+import { getDouyinCookie } from "@/lib/api/config";
 import {
   Cookie,
   FolderOpen,
@@ -144,6 +145,34 @@ export default function SettingsPage() {
   }, [reset]);
 
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [isLoadingCookie, setIsLoadingCookie] = useState(false);
+  const [cookieError, setCookieError] = useState<string | null>(null);
+
+  // 自动获取 Firefox Cookie
+  const handleAutoGetCookie = async () => {
+    setIsLoadingCookie(true);
+    setCookieError(null);
+    setSaveMsg(null);
+
+    try {
+      const cookie = await getDouyinCookie();
+      if (cookie) {
+        // 更新表单中的 cookie 值
+        reset((prev) => ({ ...prev, cookie }));
+        setSaveMsg("已从 Firefox 获取 Cookie");
+      } else {
+        setCookieError("未获取到 Cookie，请确保 Firefox 已登录抖音");
+      }
+    } catch (err) {
+      setCookieError(err instanceof Error ? err.message : "获取 Cookie 失败");
+    } finally {
+      setIsLoadingCookie(false);
+      window.setTimeout(() => {
+        setSaveMsg(null);
+        setCookieError(null);
+      }, 3000);
+    }
+  };
 
   const onSubmit = async (data: SettingsForm) => {
     setSaveMsg(null);
@@ -227,15 +256,40 @@ export default function SettingsPage() {
                 <SettingItem
                   icon={Cookie}
                   title="Cookie"
-                  description="从浏览器开发者工具中复制"
+                  description="从浏览器开发者工具中复制，或自动获取 Firefox Cookie"
                 >
-                  <div className="w-96 max-w-full">
+                  <div className="w-96 max-w-full space-y-2">
                     <Textarea
                       {...register("cookie")}
                       placeholder="粘贴浏览器 Cookie..."
                       rows={3}
                       className="field-sizing-fixed text-xs rounded-xl border-foreground/[0.08] bg-foreground/[0.03]"
                     />
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-xs rounded-lg"
+                        onClick={handleAutoGetCookie}
+                        disabled={isLoadingCookie}
+                      >
+                        {isLoadingCookie ? (
+                          <>
+                            <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
+                            获取中...
+                          </>
+                        ) : (
+                          <>
+                            <RefreshCw className="h-3 w-3 mr-1" />
+                            自动获取 Firefox Cookie
+                          </>
+                        )}
+                      </Button>
+                      {cookieError && (
+                        <span className="text-xs text-destructive">{cookieError}</span>
+                      )}
+                    </div>
                   </div>
                 </SettingItem>
               </div>
