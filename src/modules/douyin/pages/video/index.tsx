@@ -21,6 +21,7 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { formatCount } from "@/lib/utils";
+import { CommentDialog } from "@/components/shared/comment-dialog";
 
 interface ParsedInfo {
   type: string;
@@ -36,6 +37,7 @@ export default function VideoPage() {
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [downloading, setDownloading] = useState(false);
   const [downloaded, setDownloaded] = useState(false);
+  const [commentAwemeId, setCommentAwemeId] = useState<string | null>(null);
 
   // React Query: 解析结果按 URL 缓存，路由切换不丢失
   const { data: parseResult, isLoading, error: parseError } = useVideoParseQuery(submittedUrl);
@@ -182,7 +184,10 @@ export default function VideoPage() {
                     <p className="text-xl font-heading font-bold tabular-nums">{formatCount(stats.digg_count)}</p>
                     <p className="text-xs text-muted-foreground mt-0.5 tracking-wide">点赞</p>
                   </div>
-                  <div className="text-center">
+                  <div
+                    className="text-center cursor-pointer hover:bg-foreground/[0.03] rounded-lg py-1 -my-1 transition-colors"
+                    onClick={() => parsed?.awemeId && setCommentAwemeId(parsed.awemeId)}
+                  >
                     <MessageSquare className="h-4 w-4 text-muted-foreground mx-auto mb-2" />
                     <p className="text-xl font-heading font-bold tabular-nums">{formatCount(stats.comment_count)}</p>
                     <p className="text-xs text-muted-foreground mt-0.5 tracking-wide">评论</p>
@@ -203,6 +208,12 @@ export default function VideoPage() {
           </AnimateEntry>
         )}
       </div>
+
+      <CommentDialog
+        awemeId={commentAwemeId ?? ""}
+        open={!!commentAwemeId}
+        onOpenChange={(open) => !open && setCommentAwemeId(null)}
+      />
     </>
   );
 }

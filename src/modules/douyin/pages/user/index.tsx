@@ -26,6 +26,7 @@ import { InfiniteScrollSentinel } from "@/components/shared/infinite-scroll-sent
 import { LoadingSpinner } from "@/components/shared/loading-spinner";
 import { ErrorBanner } from "@/components/shared/error-banner";
 import { formatCount, formatDurationSec } from "@/lib/utils";
+import { CommentDialog } from "@/components/shared/comment-dialog";
 
 function FollowItemCard({ item, type }: { item: FollowItem; type: "following" | "follower" }) {
   return (
@@ -58,6 +59,7 @@ export default function UserPage() {
   const [downloadedCount, setDownloadedCount] = useState(0);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [currentUrl, setCurrentUrl] = useState("");
+  const [commentAwemeId, setCommentAwemeId] = useState<string | null>(null);
   const batchTask = useActiveTask(activeTaskId);
   const downloadProgress = batchTask ? ((batchTask.total ?? 0) > 0 ? Math.round(((batchTask.completed ?? 0) / (batchTask.total ?? 1)) * 100) : 0) : 0;
 
@@ -219,6 +221,7 @@ export default function UserPage() {
                       diggCount={video.digg_count}
                       commentCount={video.comment_count}
                       shareCount={video.share_count}
+                      onClick={() => setCommentAwemeId(video.aweme_id)}
                     />
                   ))}
                 </div>
@@ -248,6 +251,12 @@ export default function UserPage() {
       </div>
 
       <DownloadStatusCard />
+
+      <CommentDialog
+        awemeId={commentAwemeId ?? ""}
+        open={!!commentAwemeId}
+        onOpenChange={(open) => !open && setCommentAwemeId(null)}
+      />
     </>
   );
 }

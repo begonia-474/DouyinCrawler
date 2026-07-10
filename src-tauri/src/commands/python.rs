@@ -41,18 +41,6 @@ macro_rules! py_command_str_opts {
     };
 }
 
-macro_rules! py_command_str_ii {
-    ($name:ident, $handler:path, $ret:ty) => {
-        #[tauri::command(rename_all = "snake_case")]
-        pub async fn $name(url: String, arg1: i64, arg2: i64) -> Result<$ret, AppError> {
-            run_python_blocking(stringify!($name), move || $handler(&url, arg1, arg2))
-                .await
-                .map_err(AppError::from)?
-                .into_result()
-        }
-    };
-}
-
 macro_rules! py_command_i64 {
     ($name:ident, $handler:path, $ret:ty) => {
         #[tauri::command(rename_all = "snake_case")]
@@ -94,11 +82,35 @@ py_command_str_opts!(py_get_mix_info, crate::python::handler::get_mix_info, MixI
 py_command_str_opts!(py_get_collects_video_list, crate::python::handler::get_collects_video_list, CollectsVideoListResult);
 py_command_str_opts!(py_get_user_likes, crate::python::handler::get_user_likes, UserLikesResult);
 
-// 模式 3: (url: String, arg1: i64, arg2: i64)
-py_command_str_ii!(py_search_videos, crate::python::handler::search_videos, SearchResult);
-py_command_str_ii!(py_get_following_list, crate::python::handler::get_following_list, FollowingListResult);
-py_command_str_ii!(py_get_follower_list, crate::python::handler::get_follower_list, FollowerListResult);
-py_command_str_ii!(py_get_comments, crate::python::handler::get_comments, CommentsResult);
+// 模式 3: 手动定义（原 py_command_str_ii! 宏参数名硬编码为 arg1/arg2，与前端不匹配）
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn py_search_videos(keyword: String, offset: i64, count: i64) -> Result<SearchResult, AppError> {
+    run_python_blocking("py_search_videos", move || {
+        crate::python::handler::search_videos(&keyword, offset, count)
+    }).await.map_err(AppError::from)?.into_result()
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn py_get_following_list(url: String, offset: i64, count: i64) -> Result<FollowingListResult, AppError> {
+    run_python_blocking("py_get_following_list", move || {
+        crate::python::handler::get_following_list(&url, offset, count)
+    }).await.map_err(AppError::from)?.into_result()
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn py_get_follower_list(url: String, offset: i64, count: i64) -> Result<FollowerListResult, AppError> {
+    run_python_blocking("py_get_follower_list", move || {
+        crate::python::handler::get_follower_list(&url, offset, count)
+    }).await.map_err(AppError::from)?.into_result()
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn py_get_comments(url: String, cursor: i64, count: i64) -> Result<CommentsResult, AppError> {
+    run_python_blocking("py_get_comments", move || {
+        crate::python::handler::get_comments(&url, cursor, count)
+    }).await.map_err(AppError::from)?.into_result()
+}
 
 // 模式 4: (count: i64)
 py_command_i64!(py_get_tab_feed, crate::python::handler::get_tab_feed, TabFeedResult);

@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { ErrorBanner } from "@/components/shared/error-banner";
 import { formatCount, formatDurationSec } from "@/lib/utils";
+import { CommentDialog } from "@/components/shared/comment-dialog";
 
 type MixVideo = VideoItem & { downloaded?: boolean };
 
@@ -34,6 +35,7 @@ export default function MixPage() {
   const [mixName, setMixName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [currentUrl, setCurrentUrl] = useState("");
+  const [commentAwemeId, setCommentAwemeId] = useState<string | null>(null);
 
   const { items: videos, setItems: setVideos, hasMore, loadingMore, sentinelRef, reset } = useInfiniteScroll<MixVideo>({
     fetchPage: useCallback(async (cursor: number) => {
@@ -141,7 +143,10 @@ export default function MixPage() {
               {videos.map((video, i) => (
                 <AnimateEntry key={video.aweme_id} delay={Math.min(i * 25, 500)}>
                   <Bezel radius="lg" padding="sm">
-                    <div className={`flex items-center gap-4 p-4 bg-card transition-all duration-300 ${video.downloaded ? "bg-success/[0.02]" : ""}`}>
+                    <div
+                      className={`flex items-center gap-4 p-4 bg-card transition-all duration-300 cursor-pointer hover:bg-foreground/[0.02] ${video.downloaded ? "bg-success/[0.02]" : ""}`}
+                      onClick={() => setCommentAwemeId(video.aweme_id)}
+                    >
                       <div className="h-8 w-8 rounded-full bg-foreground/[0.04] ring-1 ring-foreground/[0.06] flex items-center justify-center text-sm font-medium shrink-0">
                         {video.downloaded ? <CheckCircle2 className="h-4 w-4 text-success" /> : i + 1}
                       </div>
@@ -179,6 +184,12 @@ export default function MixPage() {
       </div>
 
       <DownloadStatusCard />
+
+      <CommentDialog
+        awemeId={commentAwemeId ?? ""}
+        open={!!commentAwemeId}
+        onOpenChange={(open) => !open && setCommentAwemeId(null)}
+      />
     </>
   );
 }

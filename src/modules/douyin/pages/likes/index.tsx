@@ -15,6 +15,7 @@ import { useActiveTask } from "@/hooks/use-active-task";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import type { UserProfile as UserProfileType, VideoItem } from "@/lib/api-types";
 import { formatDurationSec } from "@/lib/utils";
+import { CommentDialog } from "@/components/shared/comment-dialog";
 
 export default function LikesPage() {
   const [loading, setLoading] = useState(false);
@@ -24,6 +25,7 @@ export default function LikesPage() {
   const [downloadedCount, setDownloadedCount] = useState(0);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [currentUrl, setCurrentUrl] = useState("");
+  const [commentAwemeId, setCommentAwemeId] = useState<string | null>(null);
   const batchTask = useActiveTask(activeTaskId);
   const downloadProgress = batchTask ? ((batchTask.total ?? 0) > 0 ? Math.round(((batchTask.completed ?? 0) / (batchTask.total ?? 1)) * 100) : 0) : 0;
 
@@ -143,6 +145,7 @@ export default function LikesPage() {
                   diggCount={video.digg_count}
                   commentCount={video.comment_count}
                   shareCount={video.share_count}
+                  onClick={() => setCommentAwemeId(video.aweme_id)}
                 />
               ))}
             </div>
@@ -156,6 +159,12 @@ export default function LikesPage() {
           </>
         )}
       </div>
+
+      <CommentDialog
+        awemeId={commentAwemeId ?? ""}
+        open={!!commentAwemeId}
+        onOpenChange={(open) => !open && setCommentAwemeId(null)}
+      />
     </>
   );
 }

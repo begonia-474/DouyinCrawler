@@ -12,6 +12,7 @@ interface VideoCardProps {
   commentCount?: number;
   shareCount?: number;
   onDownload?: () => void;
+  onClick?: () => void;
 }
 
 export function VideoCard({
@@ -22,10 +23,14 @@ export function VideoCard({
   commentCount,
   shareCount,
   onDownload,
+  onClick,
 }: VideoCardProps) {
   return (
     <Bezel radius="lg" padding="sm">
-      <div className="group overflow-hidden bg-card">
+      <div
+        className={`group overflow-hidden bg-card ${onClick ? "cursor-pointer hover:ring-1 hover:ring-foreground/10 transition-all duration-200" : ""}`}
+        onClick={onClick}
+      >
         <div className="aspect-video bg-foreground/[0.03] relative overflow-hidden">
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="h-14 w-14 rounded-full bg-foreground/[0.06] backdrop-blur-sm flex items-center justify-center ring-1 ring-foreground/[0.06]">
@@ -43,7 +48,7 @@ export function VideoCard({
           <div className="absolute inset-0 bg-foreground/0 group-hover:bg-foreground/20 transition-all duration-500 flex items-center justify-center opacity-0 group-hover:opacity-100">
             <Button
               size="sm"
-              onClick={onDownload}
+              onClick={(e) => { e.stopPropagation(); onDownload?.(); }}
               className="rounded-full px-5 shadow-ambient-lg bg-background text-foreground hover:bg-background/90"
             >
               <Download className="h-4 w-4 mr-1.5" />

@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { Header } from "@/components/layout/header";
 import { VideoCard } from "@/components/shared/video-card";
 import { Button } from "@/components/ui/button";
@@ -9,8 +9,10 @@ import { ErrorBanner } from "@/components/shared/error-banner";
 import { useTabFeedQuery, useFollowFeedQuery, useFriendFeedQuery } from "@/lib/queries";
 import type { VideoItem } from "@/lib/api-types";
 import { RefreshCw, Loader2, Rss } from "lucide-react";
+import { CommentDialog } from "@/components/shared/comment-dialog";
 
 export default function FeedPage() {
+  const [commentAwemeId, setCommentAwemeId] = useState<string | null>(null);
   const tabFeed = useTabFeedQuery(false);
   const followFeed = useFollowFeedQuery(false);
   const friendFeed = useFriendFeedQuery(false);
@@ -59,6 +61,7 @@ export default function FeedPage() {
                 diggCount={video.digg_count}
                 commentCount={video.comment_count}
                 shareCount={video.share_count}
+                onClick={() => setCommentAwemeId(video.aweme_id)}
               />
             </AnimateEntry>
           ))}
@@ -98,6 +101,12 @@ export default function FeedPage() {
           {renderVideoGrid(friendVideos, "朋友", "friend", friendFeed.isFetching)}
         </TabsContent>
       </Tabs>
+
+      <CommentDialog
+        awemeId={commentAwemeId ?? ""}
+        open={!!commentAwemeId}
+        onOpenChange={(open) => !open && setCommentAwemeId(null)}
+      />
     </>
   );
 }
