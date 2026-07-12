@@ -6,7 +6,6 @@ import { VideoCard } from "@/components/shared/video-card";
 import { InfiniteScrollSentinel } from "@/components/shared/infinite-scroll-sentinel";
 import { LoadingSpinner } from "@/components/shared/loading-spinner";
 import { ErrorBanner } from "@/components/shared/error-banner";
-import { CommentDialog } from "@/components/shared/comment-dialog";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import { getRelated } from "@/lib/api/related";
 import { formatDurationSec } from "@/lib/utils";
@@ -20,7 +19,6 @@ export default function RelatedPage() {
 
   const [error, setError] = useState<string | null>(null);
   const seenIdsRef = useRef<Set<string>>(new Set());
-  const [commentAwemeId, setCommentAwemeId] = useState<string | null>(null);
 
   const { items: videos, hasMore, loadingMore, initialLoading, sentinelRef, reset } = useInfiniteScroll<VideoItem>({
     fetchPage: useCallback(async () => {
@@ -54,8 +52,7 @@ export default function RelatedPage() {
 
   const handleVideoClick = useCallback(
     (video: VideoItem) => {
-      const videoUrl = `https://www.douyin.com/video/${video.aweme_id}`;
-      navigate(`/douyin/related?url=${encodeURIComponent(videoUrl)}&aweme_id=${video.aweme_id}`);
+      navigate(`/douyin/video/${video.aweme_id}`, { state: { from: "相关推荐", fromPath: "/douyin/related" } });
     },
     [navigate]
   );
@@ -117,12 +114,6 @@ export default function RelatedPage() {
           </AnimateEntry>
         )}
       </div>
-
-      <CommentDialog
-        awemeId={commentAwemeId ?? ""}
-        open={!!commentAwemeId}
-        onOpenChange={(open) => !open && setCommentAwemeId(null)}
-      />
     </>
   );
 }

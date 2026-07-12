@@ -1,4 +1,5 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { Header } from "@/components/layout/header";
 import { AnimateEntry } from "@/components/shared/animate-entry";
 import { UrlInput } from "@/components/shared/url-input";
@@ -13,19 +14,19 @@ import { ErrorBanner } from "@/components/shared/error-banner";
 import { getUserProfile, getUserLikes, downloadUserLikes } from "@/lib/api";
 import { useActiveTask } from "@/hooks/use-active-task";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
+import { usePersistedUrl } from "@/hooks/use-persisted-url";
 import type { UserProfile as UserProfileType, VideoItem } from "@/lib/api-types";
 import { formatDurationSec } from "@/lib/utils";
-import { CommentDialog } from "@/components/shared/comment-dialog";
 
 export default function LikesPage() {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [profile, setProfile] = useState<UserProfileType | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [downloadedCount, setDownloadedCount] = useState(0);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
-  const [currentUrl, setCurrentUrl] = useState("");
-  const [commentAwemeId, setCommentAwemeId] = useState<string | null>(null);
+  const [currentUrl, setCurrentUrl] = usePersistedUrl("likes");
   const batchTask = useActiveTask(activeTaskId);
   const downloadProgress = batchTask ? ((batchTask.total ?? 0) > 0 ? Math.round(((batchTask.completed ?? 0) / (batchTask.total ?? 1)) * 100) : 0) : 0;
 
@@ -72,7 +73,16 @@ export default function LikesPage() {
     }
 
     setLoading(false);
-  }, [reset, setLikes]);
+  }, [reset, setLikes, setCurrentUrl]);
+
+  // 挂载时自动恢复上次解析
+  const initRef = useRef(true);
+  useEffect(() => {
+    if (initRef.current && currentUrl) {
+      initRef.current = false;
+      handleParse(currentUrl);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDownloadAll = async () => {
     setDownloading(true);
@@ -145,7 +155,7 @@ export default function LikesPage() {
                   diggCount={video.digg_count}
                   commentCount={video.comment_count}
                   shareCount={video.share_count}
-                  onClick={() => setCommentAwemeId(video.aweme_id)}
+                  onClick={() => navigate(`/douyin/video/${video.aweme_id}`, { state: { from: "点赞", fromPath: "/douyin/likes" } })}
                 />
               ))}
             </div>
@@ -159,12 +169,6 @@ export default function LikesPage() {
           </>
         )}
       </div>
-
-      <CommentDialog
-        awemeId={commentAwemeId ?? ""}
-        open={!!commentAwemeId}
-        onOpenChange={(open) => !open && setCommentAwemeId(null)}
-      />
     </>
   );
 }

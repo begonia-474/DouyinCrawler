@@ -1,4 +1,5 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { Header } from "@/components/layout/header";
 import { AnimateEntry } from "@/components/shared/animate-entry";
 import { UrlInput } from "@/components/shared/url-input";
@@ -15,6 +16,7 @@ import {
 } from "@/lib/api";
 import { useActiveTask } from "@/hooks/use-active-task";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
+import { usePersistedUrl } from "@/hooks/use-persisted-url";
 import type { UserProfile as UserProfileType, VideoItem, FollowItem } from "@/lib/api-types";
 import {
   Users, Heart, Video, UserPlus,
@@ -26,7 +28,6 @@ import { InfiniteScrollSentinel } from "@/components/shared/infinite-scroll-sent
 import { LoadingSpinner } from "@/components/shared/loading-spinner";
 import { ErrorBanner } from "@/components/shared/error-banner";
 import { formatCount, formatDurationSec } from "@/lib/utils";
-import { CommentDialog } from "@/components/shared/comment-dialog";
 
 function FollowItemCard({ item, type }: { item: FollowItem; type: "following" | "follower" }) {
   return (
@@ -50,6 +51,7 @@ function FollowItemCard({ item, type }: { item: FollowItem; type: "following" | 
 }
 
 export default function UserPage() {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [profile, setProfile] = useState<UserProfileType | null>(null);
   const [following, setFollowing] = useState<FollowItem[]>([]);
@@ -58,8 +60,7 @@ export default function UserPage() {
   const [downloading, setDownloading] = useState(false);
   const [downloadedCount, setDownloadedCount] = useState(0);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
-  const [currentUrl, setCurrentUrl] = useState("");
-  const [commentAwemeId, setCommentAwemeId] = useState<string | null>(null);
+  const [currentUrl, setCurrentUrl] = usePersistedUrl("user");
   const batchTask = useActiveTask(activeTaskId);
   const downloadProgress = batchTask ? ((batchTask.total ?? 0) > 0 ? Math.round(((batchTask.completed ?? 0) / (batchTask.total ?? 1)) * 100) : 0) : 0;
 
@@ -114,7 +115,16 @@ export default function UserPage() {
     if (followersRes.success && followersRes.data?.followers) setFollowers(followersRes.data.followers);
 
     setLoading(false);
-  }, [reset, setVideos]);
+  }, [reset, setVideos, setCurrentUrl]);
+
+  // 挂载时自动恢复上次解析
+  const initRef = useRef(true);
+  useEffect(() => {
+    if (initRef.current && currentUrl) {
+      initRef.current = false;
+      handleParse(currentUrl);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDownloadAll = async () => {
     setDownloading(true);
@@ -221,7 +231,7 @@ export default function UserPage() {
                       diggCount={video.digg_count}
                       commentCount={video.comment_count}
                       shareCount={video.share_count}
-                      onClick={() => setCommentAwemeId(video.aweme_id)}
+                      onClick={() => navigate(`/douyin/video/${video.aweme_id}`, { state: { from: "用户主页", fromPath: "/douyin/user" } })}
                     />
                   ))}
                 </div>
@@ -251,12 +261,6 @@ export default function UserPage() {
       </div>
 
       <DownloadStatusCard />
-
-      <CommentDialog
-        awemeId={commentAwemeId ?? ""}
-        open={!!commentAwemeId}
-        onOpenChange={(open) => !open && setCommentAwemeId(null)}
-      />
     </>
   );
 }

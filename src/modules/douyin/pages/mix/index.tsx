@@ -1,4 +1,5 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { Header } from "@/components/layout/header";
 import { AnimateEntry } from "@/components/shared/animate-entry";
 import { UrlInput } from "@/components/shared/url-input";
@@ -12,6 +13,7 @@ import { InfiniteScrollSentinel } from "@/components/shared/infinite-scroll-sent
 import { getMixInfo, downloadMix } from "@/lib/api";
 import { useActiveTask } from "@/hooks/use-active-task";
 import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
+import { usePersistedUrl } from "@/hooks/use-persisted-url";
 import type { VideoItem } from "@/lib/api-types";
 import {
   Download,
@@ -21,11 +23,11 @@ import {
 } from "lucide-react";
 import { ErrorBanner } from "@/components/shared/error-banner";
 import { formatCount, formatDurationSec } from "@/lib/utils";
-import { CommentDialog } from "@/components/shared/comment-dialog";
 
 type MixVideo = VideoItem & { downloaded?: boolean };
 
 export default function MixPage() {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [downloadedCount, setDownloadedCount] = useState(0);
@@ -34,8 +36,7 @@ export default function MixPage() {
   const downloadProgress = batchTask ? ((batchTask.total ?? 0) > 0 ? Math.round(((batchTask.completed ?? 0) / (batchTask.total ?? 1)) * 100) : 0) : 0;
   const [mixName, setMixName] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [currentUrl, setCurrentUrl] = useState("");
-  const [commentAwemeId, setCommentAwemeId] = useState<string | null>(null);
+  const [currentUrl, setCurrentUrl] = usePersistedUrl("mix");
 
   const { items: videos, setItems: setVideos, hasMore, loadingMore, sentinelRef, reset } = useInfiniteScroll<MixVideo>({
     fetchPage: useCallback(async (cursor: number) => {
@@ -71,7 +72,16 @@ export default function MixPage() {
       setError(res.error || "获取合集失败");
     }
     setLoading(false);
-  }, [reset]);
+  }, [reset, setCurrentUrl]);
+
+  // 挂载时自动恢复上次解析
+  const initRef = useRef(true);
+  useEffect(() => {
+    if (initRef.current && currentUrl) {
+      initRef.current = false;
+      handleParse(currentUrl);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDownloadAll = async () => {
     setDownloading(true);
@@ -145,7 +155,7 @@ export default function MixPage() {
                   <Bezel radius="lg" padding="sm">
                     <div
                       className={`flex items-center gap-4 p-4 bg-card transition-all duration-300 cursor-pointer hover:bg-foreground/[0.02] ${video.downloaded ? "bg-success/[0.02]" : ""}`}
-                      onClick={() => setCommentAwemeId(video.aweme_id)}
+                      onClick={() => navigate(`/douyin/video/${video.aweme_id}`, { state: { from: "合集", fromPath: "/douyin/mix" } })}
                     >
                       <div className="h-8 w-8 rounded-full bg-foreground/[0.04] ring-1 ring-foreground/[0.06] flex items-center justify-center text-sm font-medium shrink-0">
                         {video.downloaded ? <CheckCircle2 className="h-4 w-4 text-success" /> : i + 1}
@@ -184,12 +194,6 @@ export default function MixPage() {
       </div>
 
       <DownloadStatusCard />
-
-      <CommentDialog
-        awemeId={commentAwemeId ?? ""}
-        open={!!commentAwemeId}
-        onOpenChange={(open) => !open && setCommentAwemeId(null)}
-      />
     </>
   );
 }

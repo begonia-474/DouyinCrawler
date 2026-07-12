@@ -16,13 +16,11 @@ import type { VideoItem } from "@/lib/api-types";
 import { ArrowLeft } from "lucide-react";
 import { ErrorBanner } from "@/components/shared/error-banner";
 import { formatDurationSec } from "@/lib/utils";
-import { CommentDialog } from "@/components/shared/comment-dialog";
 
 export default function CollectsDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
-  const [commentAwemeId, setCommentAwemeId] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [downloadedCount, setDownloadedCount] = useState(0);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
@@ -122,7 +120,7 @@ export default function CollectsDetailPage() {
                   diggCount={video.digg_count}
                   commentCount={video.comment_count}
                   shareCount={video.share_count}
-                  onClick={() => setCommentAwemeId(video.aweme_id)}
+                  onClick={() => navigate(`/douyin/video/${video.aweme_id}`, { state: { from: "收藏夹", fromPath: "/douyin/favorites" } })}
                 />
               ))}
             </div>
@@ -138,12 +136,6 @@ export default function CollectsDetailPage() {
       </div>
 
       <DownloadStatusCard />
-
-      <CommentDialog
-        awemeId={commentAwemeId ?? ""}
-        open={!!commentAwemeId}
-        onOpenChange={(open) => !open && setCommentAwemeId(null)}
-      />
     </>
   );
 }

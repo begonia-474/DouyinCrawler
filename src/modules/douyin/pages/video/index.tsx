@@ -23,7 +23,6 @@ import {
   Compass,
 } from "lucide-react";
 import { formatCount } from "@/lib/utils";
-import { CommentDialog } from "@/components/shared/comment-dialog";
 
 interface ParsedInfo {
   type: string;
@@ -40,7 +39,6 @@ export default function VideoPage() {
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [downloading, setDownloading] = useState(false);
   const [downloaded, setDownloaded] = useState(false);
-  const [commentAwemeId, setCommentAwemeId] = useState<string | null>(null);
 
   // React Query: 解析结果按 URL 缓存，路由切换不丢失
   const { data: parseResult, isLoading, error: parseError } = useVideoParseQuery(submittedUrl);
@@ -119,7 +117,10 @@ export default function VideoPage() {
         {parsed && (
           <AnimateEntry delay={100}>
             <Bezel radius="xl">
-              <div className="p-7">
+              <div
+                className="p-7 cursor-pointer hover:bg-foreground/[0.02] transition-colors"
+                onClick={() => parsed?.awemeId && navigate(`/douyin/video/${parsed.awemeId}`, { state: { from: "单视频下载", fromPath: "/douyin/video" } })}
+              >
                 <div className="flex items-start justify-between">
                   <div className="space-y-2">
                     <div className="flex items-center gap-2">
@@ -134,7 +135,7 @@ export default function VideoPage() {
                     </p>
                   </div>
                   <Button
-                    onClick={handleDownload}
+                    onClick={(e) => { e.stopPropagation(); handleDownload(); }}
                     disabled={downloading || downloaded}
                     size="lg"
                   >
@@ -189,7 +190,7 @@ export default function VideoPage() {
                   </div>
                   <div
                     className="text-center cursor-pointer hover:bg-foreground/[0.03] rounded-lg py-1 -my-1 transition-colors"
-                    onClick={() => parsed?.awemeId && setCommentAwemeId(parsed.awemeId)}
+                    onClick={() => parsed?.awemeId && navigate(`/douyin/video/${parsed.awemeId}`, { state: { from: "单视频下载", fromPath: "/douyin/video" } })}
                   >
                     <MessageSquare className="h-4 w-4 text-muted-foreground mx-auto mb-2" />
                     <p className="text-xl font-heading font-bold tabular-nums">{formatCount(stats.comment_count)}</p>
@@ -216,16 +217,13 @@ export default function VideoPage() {
             <Bezel radius="xl">
               <div
                 className="p-7 flex items-center justify-between cursor-pointer hover:bg-foreground/[0.02] transition-colors"
-                onClick={() => {
-                  const videoUrl = `https://www.douyin.com/video/${parsed.awemeId}`;
-                  navigate(`/douyin/related?url=${encodeURIComponent(videoUrl)}&aweme_id=${parsed.awemeId}`);
-                }}
+                onClick={() => navigate(`/douyin/video/${parsed.awemeId}`, { state: { from: "单视频下载", fromPath: "/douyin/video" } })}
               >
                 <div className="flex items-center gap-3">
                   <Compass className="h-5 w-5 text-muted-foreground" />
                   <div>
-                    <h4 className="text-sm font-medium">相关推荐</h4>
-                    <p className="text-xs text-muted-foreground tracking-wide">查看基于此视频推荐的相似作品</p>
+                    <h4 className="text-sm font-medium">视频详情</h4>
+                    <p className="text-xs text-muted-foreground tracking-wide">查看评论、相关推荐和更多信息</p>
                   </div>
                 </div>
                 <ArrowRight className="h-4 w-4 text-muted-foreground" />
@@ -234,12 +232,6 @@ export default function VideoPage() {
           </AnimateEntry>
         )}
       </div>
-
-      <CommentDialog
-        awemeId={commentAwemeId ?? ""}
-        open={!!commentAwemeId}
-        onOpenChange={(open) => !open && setCommentAwemeId(null)}
-      />
     </>
   );
 }
