@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { Header } from "@/components/layout/header";
 import { UrlInput } from "@/components/shared/url-input";
 import { Button } from "@/components/ui/button";
@@ -19,6 +20,7 @@ import {
   Bookmark,
   BarChart3,
   ArrowRight,
+  Compass,
 } from "lucide-react";
 import { formatCount } from "@/lib/utils";
 import { CommentDialog } from "@/components/shared/comment-dialog";
@@ -32,6 +34,7 @@ interface ParsedInfo {
 }
 
 export default function VideoPage() {
+  const navigate = useNavigate();
   const [submittedUrl, setSubmittedUrl] = useState<string | null>(null);
   const [downloadUrl, setDownloadUrl] = useState("");
   const [downloadProgress, setDownloadProgress] = useState(0);
@@ -203,6 +206,29 @@ export default function VideoPage() {
                     <p className="text-xs text-muted-foreground mt-0.5 tracking-wide">收藏</p>
                   </div>
                 </div>
+              </div>
+            </Bezel>
+          </AnimateEntry>
+        )}
+
+        {parsed?.awemeId && (
+          <AnimateEntry delay={200}>
+            <Bezel radius="xl">
+              <div
+                className="p-7 flex items-center justify-between cursor-pointer hover:bg-foreground/[0.02] transition-colors"
+                onClick={() => {
+                  const videoUrl = `https://www.douyin.com/video/${parsed.awemeId}`;
+                  navigate(`/douyin/related?url=${encodeURIComponent(videoUrl)}&aweme_id=${parsed.awemeId}`);
+                }}
+              >
+                <div className="flex items-center gap-3">
+                  <Compass className="h-5 w-5 text-muted-foreground" />
+                  <div>
+                    <h4 className="text-sm font-medium">相关推荐</h4>
+                    <p className="text-xs text-muted-foreground tracking-wide">查看基于此视频推荐的相似作品</p>
+                  </div>
+                </div>
+                <ArrowRight className="h-4 w-4 text-muted-foreground" />
               </div>
             </Bezel>
           </AnimateEntry>

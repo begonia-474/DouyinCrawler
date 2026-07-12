@@ -92,6 +92,15 @@ pub async fn py_search_videos(keyword: String, offset: i64, count: i64) -> Resul
 }
 
 #[tauri::command(rename_all = "snake_case")]
+pub async fn py_get_related(url: String, count: Option<i64>, filter_gids: Option<String>) -> Result<Value, AppError> {
+    let count = count.unwrap_or(20);
+    let filter_gids = filter_gids.unwrap_or_default();
+    run_python_blocking("py_get_related", move || {
+        crate::python::handler::get_related(&url, count, &filter_gids)
+    }).await.map_err(AppError::from)
+}
+
+#[tauri::command(rename_all = "snake_case")]
 pub async fn py_get_following_list(url: String, offset: i64, count: i64) -> Result<FollowingListResult, AppError> {
     run_python_blocking("py_get_following_list", move || {
         crate::python::handler::get_following_list(&url, offset, count)

@@ -124,8 +124,8 @@ class DouyinHandler:
         return await self._live.handle_following_live()
 
     # === 内容 ===
-    async def handle_related(self, url: str, progress_callback=None) -> dict:  # [reserved] 无 py_bridge 调用
-        return await self._content.handle_related(url, progress_callback)
+    async def handle_related(self, url: str, count: int = 20, filter_gids: str = "", progress_callback=None) -> dict:
+        return await self._content.handle_related(url, count, filter_gids, progress_callback)
 
     async def handle_post_comment(self, url: str, cursor: int = 0, count: int = 20) -> dict:
         return await self._content.handle_post_comment(url, cursor, count)

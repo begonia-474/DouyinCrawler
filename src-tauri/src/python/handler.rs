@@ -128,6 +128,16 @@ pub fn search_videos(keyword: &str, offset: i64, count: i64) -> PyResult<SearchR
 }
 
 // ============================================================
+// 相关推荐
+// ============================================================
+
+/// 获取相关推荐视频（单页，前端控制分页）
+pub fn get_related(url: &str, count: i64, filter_gids: &str) -> PyResult<Value> {
+    info!("[handler.rs] get_related, url={}", &url[..url.len().min(60)]);
+    call_py_json("get_related", (url, count, filter_gids))
+}
+
+// ============================================================
 // 信息流
 // ============================================================
 

@@ -307,6 +307,13 @@ def get_following_live() -> dict:
 
 
 @_safe_call
+def get_related(url: str, count: int = 20, filter_gids: str = "") -> dict:
+    """获取相关推荐视频（单页，前端控制分页）"""
+    handler = _get_task_manager().handler
+    return _run_async(handler.handle_related(url, count, filter_gids))
+
+
+@_safe_call
 def get_comments(url: str, cursor: int = 0, count: int = 20) -> dict:
     """获取评论"""
     handler = _get_task_manager().handler

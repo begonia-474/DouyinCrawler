@@ -226,9 +226,9 @@ class DouyinCrawler:
         params = PostDetail(aweme_id=aweme_id, msToken=self._get_token()).model_dump()
         return await self._get_json(self._sign_url(ep.POST_DETAIL, params))
 
-    async def fetch_post_related(self, aweme_id: str, count: int = 20) -> dict:
+    async def fetch_post_related(self, aweme_id: str, count: int = 20, filter_gids: str = "") -> dict:
         from core.models import PostRelated
-        params = PostRelated(aweme_id=aweme_id, count=count, msToken=self._get_token()).model_dump()
+        params = PostRelated(aweme_id=aweme_id, count=count, filterGids=filter_gids, msToken=self._get_token()).model_dump()
         return await self._get_json(self._sign_url(ep.POST_RELATED, params))
 
     async def fetch_post_comment(self, aweme_id: str, cursor: int = 0, count: int = 20) -> dict:

@@ -24,6 +24,9 @@ export { getComments, getCommentReplies } from "./comment";
 
 export { search } from "./search";
 
+export { getRelated } from "./related";
+export type { RelatedResult } from "./related";
+
 export { getLiveRecords, getLiveRecordCount, getVideos, getVideoCount, getUsers, getUserCount, getUserBySecUid, getVideoStats, getUserStats, getDownloadTrend, getTopAuthors, getStorageAnalysis, dbHealthCheck, getDbPath } from "./db-query";
 
 export { openFolder, exportData, getDownloadDirByMusicId, getDownloadDirByAwemeId, getUserDownloadDir } from "./file";

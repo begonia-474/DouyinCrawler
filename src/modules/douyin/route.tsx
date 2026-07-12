@@ -12,6 +12,7 @@ const FeedPage = React.lazy(() => import("./pages/feed"));
 const FavoritesPage = React.lazy(() => import("./pages/favorites"));
 const FavoritesDetailPage = React.lazy(() => import("./pages/favorites/[id]"));
 const MusicPage = React.lazy(() => import("./pages/music"));
+const RelatedPage = React.lazy(() => import("./pages/related"));
 const LibraryPage = React.lazy(() => import("./pages/library"));
 const LibraryImagesPage = React.lazy(() => import("./pages/library/images"));
 const LibraryLivePage = React.lazy(() => import("./pages/library/live"));
@@ -31,6 +32,7 @@ export const douyinRoutes: RouteObject[] = [
   { path: "favorites", element: <FavoritesPage /> },
   { path: "favorites/:id", element: <FavoritesDetailPage /> },
   { path: "music", element: <MusicPage /> },
+  { path: "related", element: <RelatedPage /> },
   { path: "library", element: <LibraryPage /> },
   { path: "library/images", element: <LibraryImagesPage /> },
   { path: "library/live", element: <LibraryLivePage /> },

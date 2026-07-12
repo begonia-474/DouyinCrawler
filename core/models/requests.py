@@ -5,6 +5,7 @@
 """
 
 from pydantic import BaseModel
+from urllib.parse import quote
 
 
 class BaseRequestModel(BaseModel):
@@ -142,6 +143,8 @@ class PostRelated(BaseRequestModel):
     aweme_id: str
     count: int = 20
     filterGids: str = ""
+    awemePcRecRawData: str = quote('{"is_client":"false"}', safe="")
+    sub_channel_id: int = 3
 
 
 class PostStats(BaseRequestModel):

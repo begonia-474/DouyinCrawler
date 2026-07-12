@@ -215,6 +215,7 @@ pub fn run() {
             commands::python::py_get_user_profile,
             commands::python::py_get_user_posts,
             commands::python::py_search_videos,
+            commands::python::py_get_related,
             commands::python::py_get_mix_info,
             commands::python::py_get_collects_list,
             commands::python::py_get_collects_video_list,
