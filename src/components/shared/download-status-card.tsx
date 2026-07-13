@@ -55,7 +55,7 @@ export function DownloadStatusCard() {
 
   return (
     <div className="fixed bottom-4 right-4 z-50 animate-in slide-in-from-bottom-4">
-      <Bezel radius="xl">
+      <Bezel radius="xl" lift>
         <div className="p-4 min-w-[280px] space-y-2.5">
           {/* 头部：图标 + 状态文字 + 操作按钮 */}
           <div className="flex items-center gap-3">

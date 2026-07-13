@@ -111,7 +111,7 @@ export function TaskCard({ task, liveState, onRemove }: TaskCardProps) {
   return (
     <CollapsiblePrimitive.Root open={open} onOpenChange={handleOpenChange}>
       <div className={cn(
-        "rounded-2xl bg-card overflow-hidden transition-all duration-200",
+        "rounded-2xl bg-card overflow-hidden transition-all duration-200 noise",
         isRunning && "ring-1 ring-primary/20"
       )}>
         {/* 卡片头部 —— 可点击展开 */}

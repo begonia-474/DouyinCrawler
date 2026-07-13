@@ -65,7 +65,7 @@ export default function DouyinIndex() {
       <div className="grid grid-cols-12 auto-rows-fr gap-5">
         {features.map((feature, i) => (
           <AnimateEntry key={feature.id} delay={i * 60} className={`${feature.span} h-full`}>
-            <Bezel radius="xl" className="h-full">
+            <Bezel radius="xl" lift className="h-full">
               <button
                 className="w-full h-full text-left p-7 group cursor-pointer transition-all duration-500 hover:bg-foreground/[0.02]"
                 onClick={() => navigate(feature.path)}

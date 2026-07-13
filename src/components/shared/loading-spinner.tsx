@@ -1,4 +1,4 @@
-import { Loader2 } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface LoadingSpinnerProps {
   size?: number;
@@ -6,12 +6,16 @@ interface LoadingSpinnerProps {
   text?: string;
 }
 
-/** 统一加载微调器 — 供所有页面使用 */
-export function LoadingSpinner({ size = 36, className = "", text }: LoadingSpinnerProps) {
+/** 统一加载占位 — 骨架屏风格 */
+export function LoadingSpinner({ className = "", text }: LoadingSpinnerProps) {
   return (
-    <div className={`flex flex-col items-center justify-center gap-3 py-12 ${className}`}>
-      <Loader2 className="animate-spin text-muted-foreground" size={size} />
-      {text && <p className="text-sm text-muted-foreground">{text}</p>}
+    <div className={`flex flex-col items-center justify-center gap-4 py-12 ${className}`}>
+      <div className="flex gap-2">
+        <Skeleton className="h-2 w-2 rounded-full animate-pulse [animation-delay:0ms]" />
+        <Skeleton className="h-2 w-2 rounded-full animate-pulse [animation-delay:150ms]" />
+        <Skeleton className="h-2 w-2 rounded-full animate-pulse [animation-delay:300ms]" />
+      </div>
+      {text && <p className="text-sm text-muted-foreground tracking-wide">{text}</p>}
     </div>
   );
 }

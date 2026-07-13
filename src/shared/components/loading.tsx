@@ -1,11 +1,33 @@
+import { Skeleton } from "@/components/ui/skeleton";
+
 export function Loading() {
   return (
-    <div className="flex flex-col items-center justify-center h-full gap-4">
-      <div className="relative h-12 w-12">
-        <div className="absolute inset-0 rounded-full border-2 border-foreground/[0.06]" />
-        <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-brand animate-spin" />
+    <div className="space-y-8 animate-in fade-in duration-300">
+      {/* Header skeleton */}
+      <div className="space-y-3">
+        <Skeleton className="h-3 w-16 rounded-full" />
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-4 w-64" />
       </div>
-      <span className="text-xs text-muted-foreground tracking-widest uppercase">加载中</span>
+
+      {/* Content skeleton — generic card grid */}
+      <div className="grid grid-cols-12 gap-5">
+        <div className="col-span-8 space-y-3">
+          <Skeleton className="h-32 rounded-[1.5rem]" />
+        </div>
+        <div className="col-span-4 space-y-3">
+          <Skeleton className="h-32 rounded-[1.5rem]" />
+        </div>
+        <div className="col-span-4 space-y-3">
+          <Skeleton className="h-28 rounded-[1.5rem]" />
+        </div>
+        <div className="col-span-4 space-y-3">
+          <Skeleton className="h-28 rounded-[1.5rem]" />
+        </div>
+        <div className="col-span-4 space-y-3">
+          <Skeleton className="h-28 rounded-[1.5rem]" />
+        </div>
+      </div>
     </div>
   );
 }

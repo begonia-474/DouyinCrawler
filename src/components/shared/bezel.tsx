@@ -6,6 +6,8 @@ interface BezelProps {
   className?: string;
   radius?: "md" | "lg" | "xl" | "2xl";
   ghost?: boolean;
+  /** 启用悬浮提升效果 */
+  lift?: boolean;
   /** @deprecated No longer used — kept for backward compatibility */
   padding?: "sm" | "md" | "lg";
 }
@@ -17,6 +19,7 @@ export function Bezel({
   className,
   radius = "xl",
   ghost = false,
+  lift = false,
   padding: _padding,
 }: BezelProps) {
   return (
@@ -25,6 +28,8 @@ export function Bezel({
         "relative overflow-hidden",
         radiusMap[radius],
         ghost ? "bg-transparent" : "bg-card",
+        !ghost && "noise",
+        lift && "card-lift",
         className,
       )}
     >
