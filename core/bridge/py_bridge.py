@@ -633,123 +633,28 @@ def resolve_urls(mode: str, url: str) -> dict:
         user_dir = download_path / app_name / "one" / (detail.author_nickname or "unknown")
         save_dir = user_dir / format_filename(naming, detail.to_dict()) if folderize else user_dir
 
-        from core.models.single_download import (
-            SingleAccessory,
-            SingleAccessoryKind,
-            SingleDownloadItem,
-            SingleDownloadPlanV1,
-            SingleMediaKind,
-            SingleOutputSpec,
-            SingleVideoMetadata,
+        from core.models.single_download import SingleDownloadPlanV1
+        from core.services.media_plan import build_media_items_v1
+
+        items = build_media_items_v1(
+            [detail], naming=naming, folderize=False, headers=base_headers
         )
-
-        base_name = format_filename(naming, detail.to_dict())
-        metadata = SingleVideoMetadata.model_validate(detail.to_db_dict())
-
-        def single_accessories(*, include_description: bool) -> list[SingleAccessory]:
-            accessories: list[SingleAccessory] = []
-            if music_enabled and detail.music_url:
-                accessories.append(SingleAccessory(
-                    kind=SingleAccessoryKind.MUSIC,
-                    url=detail.music_url,
-                    output=SingleOutputSpec(
-                        filename=f"{base_name}_music",
-                        suffix=".mp3",
-                        folder_name=None,
-                    ),
-                ))
-            if cover_enabled and detail.cover_url:
-                accessories.append(SingleAccessory(
-                    kind=SingleAccessoryKind.COVER,
-                    url=detail.cover_url,
-                    output=SingleOutputSpec(
-                        filename=f"{base_name}_cover",
-                        suffix=_cover_suffix(detail.cover_url),
-                        folder_name=None,
-                    ),
-                ))
-            if include_description and desc_enabled and detail.desc:
-                accessories.append(SingleAccessory(
-                    kind=SingleAccessoryKind.DESCRIPTION,
-                    content=detail.desc,
-                    output=SingleOutputSpec(
-                        filename=f"{base_name}_desc",
-                        suffix=".txt",
-                        folder_name=None,
-                    ),
-                ))
-            return accessories
-
-        def output(filename: str, suffix: str) -> SingleOutputSpec:
-            # ``save_dir`` already includes the folderized post directory for mode=one.
-            return SingleOutputSpec(
-                filename=filename,
-                suffix=suffix,
-                folder_name=None,
-            )
-        
-        # 构建下载项
-        if detail.is_image_post and (detail.images or detail.images_video):
-            # 图片帖子：先实况视频，再静态图（对齐 f2）
-            items: list[SingleDownloadItem] = []
-
-            # 实况视频（对齐 f2: _live_{i+1}.mp4）
-            if detail.images_video:
-                for i, live_url in enumerate(detail.images_video):
-                    if live_url:
-                        items.append(SingleDownloadItem(
-                            aweme_id=detail.aweme_id,
-                            urls=[live_url],
-                            kind=SingleMediaKind.LIVE_PHOTO,
-                            output=output(f"{base_name}_live_{i + 1}", ".mp4"),
-                            headers=base_headers.copy(),
-                            metadata=metadata,
-                        ))
-
-            # 静态图（对齐 f2: _image_{i+1}.webp）
-            for i, img_url in enumerate(detail.images):
-                if img_url:
-                    items.append(SingleDownloadItem(
-                        aweme_id=detail.aweme_id,
-                        urls=[img_url],
-                        kind=SingleMediaKind.IMAGE,
-                        output=output(f"{base_name}_image_{i + 1}", ".webp"),
-                        headers=base_headers.copy(),
-                        metadata=metadata,
-                    ))
-
-            # 添加附属文件
-            if items:
-                items[0].accessories.extend(
-                    single_accessories(include_description=False)
+        if not items:
+            return {"success": False, "error": "无法获取视频下载链接"}
+        # Rust applies the same config gate for both one and paged accessories.
+        for item in items:
+            item.accessories = [
+                accessory
+                for accessory in item.accessories
+                if (
+                    accessory.kind.value == "music" and music_enabled
+                    or accessory.kind.value == "cover" and cover_enabled
+                    or accessory.kind.value == "description" and desc_enabled
                 )
-
-            return SingleDownloadPlanV1(
-                save_dir=str(save_dir),
-                items=items,
-                total=len(items),
-            ).model_dump(mode="json")
-        else:
-            # 视频帖子
-            urls = detail.video_urls or ([detail.video_url] if detail.video_url else [])
-            urls = [download_url for download_url in urls if download_url]
-            if not urls:
-                return {"success": False, "error": "无法获取视频下载链接"}
-
-            item = SingleDownloadItem(
-                aweme_id=detail.aweme_id,
-                urls=urls,
-                kind=SingleMediaKind.VIDEO,
-                output=output(f"{base_name}_video", ".mp4"),
-                headers=base_headers.copy(),
-                metadata=metadata,
-                accessories=single_accessories(include_description=True),
-            )
-            return SingleDownloadPlanV1(
-                save_dir=str(save_dir),
-                items=[item],
-                total=1,
-            ).model_dump(mode="json")
+            ]
+        return SingleDownloadPlanV1(
+            save_dir=str(save_dir), items=items, total=len(items)
+        ).model_dump(mode="json")
     
     elif mode in ("post", "like", "mix", "collects"):
         # 批量解析 — 直接使用 crawler + PostDetailFilter 获取 to_db_dict() 格式
@@ -988,6 +893,9 @@ def resolve_page(mode: str, url: str, cursor: int = 0, count: int = 20, aweme_id
         "Cookie": cookie,
     }
 
+    from core.models.paged_download import PagedDownloadPlanV1, PagedUserProfileV1
+    from core.services.media_plan import build_media_items_v1, ordered_aweme_ids
+
     def _build_items_from_details(details, mode_for_dir):
         """从 PostDetailFilter 列表构建 items（不过滤附属文件）"""
         items = []
@@ -1098,16 +1006,30 @@ def resolve_page(mode: str, url: str, cursor: int = 0, count: int = 20, aweme_id
 
             nickname = getattr(detail, "author_nickname", None) or "unknown"
             save_dir = download_path / app_name / mode / nickname
-            items = _build_items_from_details([detail], mode)
+            typed_items = build_media_items_v1(
+                [detail], naming=naming, folderize=folderize, headers=base_headers
+            )
+            page_aweme_ids = ordered_aweme_ids(typed_items)
 
-            return {
-                "success": True,
-                "items": items,
-                "save_dir": str(save_dir),
-                "total": len(items),
-                "next_cursor": None,
-                "has_more": False,
-            }
+            if mode == "post":
+                return PagedDownloadPlanV1(
+                    save_dir=str(save_dir),
+                    items=typed_items,
+                    next_cursor=None,
+                    has_more=False,
+                    page_aweme_ids=page_aweme_ids,
+                ).model_dump(mode="json")
+            else:
+                items = _build_items_from_details([detail], mode)
+                return {
+                    "success": True,
+                    "items": items,
+                    "save_dir": str(save_dir),
+                    "total": len(items),
+                    "next_cursor": None,
+                    "has_more": False,
+                }
+
         from core.crawler_engine.filter import UserPostFilter, UserProfileFilter
         from core.utils import SecUserIdFetcher, MixIdFetcher
 
@@ -1159,7 +1081,6 @@ def resolve_page(mode: str, url: str, cursor: int = 0, count: int = 20, aweme_id
         if error:
             return {"success": False, "error": error}
 
-        items = _build_items_from_details(all_details, mode)
         # 对齐 f2：download_path / app_name / mode / nickname
         nickname = "unknown"
         if user_profile:
@@ -1169,17 +1090,41 @@ def resolve_page(mode: str, url: str, cursor: int = 0, count: int = 20, aweme_id
             nickname = getattr(first, "author_nickname", None) or "unknown"
         save_dir = download_path / app_name / mode / nickname
 
-        result = {
-            "success": True,
-            "items": items,
-            "save_dir": str(save_dir),
-            "total": len(items),
-            "next_cursor": next_cursor,
-            "has_more": has_more,
-        }
-        if user_profile:
-            result["user_profile"] = user_profile
-        return result
+        if mode == "post":
+            typed_items = build_media_items_v1(
+                all_details, naming=naming, folderize=folderize, headers=base_headers
+            )
+            page_aweme_ids = ordered_aweme_ids(typed_items)
+            typed_profile = None
+            if user_profile:
+                typed_profile = PagedUserProfileV1.model_validate(
+                    {
+                        field: user_profile.get(field)
+                        for field in PagedUserProfileV1.model_fields
+                        if field in user_profile
+                    }
+                )
+            return PagedDownloadPlanV1(
+                save_dir=str(save_dir),
+                items=typed_items,
+                next_cursor=next_cursor,
+                has_more=has_more,
+                page_aweme_ids=page_aweme_ids,
+                user_profile=typed_profile,
+            ).model_dump(mode="json")
+        else:
+            items = _build_items_from_details(all_details, mode)
+            result = {
+                "success": True,
+                "items": items,
+                "save_dir": str(save_dir),
+                "total": len(items),
+                "next_cursor": next_cursor,
+                "has_more": has_more,
+            }
+            if user_profile:
+                result["user_profile"] = user_profile
+            return result
 
     elif mode == "music":
         # 音乐：单次拉取，无分页

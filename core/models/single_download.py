@@ -9,19 +9,19 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 SINGLE_DOWNLOAD_CONTRACT_VERSION = 1
 
 
-class SingleMediaKind(str, Enum):
+class MediaKindV1(str, Enum):
     VIDEO = "video"
     IMAGE = "image"
     LIVE_PHOTO = "live_photo"
 
 
-class SingleAccessoryKind(str, Enum):
+class MediaAccessoryKindV1(str, Enum):
     MUSIC = "music"
     COVER = "cover"
     DESCRIPTION = "description"
 
 
-class SingleOutputSpec(BaseModel):
+class MediaOutputSpecV1(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     filename: str = Field(min_length=1)
@@ -29,25 +29,25 @@ class SingleOutputSpec(BaseModel):
     folder_name: Optional[str]
 
 
-class SingleAccessory(BaseModel):
+class MediaAccessoryV1(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    kind: SingleAccessoryKind
-    output: SingleOutputSpec
+    kind: MediaAccessoryKindV1
+    output: MediaOutputSpecV1
     url: Optional[str] = None
     content: Optional[str] = None
 
     @model_validator(mode="after")
-    def validate_payload(self) -> "SingleAccessory":
-        if self.kind in (SingleAccessoryKind.MUSIC, SingleAccessoryKind.COVER):
+    def validate_payload(self) -> "MediaAccessoryV1":
+        if self.kind in (MediaAccessoryKindV1.MUSIC, MediaAccessoryKindV1.COVER):
             if not self.url or not self.url.strip():
                 raise ValueError("music and cover accessories require url")
-        elif self.kind is SingleAccessoryKind.DESCRIPTION and self.content is None:
+        elif self.kind is MediaAccessoryKindV1.DESCRIPTION and self.content is None:
             raise ValueError("description accessory requires content")
         return self
 
 
-class SingleVideoMetadata(BaseModel):
+class MediaMetadataV1(BaseModel):
     """Stable database metadata mirrored by Rust ``VideoInfo``."""
 
     model_config = ConfigDict(extra="ignore")
@@ -115,21 +115,40 @@ class SingleVideoMetadata(BaseModel):
     updated_at: int = 0
 
 
-class SingleDownloadItem(BaseModel):
+class MediaDownloadItemV1(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    media_key: str = Field(min_length=1)
     aweme_id: str = Field(min_length=1)
     urls: list[str] = Field(min_length=1)
-    kind: SingleMediaKind
-    output: SingleOutputSpec
+    kind: MediaKindV1
+    output: MediaOutputSpecV1
     headers: dict[str, str] = Field(default_factory=dict)
-    accessories: list[SingleAccessory] = Field(default_factory=list)
-    metadata: SingleVideoMetadata
+    accessories: list[MediaAccessoryV1] = Field(default_factory=list)
+    metadata: MediaMetadataV1
 
     @model_validator(mode="after")
-    def validate_metadata_identity(self) -> "SingleDownloadItem":
+    def validate_metadata_identity(self) -> "MediaDownloadItemV1":
         if self.metadata.aweme_id != self.aweme_id:
             raise ValueError("item metadata.aweme_id must match item aweme_id")
+        expected_suffix = {
+            MediaKindV1.VIDEO: ".mp4",
+            MediaKindV1.LIVE_PHOTO: ".mp4",
+            MediaKindV1.IMAGE: ".webp",
+        }[self.kind]
+        if self.output.suffix != expected_suffix:
+            raise ValueError("item output suffix does not match media kind")
+        prefix = f"{self.aweme_id}:{self.kind.value}:"
+        if not self.media_key.startswith(prefix):
+            raise ValueError("item media_key does not match aweme_id and media kind")
+        try:
+            index = int(self.media_key.removeprefix(prefix))
+        except ValueError as exc:
+            raise ValueError("item media_key index must be an integer") from exc
+        if index < 0 or (self.kind is not MediaKindV1.VIDEO and index < 1):
+            raise ValueError("item media_key index is invalid for media kind")
+        if self.kind is MediaKindV1.VIDEO and index != 0:
+            raise ValueError("video media_key index must be zero")
         return self
 
 
@@ -142,7 +161,7 @@ class SingleDownloadPlanV1(BaseModel):
     )
     mode: Literal["one"] = "one"
     save_dir: str = Field(min_length=1)
-    items: list[SingleDownloadItem] = Field(min_length=1)
+    items: list[MediaDownloadItemV1] = Field(min_length=1)
     total: int = Field(ge=0)
 
     @model_validator(mode="after")
@@ -150,3 +169,13 @@ class SingleDownloadPlanV1(BaseModel):
         if self.total != len(self.items):
             raise ValueError("total must equal the number of items")
         return self
+
+
+# Compatibility aliases for issue 01 callers. New single and paged contracts use the
+# media-oriented names above; these aliases can be removed with legacy cleanup.
+SingleMediaKind = MediaKindV1
+SingleAccessoryKind = MediaAccessoryKindV1
+SingleOutputSpec = MediaOutputSpecV1
+SingleAccessory = MediaAccessoryV1
+SingleVideoMetadata = MediaMetadataV1
+SingleDownloadItem = MediaDownloadItemV1

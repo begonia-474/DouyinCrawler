@@ -231,6 +231,24 @@ pub const MIGRATE_V10_TASK_ITEMS_AUTHOR: &[&str] = &[
     "ALTER TABLE download_task_items ADD COLUMN author_sec_uid TEXT",
 ];
 
+pub const MIGRATE_V11_MEDIA_KEY: &[&str] = &[
+    "ALTER TABLE download_task_items ADD COLUMN media_key TEXT",
+    "ALTER TABLE download_task_items ADD COLUMN media_kind TEXT",
+    "ALTER TABLE download_task_items ADD COLUMN media_index INTEGER",
+    "UPDATE download_task_items
+     SET media_key = CASE
+            WHEN aweme_id IS NOT NULL AND trim(aweme_id) <> ''
+                THEN aweme_id || ':video:0'
+            ELSE '__legacy_row:' || id
+         END,
+         media_kind = 'video',
+         media_index = 0
+     WHERE media_key IS NULL OR trim(media_key) = ''",
+    "DROP INDEX IF EXISTS idx_item_unique",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_item_media_key ON download_task_items(task_id, media_key)",
+    "CREATE INDEX IF NOT EXISTS idx_item_aweme ON download_task_items(task_id, aweme_id)",
+];
+
 pub const MIGRATE_V10_DROP_DOWNLOAD_HISTORY: &[&str] = &[
     "DROP TABLE IF EXISTS download_history",
     "DROP INDEX IF EXISTS idx_download_created",
@@ -308,13 +326,17 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         run_migration_sql(conn, MIGRATE_V10_TASK_ITEMS_AUTHOR)?;
         run_migration_sql(conn, MIGRATE_V10_DROP_DOWNLOAD_HISTORY)?;
     }
+    if version < 11 {
+        info!("[DB] 迁移 v11: task_items 添加 media_key/media_kind/media_index，唯一键改为 (task_id, media_key)");
+        run_migration_sql(conn, MIGRATE_V11_MEDIA_KEY)?;
+    }
 
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64;
     conn.execute(
-        "INSERT OR REPLACE INTO _metadata (name, value) VALUES ('schema_version', '10')",
+        "INSERT OR REPLACE INTO _metadata (name, value) VALUES ('schema_version', '11')",
         [],
     )?;
     conn.execute(
@@ -322,4 +344,168 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         rusqlite::params![now.to_string()],
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_v10_database() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE _metadata (name TEXT PRIMARY KEY, value TEXT);
+             INSERT INTO _metadata (name, value) VALUES ('schema_version', '10');
+             CREATE TABLE download_tasks (
+                id TEXT PRIMARY KEY, mode TEXT NOT NULL, url TEXT NOT NULL,
+                title TEXT, author_nickname TEXT, status TEXT NOT NULL DEFAULT 'running',
+                total INTEGER NOT NULL DEFAULT 0, completed INTEGER NOT NULL DEFAULT 0,
+                skipped INTEGER NOT NULL DEFAULT 0, failed INTEGER NOT NULL DEFAULT 0,
+                error_msg TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+             );
+             CREATE TABLE download_task_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL,
+                aweme_id TEXT, title TEXT, author_nickname TEXT, cover_url TEXT,
+                file_path TEXT, file_size INTEGER DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'pending', error_msg TEXT,
+                created_at INTEGER NOT NULL, author_sec_uid TEXT
+             );
+             CREATE UNIQUE INDEX idx_item_unique
+                ON download_task_items(task_id, aweme_id);",
+        )
+        .unwrap();
+        conn
+    }
+
+    fn index_columns(conn: &Connection, index: &str) -> Vec<String> {
+        let mut stmt = conn
+            .prepare(&format!("PRAGMA index_info('{index}')"))
+            .unwrap();
+        stmt.query_map([], |row| row.get(2))
+            .unwrap()
+            .collect::<Result<Vec<_>>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn fresh_database_migrates_to_v11() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(CREATE_TABLES_SQL).unwrap();
+
+        migrate(&conn).unwrap();
+
+        let version: String = conn
+            .query_row(
+                "SELECT value FROM _metadata WHERE name = 'schema_version'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(version, "11");
+        assert_eq!(
+            index_columns(&conn, "idx_item_media_key"),
+            ["task_id", "media_key"]
+        );
+        assert_eq!(
+            index_columns(&conn, "idx_item_aweme"),
+            ["task_id", "aweme_id"]
+        );
+    }
+
+    #[test]
+    fn v10_rows_are_backfilled_without_identity_collisions() {
+        let conn = create_v10_database();
+        conn.execute_batch(
+            "INSERT INTO download_task_items (task_id, aweme_id, created_at)
+                VALUES ('task', 'aweme', 1), ('task', NULL, 1), ('task', '', 1);",
+        )
+        .unwrap();
+
+        migrate(&conn).unwrap();
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, aweme_id, media_key, media_kind, media_index
+                 FROM download_task_items ORDER BY id",
+            )
+            .unwrap();
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, i64>(4)?,
+                ))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(rows[0].2, "aweme:video:0");
+        assert_eq!(rows[1].2, format!("__legacy_row:{}", rows[1].0));
+        assert_eq!(rows[2].2, format!("__legacy_row:{}", rows[2].0));
+        assert_ne!(rows[1].2, rows[2].2);
+        assert!(rows.iter().all(|row| row.3 == "video" && row.4 == 0));
+        assert!(index_columns(&conn, "idx_item_unique").is_empty());
+    }
+
+    #[test]
+    fn v11_allows_multiple_media_for_one_aweme_but_rejects_duplicate_key() {
+        let conn = create_v10_database();
+        migrate(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO download_task_items
+             (task_id, aweme_id, media_key, media_kind, media_index, created_at)
+             VALUES ('task', 'aweme', 'aweme:image:1', 'image', 1, 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO download_task_items
+             (task_id, aweme_id, media_key, media_kind, media_index, created_at)
+             VALUES ('task', 'aweme', 'aweme:image:2', 'image', 2, 1)",
+            [],
+        )
+        .unwrap();
+        assert!(conn
+            .execute(
+                "INSERT INTO download_task_items
+                 (task_id, aweme_id, media_key, media_kind, media_index, created_at)
+                 VALUES ('task', 'other', 'aweme:image:2', 'image', 2, 1)",
+                [],
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn repeated_migrate_is_idempotent() {
+        let conn = create_v10_database();
+        conn.execute(
+            "INSERT INTO download_task_items (task_id, aweme_id, created_at)
+             VALUES ('task', NULL, 1)",
+            [],
+        )
+        .unwrap();
+        migrate(&conn).unwrap();
+        let first_key: String = conn
+            .query_row(
+                "SELECT media_key FROM download_task_items WHERE task_id = 'task'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        migrate(&conn).unwrap();
+
+        let second_key: String = conn
+            .query_row(
+                "SELECT media_key FROM download_task_items WHERE task_id = 'task'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(first_key, second_key);
+        assert_eq!(index_columns(&conn, "idx_item_media_key").len(), 2);
+    }
 }

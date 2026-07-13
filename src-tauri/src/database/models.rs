@@ -72,6 +72,9 @@ pub struct TaskItem {
     pub id: i64,
     pub task_id: String,
     pub aweme_id: Option<String>,
+    pub media_key: Option<String>,
+    pub media_kind: Option<String>,
+    pub media_index: Option<i64>,
     pub title: Option<String>,
     pub author_nickname: Option<String>,
     pub author_sec_uid: Option<String>,
@@ -87,6 +90,12 @@ pub struct TaskItem {
 pub struct NewTaskItem {
     pub task_id: String,
     pub aweme_id: Option<String>,
+    #[serde(default)]
+    pub media_key: Option<String>,
+    #[serde(default)]
+    pub media_kind: Option<String>,
+    #[serde(default)]
+    pub media_index: Option<i64>,
     pub title: Option<String>,
     pub author_nickname: Option<String>,
     pub author_sec_uid: Option<String>,

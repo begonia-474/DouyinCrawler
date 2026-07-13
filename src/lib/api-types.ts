@@ -241,8 +241,12 @@ export interface TaskItem {
   id: number;
   task_id: string;
   aweme_id: string | null;
+  media_key: string | null;
+  media_kind: string | null;
+  media_index: number | null;
   title: string | null;
   author_nickname: string | null;
+  author_sec_uid: string | null;
   cover_url: string | null;
   file_path: string | null;
   file_size: number;

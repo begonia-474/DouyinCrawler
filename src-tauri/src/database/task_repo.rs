@@ -262,10 +262,12 @@ impl super::connection::Database {
             .as_secs() as i64;
         conn.execute(
             "INSERT OR IGNORE INTO download_task_items \
-             (task_id, aweme_id, title, author_nickname, author_sec_uid, cover_url, status, created_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7)",
+             (task_id, aweme_id, media_key, media_kind, media_index, \
+              title, author_nickname, author_sec_uid, cover_url, status, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'pending', ?10)",
             rusqlite::params![
-                item.task_id, item.aweme_id, item.title, item.author_nickname, item.author_sec_uid, item.cover_url, now,
+                item.task_id, item.aweme_id, item.media_key, item.media_kind, item.media_index,
+                item.title, item.author_nickname, item.author_sec_uid, item.cover_url, now,
             ],
         )?;
         Ok(())
@@ -335,6 +337,16 @@ impl super::connection::Database {
         let aweme_id = result.item.aweme_id.as_deref().ok_or_else(|| {
             rusqlite::Error::InvalidParameterName("media item result requires aweme_id".to_string())
         })?;
+        let media_key = result.item.media_key.as_deref().ok_or_else(|| {
+            rusqlite::Error::InvalidParameterName(
+                "typed media item result requires media_key".to_string(),
+            )
+        })?;
+        if media_key.trim().is_empty() {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "typed media item result requires non-empty media_key".to_string(),
+            ));
+        }
         if result
             .video_info
             .is_some_and(|video| video.aweme_id != aweme_id)
@@ -363,10 +375,13 @@ impl super::connection::Database {
         self.with_transaction(|tx| {
             tx.execute(
                 "INSERT INTO download_task_items \
-                 (task_id, aweme_id, title, author_nickname, author_sec_uid, cover_url, \
+                 (task_id, aweme_id, media_key, media_kind, media_index, \
+                  title, author_nickname, author_sec_uid, cover_url, \
                   file_path, file_size, status, error_msg, created_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) \
-                 ON CONFLICT(task_id, aweme_id) DO UPDATE SET \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14) \
+                 ON CONFLICT(task_id, media_key) DO UPDATE SET \
+                  aweme_id = excluded.aweme_id, \
+                  media_kind = excluded.media_kind, media_index = excluded.media_index, \
                   title = excluded.title, author_nickname = excluded.author_nickname, \
                   author_sec_uid = excluded.author_sec_uid, cover_url = excluded.cover_url, \
                   file_path = excluded.file_path, file_size = excluded.file_size, \
@@ -374,6 +389,9 @@ impl super::connection::Database {
                 rusqlite::params![
                     result.item.task_id,
                     aweme_id,
+                    media_key,
+                    result.item.media_kind,
+                    result.item.media_index,
                     result.item.title,
                     result.item.author_nickname,
                     result.item.author_sec_uid,
@@ -417,7 +435,8 @@ impl super::connection::Database {
     pub fn get_task_items(&self, task_id: &str, status: Option<String>) -> Result<Vec<TaskItem>> {
         let conn = lock_conn!(self);
         let mut sql = String::from(
-            "SELECT id, task_id, aweme_id, title, author_nickname, author_sec_uid, cover_url, file_path, file_size, status, error_msg, created_at \
+            "SELECT id, task_id, aweme_id, media_key, media_kind, media_index, \
+             title, author_nickname, author_sec_uid, cover_url, file_path, file_size, status, error_msg, created_at \
              FROM download_task_items WHERE task_id = ?1"
         );
         let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -438,6 +457,9 @@ impl super::connection::Database {
                 id: row.get("id")?,
                 task_id: row.get("task_id")?,
                 aweme_id: row.get("aweme_id")?,
+                media_key: row.get("media_key")?,
+                media_kind: row.get("media_kind")?,
+                media_index: row.get("media_index")?,
                 title: row.get("title")?,
                 author_nickname: row.get("author_nickname")?,
                 author_sec_uid: row.get("author_sec_uid")?,

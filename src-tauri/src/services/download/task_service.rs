@@ -17,7 +17,7 @@
 //! - 使用 emit_progress 发射进度事件
 //! - 任务完成后清理取消信号
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -40,6 +40,7 @@ use super::{
 };
 use super::contract::{
     SingleAccessory, SingleAccessoryKind, SingleDownloadItem, SingleDownloadPlanV1,
+    SingleMediaKind, PagedDownloadPlanV1,
 };
 use super::engine::{DownloadEngine, DownloadItem, DownloadUrl, EngineConfig};
 use super::events;
@@ -177,7 +178,7 @@ struct ProgressTracker {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum SingleTaskTerminal {
+enum TaskTerminal {
     Completed,
     Cancelled,
     Error(String),
@@ -188,6 +189,13 @@ pub(super) type SinglePlanFuture =
 
 pub(super) trait SingleDownloadResolver: Send + Sync {
     fn resolve(&self, url: String) -> SinglePlanFuture;
+}
+
+pub(super) type PagedPlanFuture =
+    Pin<Box<dyn Future<Output = Result<PagedDownloadPlanV1, String>> + Send>>;
+
+pub(super) trait PagedDownloadResolver: Send + Sync {
+    fn resolve_page(&self, mode: String, url: String, cursor: i64, count: i64) -> PagedPlanFuture;
 }
 
 pub(super) trait TaskEventSink: Send + Sync {
@@ -202,6 +210,16 @@ impl SingleDownloadResolver for PythonSingleDownloadResolver {
     }
 }
 
+struct PythonPagedDownloadResolver;
+
+impl PagedDownloadResolver for PythonPagedDownloadResolver {
+    fn resolve_page(&self, mode: String, url: String, cursor: i64, count: i64) -> PagedPlanFuture {
+        Box::pin(async move {
+            TaskApplicationService::resolve_paged_download_plan(&mode, &url, cursor, count).await
+        })
+    }
+}
+
 struct TauriTaskEventSink;
 
 impl TaskEventSink for TauriTaskEventSink {
@@ -213,6 +231,7 @@ impl TaskEventSink for TauriTaskEventSink {
 #[derive(Clone)]
 struct TaskRuntimeAdapters {
     single_resolver: Arc<dyn SingleDownloadResolver>,
+    paged_resolver: Arc<dyn PagedDownloadResolver>,
     event_sink: Arc<dyn TaskEventSink>,
 }
 
@@ -267,6 +286,7 @@ impl<'a> TaskApplicationService<'a> {
             state,
             adapters: TaskRuntimeAdapters {
                 single_resolver: Arc::new(PythonSingleDownloadResolver),
+                paged_resolver: Arc::new(PythonPagedDownloadResolver),
                 event_sink: Arc::new(TauriTaskEventSink),
             },
         }
@@ -282,6 +302,23 @@ impl<'a> TaskApplicationService<'a> {
             state,
             adapters: TaskRuntimeAdapters {
                 single_resolver,
+                paged_resolver: Arc::new(PythonPagedDownloadResolver),
+                event_sink,
+            },
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_paged_test_adapters(
+        state: &'a AppState,
+        paged_resolver: Arc<dyn PagedDownloadResolver>,
+        event_sink: Arc<dyn TaskEventSink>,
+    ) -> Self {
+        Self {
+            state,
+            adapters: TaskRuntimeAdapters {
+                single_resolver: Arc::new(PythonSingleDownloadResolver),
+                paged_resolver,
                 event_sink,
             },
         }
@@ -331,6 +368,32 @@ impl<'a> TaskApplicationService<'a> {
         }
 
         SingleDownloadPlanV1::from_value(json_value)
+    }
+
+    /// Resolve a single paged page and validate the typed contract.
+    ///
+    /// Used by the typed paged runner for post mode; like/mix/collects
+    /// still use the legacy `resolve_download_page` until issue 08.
+    async fn resolve_paged_download_plan(mode: &str, url: &str, cursor: i64, count: i64) -> Result<PagedDownloadPlanV1, String> {
+        let expected_mode = mode.to_string();
+        let resolver_mode = expected_mode.clone();
+        let url = url.to_string();
+        let json_value = tokio::task::spawn_blocking(move || {
+            crate::python::handler::resolve_page(&resolver_mode, &url, cursor, count)
+                .map_err(|e| format!("resolve_page 调用失败: {}", e))
+        })
+        .await
+        .map_err(|e| format!("spawn_blocking 失败: {}", e))??;
+
+        if json_value.get("success").and_then(Value::as_bool) == Some(false) {
+            return Err(json_value
+                .get("error")
+                .and_then(Value::as_str)
+                .unwrap_or("分页解析失败")
+                .to_string());
+        }
+
+        PagedDownloadPlanV1::from_value_for_mode(json_value, &expected_mode)
     }
 
     /// 通过 Python 解析直播元数据和 f2 FULL_HD1 录制地址。
@@ -769,6 +832,9 @@ impl<'a> TaskApplicationService<'a> {
         let new_item = NewTaskItem {
             task_id: task_id.to_string(),
             aweme_id: Some(aweme_id.clone()),
+            media_key: None,
+            media_kind: None,
+            media_index: None,
             title: json_str(detail, "desc"),
             author_nickname: json_str(detail, "author_nickname"),
             author_sec_uid: json_str(detail, "author_sec_uid"),
@@ -789,15 +855,25 @@ impl<'a> TaskApplicationService<'a> {
         Self::save_download_metadata(db, item)
     }
 
-    fn typed_single_task_item(task_id: &str, item: &SingleDownloadItem) -> NewTaskItem {
-        NewTaskItem {
+    fn typed_media_task_item(
+        task_id: &str,
+        item: &SingleDownloadItem,
+    ) -> Result<NewTaskItem, String> {
+        Ok(NewTaskItem {
             task_id: task_id.to_string(),
             aweme_id: Some(item.aweme_id.clone()),
+            media_key: Some(item.media_key.clone()),
+            media_kind: Some(match item.kind {
+                SingleMediaKind::Video => "video",
+                SingleMediaKind::Image => "image",
+                SingleMediaKind::LivePhoto => "live_photo",
+            }.to_string()),
+            media_index: Some(item.media_index()?),
             title: item.metadata.desc.clone(),
             author_nickname: item.metadata.author_nickname.clone(),
             author_sec_uid: item.metadata.author_sec_uid.clone(),
             cover_url: item.metadata.cover_url.clone(),
-        }
+        })
     }
 
     /// 通过结果级事务接口提交 mode=one 媒体项。
@@ -863,30 +939,30 @@ impl<'a> TaskApplicationService<'a> {
     ///
     /// `Completed` 仅在 task completed 状态成功提交后返回，因此调用者按
     /// 返回值发事件时不会在数据库失败后误发 finished/completed。
-    fn finalize_single_task(
+    fn finalize_task(
         db: &Database,
         task_id: &str,
         execution_result: Result<(), String>,
         cancelled: bool,
-    ) -> SingleTaskTerminal {
+    ) -> TaskTerminal {
         let is_explicit_cancellation = cancelled
             && execution_result
                 .as_ref()
                 .is_err_and(|message| message == "下载已取消");
         if is_explicit_cancellation {
             return match db.update_task_status(task_id, "cancelled", None) {
-                Ok(()) => SingleTaskTerminal::Cancelled,
+                Ok(()) => TaskTerminal::Cancelled,
                 Err(db_error) => {
                     let message = format!("更新取消状态失败: {db_error}");
                     error!("[TaskService] task_id={}, {}", task_id, message);
-                    SingleTaskTerminal::Error(message)
+                    TaskTerminal::Error(message)
                 }
             };
         }
 
         match execution_result {
             Ok(()) => match db.update_task_status(task_id, "completed", None) {
-                Ok(()) => SingleTaskTerminal::Completed,
+                Ok(()) => TaskTerminal::Completed,
                 Err(db_error) => {
                     let mut message = format!("提交任务完成状态失败: {db_error}");
                     error!("[TaskService] task_id={}, {}", task_id, message);
@@ -901,7 +977,7 @@ impl<'a> TaskApplicationService<'a> {
                             "; 任务 error 状态写入失败: {error_status_error}"
                         ));
                     }
-                    SingleTaskTerminal::Error(message)
+                    TaskTerminal::Error(message)
                 }
             },
             Err(mut message) => {
@@ -912,61 +988,81 @@ impl<'a> TaskApplicationService<'a> {
                     );
                     message.push_str(&format!("; 任务 error 状态写入失败: {db_error}"));
                 }
-                SingleTaskTerminal::Error(message)
+                TaskTerminal::Error(message)
             }
         }
     }
 
-    async fn execute_single_download_plan(
+    /// Emit item-count progress only after the corresponding result transaction
+    /// has committed. HTTP byte progress must not be written into task item count
+    /// fields; the frontend treats these values as durable media-row counts.
+    fn emit_persisted_item_counts(
         db: &Database,
         task_id: &str,
-        plan: SingleDownloadPlanV1,
+        event_sink: &Arc<dyn TaskEventSink>,
+    ) {
+        match db.get_task_item_counts(task_id) {
+            Ok(counts) => event_sink.emit(TaskEvent::progress(
+                TaskPatch::new(task_id).with_counts(
+                    counts.total,
+                    counts.completed,
+                    counts.skipped,
+                    counts.failed,
+                ),
+            )),
+            Err(error) => warn!(
+                "[TaskService] 读取已提交任务计数失败，跳过进度事件: task_id={}, error={}",
+                task_id, error
+            ),
+        }
+    }
+
+    /// Execute a batch of typed media items with a shared engine and event sink.
+    ///
+    /// Shared between `execute_single_download_plan` and the typed paged runner.
+    /// Returns the number of completed and failed items.
+    async fn execute_media_items(
+        db: &Database,
+        task_id: &str,
+        items: &[SingleDownloadItem],
+        save_dir: &str,
         cancel_signal: &Arc<AtomicBool>,
         app_config: &crate::config::AppConfig,
-        event_sink: Arc<dyn TaskEventSink>,
-    ) -> Result<(), String> {
-        let save_dir = plan.save_dir;
-        tokio::fs::create_dir_all(&save_dir)
-            .await
-            .map_err(|error| format!("创建保存目录失败: {error}"))?;
-
+        event_sink: &Arc<dyn TaskEventSink>,
+    ) -> Result<(i64, i64), String> {
         let engine = Self::create_engine(app_config, cancel_signal.clone());
-        let total = plan.items.len() as i64;
+        let total = items.len() as i64;
         let mut completed = 0_i64;
         let mut failed = 0_i64;
-        let progress = ProgressTracker::with_sink(task_id.to_string(), event_sink.clone());
 
-        for (index, item) in plan.items.iter().enumerate() {
+        for item in items.iter() {
             if cancel_signal.load(Ordering::Relaxed) {
                 info!(
-                    "[TaskService] 单视频下载被取消: task_id={}, 已完成 {}/{}",
-                    task_id, index, total
+                    "[TaskService] 下载被取消: task_id={}, 已完成 {}/{}",
+                    task_id, completed + failed, total
                 );
                 return Err("下载已取消".to_string());
             }
 
-            let download_item = build_single_download_item(item, &save_dir, task_id);
-            let progress_ref = &progress;
+            let download_item = build_single_download_item(item, save_dir, task_id);
             match engine
-                .download(&download_item, |downloaded, total_size| {
-                    progress_ref.update(downloaded, total_size);
-                })
+                .download(&download_item, |_downloaded, _total_size| {})
                 .await
             {
                 Ok(result) => {
                     let file_path = result.path.to_string_lossy().to_string();
                     let file_size = result.file_size as i64;
-                    let _accessory_paths = Self::download_single_accessories(
+                    let _ = Self::download_single_accessories(
                         &engine,
                         &item.accessories,
-                        &save_dir,
+                        save_dir,
                         &item.output.folder_name,
                         task_id,
                         app_config,
                     )
                     .await;
 
-                    let task_item = Self::typed_single_task_item(task_id, item);
+                    let task_item = Self::typed_media_task_item(task_id, item)?;
                     let outcome = if result.skipped {
                         MediaItemOutcome::Skipped {
                             file_path: &file_path,
@@ -986,21 +1082,21 @@ impl<'a> TaskApplicationService<'a> {
                     )?;
 
                     completed += 1;
-                    progress.update((completed + failed) as u64, total as u64);
+                    Self::emit_persisted_item_counts(db, task_id, event_sink);
                 }
                 Err(error) => {
                     if matches!(error, super::engine::DownloadError::Cancelled) {
                         info!(
-                            "[TaskService] 单视频下载被取消: task_id={}, aweme_id={}",
+                            "[TaskService] 下载被取消: task_id={}, aweme_id={}",
                             task_id, item.aweme_id
                         );
                         return Err("下载已取消".to_string());
                     }
                     warn!(
-                        "[TaskService] 单视频下载失败: aweme_id={}, error={}",
+                        "[TaskService] 下载失败: aweme_id={}, error={}",
                         item.aweme_id, error
                     );
-                    let task_item = Self::typed_single_task_item(task_id, item);
+                    let task_item = Self::typed_media_task_item(task_id, item)?;
                     let error_message = error.to_string();
                     Self::persist_single_media_item_outcome(
                         db,
@@ -1011,18 +1107,242 @@ impl<'a> TaskApplicationService<'a> {
                         },
                     )?;
                     failed += 1;
+                    Self::emit_persisted_item_counts(db, task_id, event_sink);
                 }
             }
         }
 
+        Ok((completed, failed))
+    }
+
+    async fn execute_single_download_plan(
+        db: &Database,
+        task_id: &str,
+        plan: SingleDownloadPlanV1,
+        cancel_signal: &Arc<AtomicBool>,
+        app_config: &crate::config::AppConfig,
+        event_sink: Arc<dyn TaskEventSink>,
+    ) -> Result<(), String> {
+        let save_dir = plan.save_dir;
+        tokio::fs::create_dir_all(&save_dir)
+            .await
+            .map_err(|error| format!("创建保存目录失败: {error}"))?;
+
+        let (completed, failed) = Self::execute_media_items(
+            db, task_id, &plan.items, &save_dir,
+            cancel_signal, app_config, &event_sink,
+        ).await?;
+
         if failed > 0 && completed == 0 {
-            return Err(format!("所有下载均失败: {failed}/{total} failed"));
+            return Err(format!("所有下载均失败: {failed}/{} failed", plan.items.len()));
         }
 
         info!(
             "[TaskService] 单视频下载完成: task_id={}, total={}, completed={}, failed={}",
-            task_id, total, completed, failed
+            task_id, plan.items.len(), completed, failed
         );
+        Ok(())
+    }
+
+    /// Typed paged download runner for post mode.
+    ///
+    /// Python returns one versioned page at a time; Rust drives pagination,
+    /// calls the shared media executor, and handles protocol errors.
+    async fn execute_paged_download_plan(
+        db: &Database,
+        task_id: &str,
+        url: &str,
+        cancel_signal: &Arc<AtomicBool>,
+        app_config: &crate::config::AppConfig,
+        adapters: &TaskRuntimeAdapters,
+    ) -> Result<(), String> {
+        let page_counts = app_config.page_counts as i64;
+        let mut cursor: i64 = 0;
+        let mut total_completed = 0_i64;
+        let mut total_failed = 0_i64;
+        let mut page_index: i64 = 0;
+        let mut save_dir: Option<String> = None;
+        let mut seen_cursors = HashSet::from([cursor]);
+        let mut seen_media_keys = HashSet::new();
+        let mut seen_aweme_ids = HashSet::new();
+        let event_sink = adapters.event_sink.clone();
+        let max_counts = app_config.max_counts as usize;
+
+        loop {
+            if cancel_signal.load(Ordering::Relaxed) {
+                info!("[TaskService] 分页下载被取消 (typed): task_id={}", task_id);
+                return Err("下载已取消".to_string());
+            }
+
+            page_index += 1;
+            info!(
+                "[TaskService] typed 分页解析第 {} 页: task_id={}, cursor={}",
+                page_index, task_id, cursor
+            );
+
+            let request_count = if max_counts == 0 {
+                page_counts
+            } else {
+                let remaining = max_counts.saturating_sub(seen_aweme_ids.len());
+                if remaining == 0 {
+                    break;
+                }
+                page_counts.min(remaining as i64)
+            };
+
+            let plan = adapters
+                .paged_resolver
+                .resolve_page("post".to_string(), url.to_string(), cursor, request_count)
+                .await
+                .map_err(|error| {
+                    format!("第 {page_index} 页解析失败 (cursor={cursor}): {error}")
+                })?;
+
+            if cancel_signal.load(Ordering::Relaxed) {
+                return Err("下载已取消".to_string());
+            }
+            if plan.mode != "post" {
+                return Err(format!(
+                    "第 {page_index} 页 mode 漂移: expected=post, actual={}",
+                    plan.mode
+                ));
+            }
+
+            if page_index == 1 {
+                save_dir = Some(plan.save_dir.clone());
+                tokio::fs::create_dir_all(plan.save_dir.as_str())
+                    .await
+                    .map_err(|error| format!("创建保存目录失败: {error}"))?;
+
+                if let Some(user_info) = &plan.user_profile {
+                    db.get_user_by_sec_uid(&user_info.sec_user_id)
+                        .map_err(|error| format!("查询用户资料失败: {error}"))?;
+                    db.save_user(user_info)
+                        .map_err(|error| format!("保存用户资料失败: {error}"))?;
+                    let nickname = user_info.nickname.as_deref();
+                    let title = nickname.or(Some("用户作品"));
+                    db.update_task_metadata(task_id, title, nickname)
+                        .map_err(|error| format!("更新任务资料失败: {error}"))?;
+                }
+            } else {
+                if plan.save_dir != *save_dir.as_ref().expect("first page sets save_dir") {
+                    return Err(format!("第 {page_index} 页 save_dir 漂移"));
+                }
+                if plan.user_profile.is_some() {
+                    return Err(format!("第 {page_index} 页不得重复返回 user_profile"));
+                }
+            }
+
+            let current_save_dir = save_dir.as_ref().ok_or_else(|| {
+                "分页解析未返回 save_dir".to_string()
+            })?;
+
+            if plan.has_more && plan.next_cursor.is_none() {
+                return Err(format!(
+                    "第 {} 页 has_more=true 但 next_cursor 为空",
+                    page_index
+                ));
+            }
+
+            if plan.items.is_empty() && plan.has_more {
+                return Err(format!(
+                    "第 {} 页 items 为空但 has_more=true (重复 cursor 或协议错误)",
+                    page_index
+                ));
+            }
+
+            if plan.items.is_empty() {
+                info!("[TaskService] 第 {} 页无数据，停止分页", page_index);
+                break;
+            }
+
+            for item in &plan.items {
+                if !plan.page_aweme_ids.contains(&item.aweme_id) {
+                    return Err(format!(
+                        "第 {page_index} 页媒体 {} 不属于 page_aweme_ids",
+                        item.media_key
+                    ));
+                }
+                item.media_index()?;
+                if !seen_media_keys.insert(item.media_key.clone()) {
+                    return Err(format!("跨页重复 media_key: {}", item.media_key));
+                }
+            }
+
+            let mut allowed_work_ids = HashSet::new();
+            for aweme_id in &plan.page_aweme_ids {
+                if seen_aweme_ids.contains(aweme_id) {
+                    allowed_work_ids.insert(aweme_id.as_str());
+                    continue;
+                }
+                if max_counts != 0 && seen_aweme_ids.len() >= max_counts {
+                    break;
+                }
+                seen_aweme_ids.insert(aweme_id.clone());
+                allowed_work_ids.insert(aweme_id.as_str());
+            }
+            let page_items: Vec<_> = plan
+                .items
+                .iter()
+                .filter(|item| allowed_work_ids.contains(item.aweme_id.as_str()))
+                .cloned()
+                .collect();
+
+            if page_items.is_empty()
+                && max_counts != 0
+                && seen_aweme_ids.len() >= max_counts
+            {
+                break;
+            }
+
+            let (completed, failed) = Self::execute_media_items(
+                db,
+                task_id,
+                &page_items,
+                current_save_dir,
+                cancel_signal,
+                app_config,
+                &event_sink,
+            )
+            .await?;
+
+            total_completed += completed;
+            total_failed += failed;
+
+            info!(
+                "[TaskService] 第 {} 页下载完成: completed={}, failed={}, 累计: {}/{}",
+                page_index, completed, failed, total_completed, total_completed + total_failed
+            );
+
+            if max_counts != 0 && seen_aweme_ids.len() >= max_counts {
+                break;
+            }
+            if !plan.has_more {
+                info!("[TaskService] has_more=false，停止分页 (共 {} 页)", page_index);
+                break;
+            }
+
+            let next = plan.next_cursor.ok_or_else(|| {
+                format!("第 {page_index} 页 has_more=true 但 next_cursor 为空")
+            })?;
+            if !seen_cursors.insert(next) {
+                return Err(format!("第 {page_index} 页 next_cursor 重复: {next}"));
+            }
+            cursor = next;
+        }
+
+        if total_completed == 0 && total_failed == 0 {
+            return Err("未发现可下载媒体".to_string());
+        }
+        if total_failed > 0 && total_completed == 0 {
+            return Err(format!("所有下载均失败: {total_failed}/{} failed", total_failed + total_completed));
+        }
+
+        info!(
+            "[TaskService] 分页下载完成 (typed): task_id={}, pages={}, completed={}, failed={}",
+            task_id, page_index, total_completed, total_failed
+        );
+
         Ok(())
     }
 
@@ -1087,25 +1407,25 @@ impl<'a> TaskApplicationService<'a> {
             )
             .await;
 
-            match Self::finalize_single_task(
+            match Self::finalize_task(
                 &db,
                 &task_id_clone,
                 result,
                 cancel_signal.load(Ordering::Relaxed),
             ) {
-                SingleTaskTerminal::Completed => {
+                TaskTerminal::Completed => {
                     adapters.event_sink.emit(TaskEvent::finished(
                         TaskPatch::new(&task_id_clone).with_status(TaskStatus::Completed),
                     ));
                     info!("[TaskService] 下载任务完成: task_id={}", task_id_clone);
                 }
-                SingleTaskTerminal::Cancelled => {
+                TaskTerminal::Cancelled => {
                     adapters.event_sink.emit(TaskEvent::finished(
                         TaskPatch::new(&task_id_clone).with_status(TaskStatus::Cancelled),
                     ));
                     info!("[TaskService] 下载任务已取消: task_id={}", task_id_clone);
                 }
-                SingleTaskTerminal::Error(message) => {
+                TaskTerminal::Error(message) => {
                     error!(
                         "[TaskService] 下载任务失败: task_id={}, error={}",
                         task_id_clone, message
@@ -1231,6 +1551,9 @@ impl<'a> TaskApplicationService<'a> {
                         let new_item = NewTaskItem {
                             task_id: task_id.to_string(),
                             aweme_id: Some(item.aweme_id.clone()),
+                            media_key: None,
+                            media_kind: None,
+                            media_index: None,
                             title: json_str(item.detail.as_ref(), "desc"),
                             author_nickname: json_str(item.detail.as_ref(), "author_nickname"),
                             author_sec_uid: json_str(item.detail.as_ref(), "author_sec_uid"),
@@ -1284,6 +1607,9 @@ impl<'a> TaskApplicationService<'a> {
                     let new_item = NewTaskItem {
                         task_id: task_id.to_string(),
                         aweme_id: Some(item.aweme_id.clone()),
+                        media_key: None,
+                        media_kind: None,
+                        media_index: None,
                         title: json_str(item.detail.as_ref(), "desc"),
                         author_nickname: json_str(item.detail.as_ref(), "author_nickname"),
                         author_sec_uid: json_str(item.detail.as_ref(), "author_sec_uid"),
@@ -1476,6 +1802,9 @@ impl<'a> TaskApplicationService<'a> {
                             let new_item = NewTaskItem {
                                 task_id: task_id.to_string(),
                                 aweme_id: Some(item.aweme_id.clone()),
+                                media_key: None,
+                                media_kind: None,
+                                media_index: None,
                                 title: json_str(item.detail.as_ref(), "desc"),
                                 author_nickname: json_str(item.detail.as_ref(), "author_nickname"),
                                 author_sec_uid: json_str(item.detail.as_ref(), "author_sec_uid"),
@@ -1505,6 +1834,9 @@ impl<'a> TaskApplicationService<'a> {
                         let new_item = NewTaskItem {
                             task_id: task_id.to_string(),
                             aweme_id: Some(item.aweme_id.clone()),
+                            media_key: None,
+                            media_kind: None,
+                            media_index: None,
                             title: json_str(item.detail.as_ref(), "desc"),
                             author_nickname: json_str(item.detail.as_ref(), "author_nickname"),
                             author_sec_uid: json_str(item.detail.as_ref(), "author_sec_uid"),
@@ -1604,7 +1936,11 @@ impl<'a> TaskApplicationService<'a> {
         }
 
         // 2. 发射启动事件
-        events::emit_started(&task_id, mode, url);
+        self.adapters.event_sink.emit(TaskEvent::started(
+            &task_id,
+            mode,
+            url,
+        ));
 
         // 3. 注册取消信号
         let cancel_signal = self.state.register_cancel_signal(&task_id);
@@ -1617,66 +1953,68 @@ impl<'a> TaskApplicationService<'a> {
         let mode_val = mode;
         let url_val = url.to_string();
         let aweme_ids_val: Vec<String> = aweme_ids.to_vec();
+        let adapters = self.adapters.clone();
 
         // 5. 启动后台下载任务（分页模式）
         tokio::spawn(async move {
-            let result = Self::execute_paged_download(
+            // Post mode uses the typed paged runner with shared media executor;
+            // like/mix/collects/music remain on the legacy path until issues 08/10.
+            let is_typed_post = mode_val == DownloadMode::Post;
+
+            let result = if is_typed_post {
+                Self::execute_paged_download_plan(
+                    &db,
+                    &task_id_clone,
+                    &url_val,
+                    &cancel_signal,
+                    &app_config,
+                    &adapters,
+                )
+                .await
+            } else {
+                Self::execute_paged_download(
+                    &db,
+                    &task_id_clone,
+                    mode_val,
+                    &url_val,
+                    &cancel_signal,
+                    &app_config,
+                    &aweme_ids_val,
+                )
+                .await
+            };
+
+            match Self::finalize_task(
                 &db,
                 &task_id_clone,
-                mode_val,
-                &url_val,
-                &cancel_signal,
-                &app_config,
-                &aweme_ids_val,
-            )
-            .await;
-
-            match result {
-                Ok(()) => {
-                    if let Err(e) = db.update_task_status(&task_id_clone, "completed", None) {
-                        error!(
-                            "[TaskService] 更新批量任务完成状态失败: task_id={}, error={}",
-                            task_id_clone, e
-                        );
-                    }
-                    events::emit_finished(
+                result,
+                cancel_signal.load(Ordering::Relaxed),
+            ) {
+                TaskTerminal::Completed => {
+                    adapters.event_sink.emit(TaskEvent::finished(
                         TaskPatch::new(&task_id_clone).with_status(TaskStatus::Completed),
-                    );
+                    ));
                     info!(
                         "[TaskService] 批量下载完成: task_id={}",
                         task_id_clone
                     );
                 }
-                Err(e) => {
-                    if cancel_signal.load(Ordering::Relaxed) {
-                        if let Err(db_err) =
-                            db.update_task_status(&task_id_clone, "cancelled", None)
-                        {
-                            error!(
-                                "[TaskService] 更新取消状态失败: task_id={}, error={}",
-                                task_id_clone, db_err
-                            );
-                        }
-                        events::emit_cancelled(&task_id_clone);
-                        info!(
-                            "[TaskService] 批量下载已取消: task_id={}",
-                            task_id_clone
-                        );
-                    } else {
-                        error!(
-                            "[TaskService] 批量下载失败: task_id={}, error={}",
-                            task_id_clone, e
-                        );
-                        if let Err(db_err) =
-                            db.update_task_status(&task_id_clone, "error", Some(&e))
-                        {
-                            error!(
-                                "[TaskService] 更新批量错误状态失败: task_id={}, error={}",
-                                task_id_clone, db_err
-                            );
-                        }
-                        events::emit_error(&task_id_clone, &e);
-                    }
+                TaskTerminal::Cancelled => {
+                    adapters.event_sink.emit(TaskEvent::finished(
+                        TaskPatch::new(&task_id_clone).with_status(TaskStatus::Cancelled),
+                    ));
+                    info!("[TaskService] 批量下载已取消: task_id={}", task_id_clone);
+                }
+                TaskTerminal::Error(message) => {
+                    error!(
+                        "[TaskService] 批量下载失败: task_id={}, error={}",
+                        task_id_clone, message
+                    );
+                    adapters.event_sink.emit(TaskEvent::finished(
+                        TaskPatch::new(&task_id_clone)
+                            .with_status(TaskStatus::Error)
+                            .with_error(message),
+                    ));
                 }
             }
 
@@ -1876,6 +2214,9 @@ impl<'a> TaskApplicationService<'a> {
                         let new_item = NewTaskItem {
                             task_id: task_id.to_string(),
                             aweme_id: Some(music_id.clone()),
+                            media_key: None,
+                            media_kind: None,
+                            media_index: None,
                             title: title.clone(),
                             author_nickname: author.clone(),
                             author_sec_uid: None,
@@ -1896,6 +2237,9 @@ impl<'a> TaskApplicationService<'a> {
                         let new_item = NewTaskItem {
                             task_id: task_id.to_string(),
                             aweme_id: Some(music_id.clone()),
+                            media_key: None,
+                            media_kind: None,
+                            media_index: None,
                             title: title.clone(),
                             author_nickname: author.clone(),
                             author_sec_uid: None,
@@ -1935,6 +2279,9 @@ impl<'a> TaskApplicationService<'a> {
                     let new_item = NewTaskItem {
                         task_id: task_id.to_string(),
                         aweme_id: Some(item.aweme_id.clone()),
+                        media_key: None,
+                        media_kind: None,
+                        media_index: None,
                         title: None,
                         author_nickname: None,
                         author_sec_uid: None,
@@ -1981,7 +2328,7 @@ mod single_media_outcome_tests {
     use serde_json::json;
     use uuid::Uuid;
 
-    use super::{SingleTaskTerminal, TaskApplicationService};
+    use super::{TaskApplicationService, TaskTerminal};
     use crate::db::{Database, MediaItemOutcome, NewDownloadTask, NewTaskItem, VideoInfo};
 
     fn test_database(task_id: &str) -> (Database, PathBuf) {
@@ -2005,6 +2352,9 @@ mod single_media_outcome_tests {
         NewTaskItem {
             task_id: task_id.to_string(),
             aweme_id: Some(aweme_id.to_string()),
+            media_key: Some(format!("{aweme_id}:video:0")),
+            media_kind: Some("video".to_string()),
+            media_index: Some(0),
             title: Some("transactional result".to_string()),
             author_nickname: Some("tester".to_string()),
             author_sec_uid: Some("sec-user".to_string()),
@@ -2068,8 +2418,8 @@ mod single_media_outcome_tests {
         assert!(has_video(&db, aweme_id));
 
         assert_eq!(
-            TaskApplicationService::finalize_single_task(&db, task_id, Ok(()), false),
-            SingleTaskTerminal::Completed
+            TaskApplicationService::finalize_task(&db, task_id, Ok(()), false),
+            TaskTerminal::Completed
         );
         assert_eq!(
             db.get_task_by_id(task_id)
@@ -2115,8 +2465,8 @@ mod single_media_outcome_tests {
         assert!(has_video(&db, aweme_id));
 
         assert_eq!(
-            TaskApplicationService::finalize_single_task(&db, task_id, Ok(()), false),
-            SingleTaskTerminal::Completed
+            TaskApplicationService::finalize_task(&db, task_id, Ok(()), false),
+            TaskTerminal::Completed
         );
 
         drop(db);
@@ -2140,13 +2490,13 @@ mod single_media_outcome_tests {
         )
         .expect("download failure outcome should persist");
 
-        let terminal = TaskApplicationService::finalize_single_task(
+        let terminal = TaskApplicationService::finalize_task(
             &db,
             task_id,
             Err(format!("所有下载均失败: {download_error}")),
             false,
         );
-        assert!(matches!(terminal, SingleTaskTerminal::Error(_)));
+        assert!(matches!(terminal, TaskTerminal::Error(_)));
 
         let detail = db.get_task_detail(task_id).unwrap().unwrap();
         assert_eq!(detail.task.status, "error");
@@ -2195,13 +2545,13 @@ mod single_media_outcome_tests {
         .expect_err("metadata failure must fail the result transaction");
         assert!(execution_error.contains("forced metadata failure"));
 
-        let terminal = TaskApplicationService::finalize_single_task(
+        let terminal = TaskApplicationService::finalize_task(
             &db,
             task_id,
             Err(execution_error),
             true,
         );
-        assert!(matches!(terminal, SingleTaskTerminal::Error(_)));
+        assert!(matches!(terminal, TaskTerminal::Error(_)));
 
         let detail = db.get_task_detail(task_id).unwrap().unwrap();
         assert_eq!(detail.task.status, "error");
@@ -2251,13 +2601,13 @@ mod single_media_outcome_tests {
         assert!(execution_error.contains("forced item failure"));
         assert!(execution_error.contains("错误状态恢复写入失败"));
 
-        let terminal = TaskApplicationService::finalize_single_task(
+        let terminal = TaskApplicationService::finalize_task(
             &db,
             task_id,
             Err(execution_error),
             false,
         );
-        assert!(matches!(terminal, SingleTaskTerminal::Error(_)));
+        assert!(matches!(terminal, TaskTerminal::Error(_)));
         let detail = db.get_task_detail(task_id).unwrap().unwrap();
         assert_eq!(detail.task.status, "error");
         assert!(detail
@@ -2287,8 +2637,8 @@ mod single_media_outcome_tests {
         .expect("failure trigger should be installed");
 
         let terminal =
-            TaskApplicationService::finalize_single_task(&db, task_id, Ok(()), false);
-        let SingleTaskTerminal::Error(message) = terminal else {
+            TaskApplicationService::finalize_task(&db, task_id, Ok(()), false);
+        let TaskTerminal::Error(message) = terminal else {
             panic!("completed status DB failure must not produce completed semantics");
         };
         assert!(message.contains("forced completed status failure"));
@@ -2308,14 +2658,14 @@ mod single_media_outcome_tests {
         let task_id = "cancelled-outcome";
         let (db, path) = test_database(task_id);
 
-        let terminal = TaskApplicationService::finalize_single_task(
+        let terminal = TaskApplicationService::finalize_task(
             &db,
             task_id,
             Err("下载已取消".to_string()),
             true,
         );
 
-        assert_eq!(terminal, SingleTaskTerminal::Cancelled);
+        assert_eq!(terminal, TaskTerminal::Cancelled);
         let detail = db.get_task_detail(task_id).unwrap().unwrap();
         assert_eq!(detail.task.status, "cancelled");
         assert_eq!(detail.task.total, 0);

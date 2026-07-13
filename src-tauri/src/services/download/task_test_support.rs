@@ -10,14 +10,16 @@ use tokio::net::TcpListener;
 use uuid::Uuid;
 
 use super::contract::{
-    SingleDownloadItem, SingleDownloadPlanV1, SingleMediaKind, SingleOutputSpec,
+    PagedDownloadPlanV1, SingleDownloadItem, SingleDownloadPlanV1, SingleMediaKind,
+    SingleOutputSpec,
 };
 use super::task_service::{
-    SingleDownloadResolver, SinglePlanFuture, TaskApplicationService, TaskEventSink,
+    PagedDownloadResolver, PagedPlanFuture, SingleDownloadResolver, SinglePlanFuture,
+    TaskApplicationService, TaskEventSink,
 };
 use super::{DownloadMode, DownloadRequest, TaskEvent, TaskEventType, TaskStatus};
 use crate::config::{AppConfig, ConfigManager};
-use crate::db::{Database, DownloadTask, VideoInfo};
+use crate::db::{Database, DownloadTask, UserInfo, VideoInfo};
 use crate::python::PythonBridge;
 use crate::state::AppState;
 
@@ -52,6 +54,90 @@ impl SingleDownloadResolver for FixedSingleResolver {
             match result {
                 ResolverResult::Plan(plan) => Ok(plan),
                 ResolverResult::Error(message) => Err(message),
+            }
+        })
+    }
+}
+
+// ============================================================
+// Paged resolver fixture
+// ============================================================
+
+#[derive(Clone)]
+pub(crate) enum PagedResolverResult {
+    Plan(PagedDownloadPlanV1),
+    DelayedPlan(PagedDownloadPlanV1, Duration),
+    Error(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PagedResolverCall {
+    pub(crate) mode: String,
+    pub(crate) url: String,
+    pub(crate) cursor: i64,
+    pub(crate) count: i64,
+}
+
+#[derive(Clone)]
+pub(crate) struct FixedPagedResolver {
+    pages: Arc<Vec<PagedResolverResult>>,
+    index: Arc<std::sync::Mutex<usize>>,
+    calls: Arc<std::sync::Mutex<Vec<PagedResolverCall>>>,
+}
+
+impl FixedPagedResolver {
+    pub(crate) fn single(plan: PagedDownloadPlanV1) -> Self {
+        Self {
+            pages: Arc::new(vec![PagedResolverResult::Plan(plan)]),
+            index: Arc::new(std::sync::Mutex::new(0)),
+            calls: Arc::new(std::sync::Mutex::new(Vec::new())),
+        }
+    }
+
+    pub(crate) fn multi(pages: Vec<PagedResolverResult>) -> Self {
+        Self {
+            pages: Arc::new(pages),
+            index: Arc::new(std::sync::Mutex::new(0)),
+            calls: Arc::new(std::sync::Mutex::new(Vec::new())),
+        }
+    }
+
+    pub(crate) fn error(message: impl Into<String>) -> Self {
+        Self {
+            pages: Arc::new(vec![PagedResolverResult::Error(message.into())]),
+            index: Arc::new(std::sync::Mutex::new(0)),
+            calls: Arc::new(std::sync::Mutex::new(Vec::new())),
+        }
+    }
+
+    pub(crate) fn calls(&self) -> Vec<PagedResolverCall> {
+        self.calls.lock().unwrap().clone()
+    }
+}
+
+impl PagedDownloadResolver for FixedPagedResolver {
+    fn resolve_page(&self, mode: String, url: String, cursor: i64, count: i64) -> PagedPlanFuture {
+        self.calls.lock().unwrap().push(PagedResolverCall {
+            mode,
+            url,
+            cursor,
+            count,
+        });
+        let mut idx = self.index.lock().unwrap();
+        let result = if *idx < self.pages.len() {
+            self.pages[*idx].clone()
+        } else {
+            PagedResolverResult::Error("no more pages".to_string())
+        };
+        *idx += 1;
+        Box::pin(async move {
+            match result {
+                PagedResolverResult::Plan(plan) => Ok(plan),
+                PagedResolverResult::DelayedPlan(plan, delay) => {
+                    tokio::time::sleep(delay).await;
+                    Ok(plan)
+                }
+                PagedResolverResult::Error(message) => Err(message),
             }
         })
     }
@@ -107,46 +193,50 @@ impl LocalHttpServer {
             .expect("local HTTP listener should bind");
         let address = listener.local_addr().unwrap();
         let task = tokio::spawn(async move {
-            let Ok((mut socket, _)) = listener.accept().await else {
-                return;
-            };
-            let mut request = [0_u8; 2048];
-            let _ = socket.read(&mut request).await;
-            match behavior {
-                HttpBehavior::Success(body) => {
-                    let header = format!(
-                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                        body.len()
-                    );
-                    let _ = socket.write_all(header.as_bytes()).await;
-                    let _ = socket.write_all(body).await;
-                }
-                HttpBehavior::NotFound => {
-                    let _ = socket
-                        .write_all(
-                            b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                        )
-                        .await;
-                }
-                HttpBehavior::Timeout => {
-                    tokio::time::sleep(Duration::from_secs(3)).await;
-                }
-                HttpBehavior::Chunked {
-                    chunks,
-                    chunk_size,
-                    delay,
-                } => {
-                    let total = chunks * chunk_size;
-                    let header = format!(
-                        "HTTP/1.1 200 OK\r\nContent-Length: {total}\r\nConnection: close\r\n\r\n"
-                    );
-                    let _ = socket.write_all(header.as_bytes()).await;
-                    let chunk = vec![b'x'; chunk_size];
-                    for _ in 0..chunks {
-                        if socket.write_all(&chunk).await.is_err() {
-                            break;
+            // Accept multiple connections (handles multi-item downloads)
+            loop {
+                let (mut socket, _) = match listener.accept().await {
+                    Ok(socket) => socket,
+                    Err(_) => break,
+                };
+                let mut request = [0_u8; 2048];
+                let _ = socket.read(&mut request).await;
+                match behavior {
+                    HttpBehavior::Success(body) => {
+                        let header = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            body.len()
+                        );
+                        let _ = socket.write_all(header.as_bytes()).await;
+                        let _ = socket.write_all(body).await;
+                    }
+                    HttpBehavior::NotFound => {
+                        let _ = socket
+                            .write_all(
+                                b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                            )
+                            .await;
+                    }
+                    HttpBehavior::Timeout => {
+                        tokio::time::sleep(Duration::from_secs(3)).await;
+                    }
+                    HttpBehavior::Chunked {
+                        chunks,
+                        chunk_size,
+                        delay,
+                    } => {
+                        let total = chunks * chunk_size;
+                        let header = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {total}\r\nConnection: close\r\n\r\n"
+                        );
+                        let _ = socket.write_all(header.as_bytes()).await;
+                        let chunk = vec![b'x'; chunk_size];
+                        for _ in 0..chunks {
+                            if socket.write_all(&chunk).await.is_err() {
+                                break;
+                            }
+                            tokio::time::sleep(delay).await;
                         }
-                        tokio::time::sleep(delay).await;
                     }
                 }
             }
@@ -178,20 +268,35 @@ pub(crate) struct TaskHarness {
 
 impl TaskHarness {
     pub(crate) fn new() -> Self {
-        let root =
-            std::env::temp_dir().join(format!("douyin-crawler-task-harness-{}", Uuid::new_v4()));
-        std::fs::create_dir_all(&root).unwrap();
-        let database_path = root.join("tasks.sqlite");
-        let db = Database::open(&database_path).unwrap();
-        let config = AppConfig {
-            download_path: root.to_string_lossy().to_string(),
+        Self::with_config(AppConfig {
             timeout: 1,
             max_retries: 1,
             music: false,
             cover: false,
             desc: false,
             ..AppConfig::default()
-        };
+        })
+    }
+
+    pub(crate) fn with_max_counts(max_counts: u32) -> Self {
+        Self::with_config(AppConfig {
+            timeout: 1,
+            max_retries: 1,
+            max_counts,
+            music: false,
+            cover: false,
+            desc: false,
+            ..AppConfig::default()
+        })
+    }
+
+    fn with_config(mut config: AppConfig) -> Self {
+        let root =
+            std::env::temp_dir().join(format!("douyin-crawler-task-harness-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let database_path = root.join("tasks.sqlite");
+        let db = Database::open(&database_path).unwrap();
+        config.download_path = root.to_string_lossy().to_string();
         let state = AppState::new(
             db,
             Arc::new(Mutex::new(ConfigManager::for_test(config))),
@@ -212,6 +317,7 @@ impl TaskHarness {
             mode: "one".to_string(),
             save_dir: self.root.to_string_lossy().to_string(),
             items: vec![SingleDownloadItem {
+                media_key: format!("{aweme_id}:video:0"),
                 aweme_id: aweme_id.to_string(),
                 urls: vec![url.to_string()],
                 kind: SingleMediaKind::Video,
@@ -228,6 +334,51 @@ impl TaskHarness {
         }
     }
 
+    pub(crate) fn paged_plan(&self, url: &str, aweme_ids: &[&str], has_more: bool, next_cursor: Option<i64>) -> PagedDownloadPlanV1 {
+        let items: Vec<SingleDownloadItem> = aweme_ids.iter().map(|aweme_id| {
+            SingleDownloadItem {
+                media_key: format!("{aweme_id}:video:0"),
+                aweme_id: aweme_id.to_string(),
+                urls: vec![url.to_string()],
+                kind: SingleMediaKind::Video,
+                output: SingleOutputSpec {
+                    filename: aweme_id.to_string(),
+                    suffix: ".mp4".to_string(),
+                    folder_name: None,
+                },
+                headers: Default::default(),
+                accessories: Vec::new(),
+                metadata: video(aweme_id),
+            }
+        }).collect();
+        PagedDownloadPlanV1 {
+            success: true,
+            contract_version: 1,
+            mode: "post".to_string(),
+            save_dir: self.root.to_string_lossy().to_string(),
+            items,
+            next_cursor,
+            has_more,
+            page_aweme_ids: aweme_ids.iter().map(|s| s.to_string()).collect(),
+            user_profile: None,
+        }
+    }
+
+    pub(crate) fn paged_plan_with_urls(
+        &self,
+        items: &[(&str, &str)],
+        has_more: bool,
+        next_cursor: Option<i64>,
+    ) -> PagedDownloadPlanV1 {
+        let mut plan = self.paged_plan("http://127.0.0.1:1/unused", &[], has_more, next_cursor);
+        plan.page_aweme_ids = items.iter().map(|(aweme_id, _)| (*aweme_id).to_string()).collect();
+        plan.items = items
+            .iter()
+            .map(|(aweme_id, url)| self.plan(url, aweme_id).items.into_iter().next().unwrap())
+            .collect();
+        plan
+    }
+
     pub(crate) async fn start(&self, resolver: FixedSingleResolver) -> String {
         TaskApplicationService::with_test_adapters(
             &self.state,
@@ -239,6 +390,21 @@ impl TaskHarness {
             url: "https://fixture.invalid/video".to_string(),
             aweme_ids: Vec::new(),
         })
+        .await
+        .unwrap()
+    }
+
+    pub(crate) async fn start_paged(&self, resolver: FixedPagedResolver) -> String {
+        TaskApplicationService::with_paged_test_adapters(
+            &self.state,
+            Arc::new(resolver),
+            self.events.clone(),
+        )
+        .start_batch_download_mode(
+            DownloadMode::Post,
+            "https://fixture.invalid/user",
+            &[],
+        )
         .await
         .unwrap()
     }
@@ -282,6 +448,33 @@ impl TaskHarness {
             })
             .unwrap();
     }
+
+    pub(crate) fn install_user_failure(&self) {
+        self.state
+            .db
+            .with_transaction(|tx| {
+                tx.execute_batch(
+                    "CREATE TRIGGER harness_fail_user BEFORE INSERT ON user_info \
+                     BEGIN SELECT RAISE(ABORT, 'harness user failure'); END;",
+                )?;
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    pub(crate) fn install_completed_status_failure(&self) {
+        self.state
+            .db
+            .with_transaction(|tx| {
+                tx.execute_batch(
+                    "CREATE TRIGGER harness_fail_completed BEFORE UPDATE OF status ON download_tasks \
+                     WHEN NEW.status = 'completed' \
+                     BEGIN SELECT RAISE(ABORT, 'harness completed status failure'); END;",
+                )?;
+                Ok(())
+            })
+            .unwrap();
+    }
 }
 
 impl Drop for TaskHarness {
@@ -296,6 +489,14 @@ fn video(aweme_id: &str) -> VideoInfo {
         "aweme_id": aweme_id,
         "desc": "task harness",
         "author_nickname": "fixture"
+    }))
+    .unwrap()
+}
+
+fn user_profile(sec_user_id: &str, nickname: &str) -> UserInfo {
+    serde_json::from_value(serde_json::json!({
+        "sec_user_id": sec_user_id,
+        "nickname": nickname
     }))
     .unwrap()
 }
@@ -316,17 +517,19 @@ fn assert_terminal_event(harness: &TaskHarness, task_id: &str, status: TaskStatu
     assert_eq!(event.patch.status, Some(status));
 }
 
-fn assert_started_event(harness: &TaskHarness, task_id: &str) {
+fn assert_started_event(
+    harness: &TaskHarness,
+    task_id: &str,
+    mode: DownloadMode,
+    url: &str,
+) {
     let events = harness.events.snapshot();
     let started = events
         .iter()
         .find(|event| event.task_id == task_id && event.event_type == TaskEventType::Started)
         .expect("started event should be captured");
-    assert_eq!(started.mode, Some(DownloadMode::One));
-    assert_eq!(
-        started.url.as_deref(),
-        Some("https://fixture.invalid/video")
-    );
+    assert_eq!(started.mode, Some(mode));
+    assert_eq!(started.url.as_deref(), Some(url));
     assert_eq!(started.patch.status, Some(TaskStatus::Running));
 }
 
@@ -358,7 +561,12 @@ async fn public_task_success_writes_file_database_and_events() {
         .unwrap()
         .iter()
         .any(|video| video.aweme_id == "success-item"));
-    assert_started_event(&harness, &task_id);
+    assert_started_event(
+        &harness,
+        &task_id,
+        DownloadMode::One,
+        "https://fixture.invalid/video",
+    );
     assert_terminal_event(&harness, &task_id, TaskStatus::Completed);
 }
 
@@ -534,4 +742,383 @@ async fn recover_simulates_process_restart() {
     }
 
     let _ = std::fs::remove_dir_all(&root);
+}
+
+// ============================================================
+// Paged task tests (post mode with typed PagedDownloadPlanV1)
+// ============================================================
+
+#[tokio::test]
+async fn public_paged_task_single_page_success() {
+    let server = LocalHttpServer::start(HttpBehavior::Success(b"page-data")).await;
+    let harness = TaskHarness::new();
+    let plan = harness.paged_plan(server.url(), &["item-1", "item-2"], false, None);
+    let task_id = harness.start_paged(FixedPagedResolver::single(plan)).await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "completed");
+    assert_eq!(task.completed, 2);
+    assert_eq!(task.skipped, 0);
+    assert_eq!(
+        std::fs::read(harness.media_path("item-1")).unwrap(),
+        b"page-data"
+    );
+    assert_eq!(
+        std::fs::read(harness.media_path("item-2")).unwrap(),
+        b"page-data"
+    );
+    let detail = harness.state.db.get_task_detail(&task_id).unwrap().unwrap();
+    assert_eq!(detail.items.len(), 2);
+    assert_eq!(detail.items[0].media_key.as_deref(), Some("item-1:video:0"));
+    assert_eq!(detail.items[1].media_key.as_deref(), Some("item-2:video:0"));
+    assert_started_event(
+        &harness,
+        &task_id,
+        DownloadMode::Post,
+        "https://fixture.invalid/user",
+    );
+    assert_terminal_event(&harness, &task_id, TaskStatus::Completed);
+}
+
+#[tokio::test]
+async fn public_paged_task_two_pages_success() {
+    let server = LocalHttpServer::start(HttpBehavior::Success(b"page-data")).await;
+    let harness = TaskHarness::new();
+    let plan1 = harness.paged_plan(server.url(), &["item-1"], true, Some(100));
+    let plan2 = harness.paged_plan(server.url(), &["item-2"], false, None);
+    let resolver = FixedPagedResolver::multi(vec![
+        PagedResolverResult::Plan(plan1),
+        PagedResolverResult::Plan(plan2),
+    ]);
+    let task_id = harness.start_paged(resolver.clone()).await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "completed");
+    assert_eq!(task.completed, 2);
+    assert_eq!(
+        resolver
+            .calls()
+            .iter()
+            .map(|call| (call.mode.as_str(), call.cursor))
+            .collect::<Vec<_>>(),
+        [("post", 0), ("post", 100)]
+    );
+    let progress_events = harness
+        .events
+        .snapshot()
+        .into_iter()
+        .filter(|event| {
+            event.task_id == task_id && event.event_type == TaskEventType::Progress
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(progress_events.len(), 2);
+    assert_eq!(progress_events[0].patch.total, Some(1));
+    assert_eq!(progress_events[0].patch.completed, Some(1));
+    assert_eq!(progress_events[0].patch.skipped, Some(0));
+    assert_eq!(progress_events[0].patch.failed, Some(0));
+    assert_eq!(progress_events[1].patch.total, Some(2));
+    assert_eq!(progress_events[1].patch.completed, Some(2));
+    assert_eq!(progress_events[1].patch.skipped, Some(0));
+    assert_eq!(progress_events[1].patch.failed, Some(0));
+    assert_terminal_event(&harness, &task_id, TaskStatus::Completed);
+}
+
+#[tokio::test]
+async fn public_paged_task_second_page_error_retains_first_page_and_errors() {
+    let server = LocalHttpServer::start(HttpBehavior::Success(b"page-one")).await;
+    let harness = TaskHarness::new();
+    let first = harness.paged_plan(server.url(), &["first-item"], true, Some(100));
+    let resolver = FixedPagedResolver::multi(vec![
+        PagedResolverResult::Plan(first),
+        PagedResolverResult::Error("second page fixture failure".to_string()),
+    ]);
+    let task_id = harness.start_paged(resolver).await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "error");
+    assert_eq!(task.completed, 1);
+    assert!(task
+        .error_msg
+        .as_deref()
+        .unwrap_or("")
+        .contains("第 2 页解析失败 (cursor=100)"));
+    assert_eq!(
+        std::fs::read(harness.media_path("first-item")).unwrap(),
+        b"page-one"
+    );
+    assert_terminal_event(&harness, &task_id, TaskStatus::Error);
+}
+
+#[tokio::test]
+async fn public_paged_task_missing_next_cursor_is_protocol_error() {
+    let harness = TaskHarness::new();
+    let plan = harness.paged_plan("http://127.0.0.1:1/unused", &["item"], true, None);
+    let task_id = harness.start_paged(FixedPagedResolver::single(plan)).await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "error");
+    assert_eq!(task.total, 0);
+    assert!(task.error_msg.as_deref().unwrap_or("").contains("next_cursor"));
+}
+
+#[tokio::test]
+async fn public_paged_task_repeated_cursor_is_protocol_error() {
+    let server = LocalHttpServer::start(HttpBehavior::Success(b"first-page")).await;
+    let harness = TaskHarness::new();
+    let plan = harness.paged_plan(server.url(), &["item"], true, Some(0));
+    let task_id = harness.start_paged(FixedPagedResolver::single(plan)).await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "error");
+    assert_eq!(task.completed, 1);
+    assert!(task.error_msg.as_deref().unwrap_or("").contains("next_cursor 重复"));
+}
+
+#[tokio::test]
+async fn public_paged_task_empty_page_with_has_more_is_protocol_error() {
+    let harness = TaskHarness::new();
+    let plan = harness.paged_plan("http://127.0.0.1:1/unused", &[], true, Some(10));
+    let task_id = harness.start_paged(FixedPagedResolver::single(plan)).await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "error");
+    assert!(task.error_msg.as_deref().unwrap_or("").contains("items 为空"));
+}
+
+#[tokio::test]
+async fn public_paged_task_rejects_mode_and_save_dir_drift() {
+    let server = LocalHttpServer::start(HttpBehavior::Success(b"page-data")).await;
+
+    let mode_harness = TaskHarness::new();
+    let mut wrong_mode = mode_harness.paged_plan(server.url(), &["mode-item"], false, None);
+    wrong_mode.mode = "like".to_string();
+    let mode_task = mode_harness
+        .start_paged(FixedPagedResolver::single(wrong_mode))
+        .await;
+    let mode_result = mode_harness.wait_for_terminal(&mode_task).await;
+    assert_eq!(mode_result.status, "error");
+    assert!(mode_result.error_msg.as_deref().unwrap_or("").contains("mode 漂移"));
+
+    let dir_harness = TaskHarness::new();
+    let first = dir_harness.paged_plan(server.url(), &["dir-one"], true, Some(20));
+    let mut second = dir_harness.paged_plan(server.url(), &["dir-two"], false, None);
+    second.save_dir = dir_harness.root.join("different").to_string_lossy().to_string();
+    let dir_task = dir_harness
+        .start_paged(FixedPagedResolver::multi(vec![
+            PagedResolverResult::Plan(first),
+            PagedResolverResult::Plan(second),
+        ]))
+        .await;
+    let dir_result = dir_harness.wait_for_terminal(&dir_task).await;
+    assert_eq!(dir_result.status, "error");
+    assert_eq!(dir_result.completed, 1);
+    assert!(dir_result.error_msg.as_deref().unwrap_or("").contains("save_dir 漂移"));
+}
+
+#[tokio::test]
+async fn public_paged_task_rejects_cross_page_duplicate_media_key() {
+    let server = LocalHttpServer::start(HttpBehavior::Success(b"page-data")).await;
+    let harness = TaskHarness::new();
+    let first = harness.paged_plan(server.url(), &["duplicate"], true, Some(10));
+    let second = harness.paged_plan(server.url(), &["duplicate"], false, None);
+    let task_id = harness
+        .start_paged(FixedPagedResolver::multi(vec![
+            PagedResolverResult::Plan(first),
+            PagedResolverResult::Plan(second),
+        ]))
+        .await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "error");
+    assert_eq!(task.completed, 1);
+    assert!(task.error_msg.as_deref().unwrap_or("").contains("跨页重复 media_key"));
+}
+
+#[tokio::test]
+async fn public_paged_task_max_counts_keeps_complete_work_group() {
+    let server = LocalHttpServer::start(HttpBehavior::Success(b"image-data")).await;
+    let harness = TaskHarness::with_max_counts(1);
+    let mut plan = harness.paged_plan(server.url(), &["work-one", "work-two"], true, Some(100));
+    let mut image_one = plan.items[0].clone();
+    image_one.media_key = "work-one:image:1".to_string();
+    image_one.kind = SingleMediaKind::Image;
+    image_one.output.filename = "work-one-image-1".to_string();
+    image_one.output.suffix = ".webp".to_string();
+    let mut image_two = image_one.clone();
+    image_two.media_key = "work-one:image:2".to_string();
+    image_two.output.filename = "work-one-image-2".to_string();
+    let work_two = plan.items[1].clone();
+    plan.items = vec![image_one, image_two, work_two];
+    let resolver = FixedPagedResolver::single(plan);
+    let task_id = harness.start_paged(resolver.clone()).await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "completed");
+    assert_eq!(task.total, 2);
+    assert_eq!(task.completed, 2);
+    let items = harness.state.db.get_task_items(&task_id, None).unwrap();
+    assert!(items.iter().all(|item| item.aweme_id.as_deref() == Some("work-one")));
+    assert_eq!(resolver.calls()[0].count, 1);
+}
+
+#[tokio::test]
+async fn public_paged_task_partial_media_failure_can_complete() {
+    let success = LocalHttpServer::start(HttpBehavior::Success(b"ok")).await;
+    let failure = LocalHttpServer::start(HttpBehavior::NotFound).await;
+    let harness = TaskHarness::new();
+    let plan = harness.paged_plan_with_urls(
+        &[("good", success.url()), ("bad", failure.url())],
+        false,
+        None,
+    );
+    let task_id = harness.start_paged(FixedPagedResolver::single(plan)).await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "completed");
+    assert_eq!(task.completed, 1);
+    assert_eq!(task.failed, 1);
+}
+
+#[tokio::test]
+async fn public_paged_task_all_media_failure_is_error() {
+    let failure = LocalHttpServer::start(HttpBehavior::NotFound).await;
+    let harness = TaskHarness::new();
+    let plan = harness.paged_plan(failure.url(), &["bad"], false, None);
+    let task_id = harness.start_paged(FixedPagedResolver::single(plan)).await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "error");
+    assert_eq!(task.failed, 1);
+    assert!(task.error_msg.as_deref().unwrap_or("").contains("所有下载均失败"));
+}
+
+#[tokio::test]
+async fn public_paged_task_cancelled_after_resolver_returns() {
+    let harness = TaskHarness::new();
+    let plan = harness.paged_plan("http://127.0.0.1:1/unused", &["cancel-after-parse"], false, None);
+    let resolver = FixedPagedResolver::multi(vec![PagedResolverResult::DelayedPlan(
+        plan,
+        Duration::from_millis(150),
+    )]);
+    let task_id = harness.start_paged(resolver).await;
+    wait_until(|| harness.state.get_cancel_signal(&task_id).is_some()).await;
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert!(harness.state.cancel_task(&task_id));
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "cancelled");
+    assert_eq!(task.total, 0);
+}
+
+#[tokio::test]
+async fn public_paged_task_profile_failure_is_error_without_completed_event() {
+    let harness = TaskHarness::new();
+    harness.install_user_failure();
+    let mut plan = harness.paged_plan("http://127.0.0.1:1/unused", &["profile-item"], false, None);
+    plan.user_profile = Some(user_profile("sec-profile", "profile user"));
+    let task_id = harness.start_paged(FixedPagedResolver::single(plan)).await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "error");
+    assert_eq!(task.total, 0);
+    assert!(task.error_msg.as_deref().unwrap_or("").contains("harness user failure"));
+    assert!(!harness.events.snapshot().iter().any(|event| {
+        event.task_id == task_id && event.patch.status == Some(TaskStatus::Completed)
+    }));
+}
+
+#[tokio::test]
+async fn public_paged_task_profile_updates_task_metadata() {
+    let harness = TaskHarness::new();
+    std::fs::write(harness.media_path("profile-success"), b"existing").unwrap();
+    let mut plan = harness.paged_plan(
+        "http://127.0.0.1:1/unused",
+        &["profile-success"],
+        false,
+        None,
+    );
+    plan.user_profile = Some(user_profile("sec-profile-success", "profile user"));
+    let task_id = harness.start_paged(FixedPagedResolver::single(plan)).await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "completed");
+    assert_eq!(task.title.as_deref(), Some("profile user"));
+    assert_eq!(task.author_nickname.as_deref(), Some("profile user"));
+    assert!(harness
+        .state
+        .db
+        .get_user_by_sec_uid("sec-profile-success")
+        .unwrap()
+        .is_some());
+}
+
+#[tokio::test]
+async fn public_paged_task_terminal_db_failure_never_emits_completed() {
+    let harness = TaskHarness::new();
+    std::fs::write(harness.media_path("terminal-db"), b"existing").unwrap();
+    harness.install_completed_status_failure();
+    let plan = harness.paged_plan(
+        "http://127.0.0.1:1/unused",
+        &["terminal-db"],
+        false,
+        None,
+    );
+    let task_id = harness.start_paged(FixedPagedResolver::single(plan)).await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "error");
+    assert!(task
+        .error_msg
+        .as_deref()
+        .unwrap_or("")
+        .contains("harness completed status failure"));
+    assert!(!harness.events.snapshot().iter().any(|event| {
+        event.task_id == task_id && event.patch.status == Some(TaskStatus::Completed)
+    }));
+}
+
+#[tokio::test]
+async fn public_paged_task_first_page_resolver_error() {
+    let harness = TaskHarness::new();
+    let task_id = harness.start_paged(FixedPagedResolver::error("fixture paged error")).await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "error");
+    assert_eq!(task.total, 0);
+    assert!(task.error_msg.as_deref().unwrap_or("").contains("fixture paged error"));
+    assert_terminal_event(&harness, &task_id, TaskStatus::Error);
+}
+
+#[tokio::test]
+async fn public_paged_task_cancelled_during_page() {
+    let server = LocalHttpServer::start(HttpBehavior::Chunked {
+        chunks: 50,
+        chunk_size: 16 * 1024,
+        delay: std::time::Duration::from_millis(20),
+    }).await;
+    let harness = TaskHarness::new();
+    let plan = harness.paged_plan(server.url(), &["item-cancel"], false, None);
+    let task_id = harness.start_paged(FixedPagedResolver::single(plan)).await;
+
+    wait_until(|| harness.state.get_cancel_signal(&task_id).is_some()).await;
+    tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+    assert!(harness.state.cancel_task(&task_id));
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "cancelled");
+    assert_eq!(task.failed, 0);
+    assert_terminal_event(&harness, &task_id, TaskStatus::Cancelled);
+}
+
+#[tokio::test]
+async fn public_paged_task_existing_file_is_skipped() {
+    let harness = TaskHarness::new();
+    std::fs::write(harness.media_path("existing-item"), b"existing").unwrap();
+    let plan = harness.paged_plan("http://127.0.0.1:1/unused", &["existing-item"], false, None);
+    let task_id = harness.start_paged(FixedPagedResolver::single(plan)).await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "completed");
+    assert_eq!(task.skipped, 1);
+    assert_terminal_event(&harness, &task_id, TaskStatus::Completed);
 }

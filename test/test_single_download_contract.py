@@ -93,6 +93,7 @@ def _valid_contract_data() -> dict:
         "total": 1,
         "items": [
             {
+                "media_key": "7650450403901017571:video:0",
                 "aweme_id": "7650450403901017571",
                 "urls": ["https://cdn.example/video.mp4"],
                 "kind": "video",
@@ -122,6 +123,7 @@ def test_resolve_one_returns_versioned_typed_contract(monkeypatch, tmp_path):
     item = result["items"][0]
     assert item["urls"] == detail.video_urls
     assert item["kind"] == "video"
+    assert item["media_key"] == f"{detail.aweme_id}:video:0"
     assert item["output"] == {
         "filename": f"{detail.aweme_id}_video",
         "suffix": ".mp4",
