@@ -101,7 +101,7 @@ def _valid_plan() -> dict:
     [
         (True, None, [_valid_item()], "requires next_cursor"),
         (False, 55, [_valid_item()], "requires next_cursor=None"),
-        (True, 55, [], "requires non-empty items"),
+        (True, 55, [], "requires non-empty page_aweme_ids"),
     ],
 )
 def test_paged_model_enforces_cursor_protocol(has_more, next_cursor, items, message):
@@ -143,8 +143,11 @@ def test_paged_model_rejects_unknown_fields_and_invalid_page_identity():
 
     data = _valid_plan()
     data["page_aweme_ids"] = ["100", "missing-media"]
-    with pytest.raises(ValidationError, match="must have at least one media item"):
-        PagedDownloadPlanV1.model_validate(data)
+    # Issue 06: page_aweme_ids may now include IDs without media items
+    # (for Rust to distinguish missing vs unavailable).
+    plan = PagedDownloadPlanV1.model_validate(data)
+    assert plan.page_aweme_ids == ["100", "missing-media"]
+    assert len(plan.items) == 1
 
     data = _valid_plan()
     data["items"][0]["aweme_id"] = "other"
@@ -157,6 +160,19 @@ def test_paged_model_rejects_unknown_fields_and_invalid_page_identity():
     data["items"].append(deepcopy(data["items"][0]))
     with pytest.raises(ValidationError, match="media_key must be unique"):
         PagedDownloadPlanV1.model_validate(data)
+
+
+def test_paged_model_accepts_media_free_source_page_with_more_data():
+    data = _valid_plan()
+    data["items"] = []
+    data["page_aweme_ids"] = ["seen-but-unavailable"]
+
+    plan = PagedDownloadPlanV1.model_validate(data)
+
+    assert plan.has_more is True
+    assert plan.next_cursor == 55
+    assert plan.page_aweme_ids == ["seen-but-unavailable"]
+    assert plan.items == []
 
 
 def test_shared_planner_preserves_f2_names_groups_and_accessories():
@@ -253,6 +269,39 @@ def _install_paged_resolver(monkeypatch, tmp_path: Path, pages: dict[int, dict])
     monkeypatch.setattr("core.crawler_engine.filter.UserPostFilter", FakePostFilter)
     monkeypatch.setattr("core.crawler_engine.filter.UserProfileFilter", FakeProfileFilter)
     return calls
+
+
+def test_page_aweme_ids_preserves_all_source_ids_including_media_free(monkeypatch, tmp_path):
+    """page_aweme_ids must include all source page IDs, even those with no media items."""
+    prohibited = FakeDetail("prohibited", prohibited=True)
+    normal = FakeDetail("normal")
+    pages = {
+        0: {
+            "details": [prohibited, normal],
+            "has_more": False,
+            "next_cursor": 0,
+        },
+    }
+    _install_paged_resolver(monkeypatch, tmp_path, pages)
+    result = py_bridge.resolve_page("post", "https://douyin.com/user/sec-user", 0, 2)
+    assert result["page_aweme_ids"] == ["prohibited", "normal"]
+    item_ids = [item["aweme_id"] for item in result["items"]]
+    assert "prohibited" not in item_ids
+    assert "normal" in item_ids
+
+
+def test_page_aweme_ids_preserves_order_from_source(monkeypatch, tmp_path):
+    """page_aweme_ids preserves source page occurrence order."""
+    pages = {
+        0: {
+            "details": [FakeDetail("b"), FakeDetail("a"), FakeDetail("c")],
+            "has_more": False,
+            "next_cursor": 0,
+        },
+    }
+    _install_paged_resolver(monkeypatch, tmp_path, pages)
+    result = py_bridge.resolve_page("post", "https://douyin.com/user/sec-user", 0, 3)
+    assert result["page_aweme_ids"] == ["b", "a", "c"]
 
 
 def test_resolve_post_returns_two_exact_typed_pages(monkeypatch, tmp_path):

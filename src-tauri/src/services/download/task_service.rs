@@ -45,6 +45,7 @@ use super::contract::{
 use super::engine::{DownloadEngine, DownloadItem, DownloadUrl, EngineConfig};
 use super::events;
 use super::live::{LiveRecorder, ResolvedLive};
+use super::selection::SelectionTracker;
 
 // ============================================================
 // 辅助函数
@@ -1148,6 +1149,10 @@ impl<'a> TaskApplicationService<'a> {
     ///
     /// Python returns one versioned page at a time; Rust drives pagination,
     /// calls the shared media executor, and handles protocol errors.
+    ///
+    /// When `aweme_ids` is non-empty, creates a `SelectionTracker` that is the
+    /// source of truth for requested/seen/planned state and classifies terminal
+    /// missing/unavailable outcomes.
     async fn execute_paged_download_plan(
         db: &Database,
         task_id: &str,
@@ -1155,6 +1160,7 @@ impl<'a> TaskApplicationService<'a> {
         cancel_signal: &Arc<AtomicBool>,
         app_config: &crate::config::AppConfig,
         adapters: &TaskRuntimeAdapters,
+        aweme_ids: &[String],
     ) -> Result<(), String> {
         let page_counts = app_config.page_counts as i64;
         let mut cursor: i64 = 0;
@@ -1164,9 +1170,11 @@ impl<'a> TaskApplicationService<'a> {
         let mut save_dir: Option<String> = None;
         let mut seen_cursors = HashSet::from([cursor]);
         let mut seen_media_keys = HashSet::new();
-        let mut seen_aweme_ids = HashSet::new();
+        let mut seen_aweme_ids: HashSet<String> = HashSet::new();
         let event_sink = adapters.event_sink.clone();
         let max_counts = app_config.max_counts as usize;
+        let mut tracker = SelectionTracker::new(aweme_ids.to_vec());
+        let selection_active = tracker.is_active();
 
         loop {
             if cancel_signal.load(Ordering::Relaxed) {
@@ -1180,7 +1188,8 @@ impl<'a> TaskApplicationService<'a> {
                 page_index, task_id, cursor
             );
 
-            let request_count = if max_counts == 0 {
+            // When selection is active, override max_counts: requested set is the limit.
+            let request_count = if selection_active || max_counts == 0 {
                 page_counts
             } else {
                 let remaining = max_counts.saturating_sub(seen_aweme_ids.len());
@@ -1195,17 +1204,19 @@ impl<'a> TaskApplicationService<'a> {
                 .resolve_page("post".to_string(), url.to_string(), cursor, request_count)
                 .await
                 .map_err(|error| {
-                    format!("第 {page_index} 页解析失败 (cursor={cursor}): {error}")
+                    tracker.contextualize(format!(
+                        "第 {page_index} 页解析失败 (cursor={cursor}): {error}"
+                    ))
                 })?;
 
             if cancel_signal.load(Ordering::Relaxed) {
                 return Err("下载已取消".to_string());
             }
             if plan.mode != "post" {
-                return Err(format!(
+                return Err(tracker.contextualize(format!(
                     "第 {page_index} 页 mode 漂移: expected=post, actual={}",
                     plan.mode
-                ));
+                )));
             }
 
             if page_index == 1 {
@@ -1226,10 +1237,14 @@ impl<'a> TaskApplicationService<'a> {
                 }
             } else {
                 if plan.save_dir != *save_dir.as_ref().expect("first page sets save_dir") {
-                    return Err(format!("第 {page_index} 页 save_dir 漂移"));
+                    return Err(tracker.contextualize(format!(
+                        "第 {page_index} 页 save_dir 漂移"
+                    )));
                 }
                 if plan.user_profile.is_some() {
-                    return Err(format!("第 {page_index} 页不得重复返回 user_profile"));
+                    return Err(tracker.contextualize(format!(
+                        "第 {page_index} 页不得重复返回 user_profile"
+                    )));
                 }
             }
 
@@ -1238,62 +1253,71 @@ impl<'a> TaskApplicationService<'a> {
             })?;
 
             if plan.has_more && plan.next_cursor.is_none() {
-                return Err(format!(
+                return Err(tracker.contextualize(format!(
                     "第 {} 页 has_more=true 但 next_cursor 为空",
                     page_index
-                ));
+                )));
             }
 
-            if plan.items.is_empty() && plan.has_more {
-                return Err(format!(
-                    "第 {} 页 items 为空但 has_more=true (重复 cursor 或协议错误)",
+            if plan.page_aweme_ids.is_empty() && plan.has_more {
+                return Err(tracker.contextualize(format!(
+                    "第 {} 页 page_aweme_ids 为空但 has_more=true (重复 cursor 或协议错误)",
                     page_index
-                ));
+                )));
             }
 
-            if plan.items.is_empty() {
-                info!("[TaskService] 第 {} 页无数据，停止分页", page_index);
-                break;
-            }
+            // Update selection tracker before item filtering.
+            tracker.mark_seen(&plan.page_aweme_ids);
 
+            let mut page_media_keys = HashSet::new();
             for item in &plan.items {
                 if !plan.page_aweme_ids.contains(&item.aweme_id) {
-                    return Err(format!(
+                    return Err(tracker.contextualize(format!(
                         "第 {page_index} 页媒体 {} 不属于 page_aweme_ids",
                         item.media_key
-                    ));
+                    )));
                 }
-                item.media_index()?;
-                if !seen_media_keys.insert(item.media_key.clone()) {
+                item.media_index().map_err(|error| tracker.contextualize(error))?;
+                if !page_media_keys.insert(item.media_key.as_str()) {
+                    return Err(tracker.contextualize(format!(
+                        "第 {page_index} 页重复 media_key: {}",
+                        item.media_key
+                    )));
+                }
+                if !selection_active && !seen_media_keys.insert(item.media_key.clone()) {
                     return Err(format!("跨页重复 media_key: {}", item.media_key));
                 }
             }
 
-            let mut allowed_work_ids = HashSet::new();
-            for aweme_id in &plan.page_aweme_ids {
-                if seen_aweme_ids.contains(aweme_id) {
+            // Filter items: selection uses tracker, non-selection uses existing max_counts logic.
+            let page_items: Vec<_> = if selection_active {
+                tracker.take_unplanned_items(plan.items.clone(), &|item| &item.aweme_id)
+            } else {
+                let mut allowed_work_ids = HashSet::new();
+                for aweme_id in &plan.page_aweme_ids {
+                    if seen_aweme_ids.contains(aweme_id) {
+                        allowed_work_ids.insert(aweme_id.as_str());
+                        continue;
+                    }
+                    if max_counts != 0 && seen_aweme_ids.len() >= max_counts {
+                        break;
+                    }
+                    seen_aweme_ids.insert(aweme_id.clone());
                     allowed_work_ids.insert(aweme_id.as_str());
-                    continue;
                 }
-                if max_counts != 0 && seen_aweme_ids.len() >= max_counts {
+                let filtered: Vec<_> = plan.items
+                    .iter()
+                    .filter(|item| allowed_work_ids.contains(item.aweme_id.as_str()))
+                    .cloned()
+                    .collect();
+                if filtered.is_empty()
+                    && max_counts != 0
+                    && seen_aweme_ids.len() >= max_counts
+                {
                     break;
                 }
-                seen_aweme_ids.insert(aweme_id.clone());
-                allowed_work_ids.insert(aweme_id.as_str());
-            }
-            let page_items: Vec<_> = plan
-                .items
-                .iter()
-                .filter(|item| allowed_work_ids.contains(item.aweme_id.as_str()))
-                .cloned()
-                .collect();
-
-            if page_items.is_empty()
-                && max_counts != 0
-                && seen_aweme_ids.len() >= max_counts
-            {
-                break;
-            }
+                filtered
+            };
 
             let (completed, failed) = Self::execute_media_items(
                 db,
@@ -1314,35 +1338,70 @@ impl<'a> TaskApplicationService<'a> {
                 page_index, completed, failed, total_completed, total_completed + total_failed
             );
 
-            if max_counts != 0 && seen_aweme_ids.len() >= max_counts {
+            // Post-download max_counts early stop (non-selection).
+            if !selection_active && max_counts != 0 && seen_aweme_ids.len() >= max_counts {
                 break;
             }
+
+            // Selection early-stop: all requested IDs seen.
+            if selection_active && tracker.all_seen() {
+                info!(
+                    "[TaskService] 所有选中作品已命中，停止分页: task_id={}",
+                    task_id
+                );
+                break;
+            }
+
             if !plan.has_more {
                 info!("[TaskService] has_more=false，停止分页 (共 {} 页)", page_index);
                 break;
             }
 
             let next = plan.next_cursor.ok_or_else(|| {
-                format!("第 {page_index} 页 has_more=true 但 next_cursor 为空")
+                tracker.contextualize(format!(
+                    "第 {page_index} 页 has_more=true 但 next_cursor 为空"
+                ))
             })?;
             if !seen_cursors.insert(next) {
-                return Err(format!("第 {page_index} 页 next_cursor 重复: {next}"));
+                return Err(tracker.contextualize(format!(
+                    "第 {page_index} 页 next_cursor 重复: {next}"
+                )));
             }
             cursor = next;
         }
 
+        // Post-pagination terminal logic.
+        if selection_active {
+            // Check for missing/unavailable — never report these on cancel (already returned).
+            if let Some(summary) = tracker.summary_error() {
+                if total_completed == 0 && total_failed == 0 {
+                    return Err(format!("选择下载未发现任何媒体: {summary}"));
+                }
+                let message = format!("选择下载部分完成: {summary}");
+                warn!("[TaskService] {}: task_id={}", message, task_id);
+                return Err(message);
+            }
+        }
         if total_completed == 0 && total_failed == 0 {
             return Err("未发现可下载媒体".to_string());
         }
         if total_failed > 0 && total_completed == 0 {
-            return Err(format!("所有下载均失败: {total_failed}/{} failed", total_failed + total_completed));
+            return Err(format!(
+                "所有下载均失败: {total_failed}/{} failed",
+                total_failed + total_completed
+            ));
         }
-
-        info!(
-            "[TaskService] 分页下载完成 (typed): task_id={}, pages={}, completed={}, failed={}",
-            task_id, page_index, total_completed, total_failed
-        );
-
+        if selection_active {
+            info!(
+                "[TaskService] 选择下载完成 (typed): task_id={}, pages={}, completed={}, failed={}",
+                task_id, page_index, total_completed, total_failed
+            );
+        } else {
+            info!(
+                "[TaskService] 分页下载完成 (typed): task_id={}, pages={}, completed={}, failed={}",
+                task_id, page_index, total_completed, total_failed
+            );
+        }
         Ok(())
     }
 
@@ -1969,6 +2028,7 @@ impl<'a> TaskApplicationService<'a> {
                     &cancel_signal,
                     &app_config,
                     &adapters,
+                    &aweme_ids_val,
                 )
                 .await
             } else {

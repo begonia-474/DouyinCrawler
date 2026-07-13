@@ -894,7 +894,7 @@ def resolve_page(mode: str, url: str, cursor: int = 0, count: int = 20, aweme_id
     }
 
     from core.models.paged_download import PagedDownloadPlanV1, PagedUserProfileV1
-    from core.services.media_plan import build_media_items_v1, ordered_aweme_ids
+    from core.services.media_plan import build_media_items_v1
 
     def _build_items_from_details(details, mode_for_dir):
         """从 PostDetailFilter 列表构建 items（不过滤附属文件）"""
@@ -1009,7 +1009,6 @@ def resolve_page(mode: str, url: str, cursor: int = 0, count: int = 20, aweme_id
             typed_items = build_media_items_v1(
                 [detail], naming=naming, folderize=folderize, headers=base_headers
             )
-            page_aweme_ids = ordered_aweme_ids(typed_items)
 
             if mode == "post":
                 return PagedDownloadPlanV1(
@@ -1017,7 +1016,7 @@ def resolve_page(mode: str, url: str, cursor: int = 0, count: int = 20, aweme_id
                     items=typed_items,
                     next_cursor=None,
                     has_more=False,
-                    page_aweme_ids=page_aweme_ids,
+                    page_aweme_ids=[target_id],
                 ).model_dump(mode="json")
             else:
                 items = _build_items_from_details([detail], mode)
@@ -1094,7 +1093,13 @@ def resolve_page(mode: str, url: str, cursor: int = 0, count: int = 20, aweme_id
             typed_items = build_media_items_v1(
                 all_details, naming=naming, folderize=folderize, headers=base_headers
             )
-            page_aweme_ids = ordered_aweme_ids(typed_items)
+            page_aweme_ids = []
+            seen_ids = set()
+            for d in all_details:
+                aid = str(getattr(d, "aweme_id", "") or "").strip()
+                if aid and aid not in seen_ids:
+                    seen_ids.add(aid)
+                    page_aweme_ids.append(aid)
             typed_profile = None
             if user_profile:
                 typed_profile = PagedUserProfileV1.model_validate(

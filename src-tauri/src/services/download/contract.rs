@@ -171,8 +171,8 @@ impl PagedDownloadPlanV1 {
         if !self.has_more && self.next_cursor.is_some() {
             return Err("has_more=false 但 next_cursor 非空".to_string());
         }
-        if self.has_more && self.items.is_empty() {
-            return Err("items 为空但 has_more=true".to_string());
+        if self.has_more && self.page_aweme_ids.is_empty() {
+            return Err("page_aweme_ids 为空但 has_more=true".to_string());
         }
 
         let mut page_ids = std::collections::HashSet::new();
@@ -189,7 +189,6 @@ impl PagedDownloadPlanV1 {
         }
 
         let mut seen_keys = std::collections::HashSet::new();
-        let mut item_aweme_ids = std::collections::HashSet::new();
         for item in &self.items {
             item.validate()?;
             if !seen_keys.insert(&item.media_key) {
@@ -199,14 +198,6 @@ impl PagedDownloadPlanV1 {
                 return Err(format!(
                     "分页项 aweme_id={} 不在 page_aweme_ids 中",
                     item.aweme_id
-                ));
-            }
-            item_aweme_ids.insert(item.aweme_id.as_str());
-        }
-        for aweme_id in &self.page_aweme_ids {
-            if !item_aweme_ids.contains(aweme_id.as_str()) {
-                return Err(format!(
-                    "page_aweme_ids 中的作品没有媒体项: {aweme_id}"
                 ));
             }
         }
@@ -487,12 +478,25 @@ mod tests {
     }
 
     #[test]
-    fn rejects_paged_aweme_id_without_media_item() {
+    fn accepts_paged_aweme_id_without_media_item() {
         let mut value = valid_paged_plan();
-        value["page_aweme_ids"] = serde_json::json!(["post-1", "missing-media"]);
+        value["page_aweme_ids"] = serde_json::json!(["post-1", "no-media"]);
+        let plan = PagedDownloadPlanV1::from_value_for_mode(value, "post").unwrap();
+        assert_eq!(plan.page_aweme_ids, vec!["post-1", "no-media"]);
+        assert_eq!(plan.items.len(), 1);
+    }
 
-        let error = paged_rejection_error(value);
-        assert!(error.contains("没有媒体项"), "{error}");
+    #[test]
+    fn accepts_media_free_source_page_when_has_more() {
+        let mut value = valid_paged_plan();
+        value["items"] = serde_json::json!([]);
+        value["page_aweme_ids"] = serde_json::json!(["no-media"]);
+
+        let plan = PagedDownloadPlanV1::from_value_for_mode(value, "post").unwrap();
+        assert!(plan.has_more);
+        assert_eq!(plan.next_cursor, Some(100));
+        assert_eq!(plan.page_aweme_ids, vec!["no-media"]);
+        assert!(plan.items.is_empty());
     }
 
     #[test]

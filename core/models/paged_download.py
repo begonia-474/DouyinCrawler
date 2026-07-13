@@ -67,8 +67,8 @@ class PagedDownloadPlanV1(BaseModel):
             raise ValueError("has_more=True requires next_cursor")
         if not self.has_more and self.next_cursor is not None:
             raise ValueError("has_more=False requires next_cursor=None")
-        if self.has_more and not self.items:
-            raise ValueError("has_more=True requires non-empty items")
+        if self.has_more and not self.page_aweme_ids:
+            raise ValueError("has_more=True requires non-empty page_aweme_ids")
         if any(not aweme_id.strip() for aweme_id in self.page_aweme_ids):
             raise ValueError("page_aweme_ids must contain non-empty IDs")
         if len(set(self.page_aweme_ids)) != len(self.page_aweme_ids):
@@ -78,9 +78,6 @@ class PagedDownloadPlanV1(BaseModel):
             raise ValueError("every item must belong to page_aweme_ids")
         if self.items and not self.page_aweme_ids:
             raise ValueError("non-empty items require page_aweme_ids")
-        item_ids = {item.aweme_id for item in self.items}
-        if any(aweme_id not in item_ids for aweme_id in self.page_aweme_ids):
-            raise ValueError("every page_aweme_id must have at least one media item")
         if len({item.media_key for item in self.items}) != len(self.items):
             raise ValueError("media_key must be unique within a page")
         return self

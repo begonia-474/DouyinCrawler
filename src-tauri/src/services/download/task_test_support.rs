@@ -409,6 +409,21 @@ impl TaskHarness {
         .unwrap()
     }
 
+    pub(crate) async fn start_paged_selection(&self, resolver: FixedPagedResolver, aweme_ids: &[&str]) -> String {
+        TaskApplicationService::with_paged_test_adapters(
+            &self.state,
+            Arc::new(resolver),
+            self.events.clone(),
+        )
+        .start_batch_download_mode(
+            DownloadMode::Post,
+            "https://fixture.invalid/user",
+            &aweme_ids.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+        )
+        .await
+        .unwrap()
+    }
+
     pub(crate) async fn wait_for_terminal(&self, task_id: &str) -> DownloadTask {
         let deadline = Instant::now() + Duration::from_secs(8);
         loop {
@@ -882,7 +897,37 @@ async fn public_paged_task_empty_page_with_has_more_is_protocol_error() {
 
     let task = harness.wait_for_terminal(&task_id).await;
     assert_eq!(task.status, "error");
-    assert!(task.error_msg.as_deref().unwrap_or("").contains("items 为空"));
+    assert!(task
+        .error_msg
+        .as_deref()
+        .unwrap_or("")
+        .contains("page_aweme_ids 为空"));
+}
+
+#[tokio::test]
+async fn public_paged_task_media_free_source_page_continues_to_next_page() {
+    let server = LocalHttpServer::start(HttpBehavior::Success(b"after-unavailable")).await;
+    let harness = TaskHarness::new();
+    let mut first = harness.paged_plan(
+        "http://127.0.0.1:1/unused",
+        &[],
+        true,
+        Some(50),
+    );
+    first.page_aweme_ids = vec!["unavailable".to_string()];
+    let second = harness.paged_plan(server.url(), &["downloadable"], false, None);
+    let resolver = FixedPagedResolver::multi(vec![
+        PagedResolverResult::Plan(first),
+        PagedResolverResult::Plan(second),
+    ]);
+    let task_id = harness.start_paged(resolver.clone()).await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "completed");
+    assert_eq!(task.total, 1);
+    assert_eq!(task.completed, 1);
+    assert_eq!(resolver.calls().len(), 2);
+    assert!(harness.media_path("downloadable").exists());
 }
 
 #[tokio::test]
@@ -1121,4 +1166,315 @@ async fn public_paged_task_existing_file_is_skipped() {
     assert_eq!(task.status, "completed");
     assert_eq!(task.skipped, 1);
     assert_terminal_event(&harness, &task_id, TaskStatus::Completed);
+}
+
+// ============================================================
+// Selection task tests (post mode with aweme_ids)
+// ============================================================
+
+#[tokio::test]
+async fn public_paged_selection_single_hit() {
+    let server = LocalHttpServer::start(HttpBehavior::Success(b"sel-data")).await;
+    let harness = TaskHarness::new();
+    let plan = harness.paged_plan(server.url(), &["target"], false, None);
+    let task_id = harness.start_paged_selection(FixedPagedResolver::single(plan), &["target"]).await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "completed");
+    assert_eq!(task.completed, 1);
+    assert_eq!(
+        std::fs::read(harness.media_path("target")).unwrap(),
+        b"sel-data"
+    );
+    assert_terminal_event(&harness, &task_id, TaskStatus::Completed);
+}
+
+#[tokio::test]
+async fn public_paged_selection_skips_non_requested_items() {
+    let server = LocalHttpServer::start(HttpBehavior::Success(b"keep-only")).await;
+    let harness = TaskHarness::new();
+    let mut plan = harness.paged_plan(server.url(), &["keep", "discard"], false, None);
+    plan.page_aweme_ids = vec!["keep".to_string(), "discard".to_string()];
+    let task_id = harness.start_paged_selection(FixedPagedResolver::single(plan), &["keep"]).await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "completed");
+    assert_eq!(task.completed, 1);
+    assert!(harness.media_path("keep").exists());
+    assert!(!harness.media_path("discard").exists());
+}
+
+#[tokio::test]
+async fn public_paged_selection_missing_ids_error() {
+    let server = LocalHttpServer::start(HttpBehavior::Success(b"present-data")).await;
+    let harness = TaskHarness::new();
+    let plan = harness.paged_plan(server.url(), &["present"], false, None);
+    let task_id = harness.start_paged_selection(FixedPagedResolver::single(plan), &["present", "never-appears"]).await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "error");
+    assert!(task.error_msg.as_deref().unwrap_or("").contains("missing_aweme_ids"));
+    assert!(task.error_msg.as_deref().unwrap_or("").contains("never-appears"));
+    // Successful files are retained despite missing IDs
+    assert!(harness.media_path("present").exists());
+}
+
+#[tokio::test]
+async fn public_paged_selection_all_missing_is_error_with_zero_counts() {
+    let harness = TaskHarness::new();
+    let plan = harness.paged_plan("http://127.0.0.1:1/unused", &[], false, None);
+    let task_id = harness.start_paged_selection(FixedPagedResolver::single(plan), &["missing-1", "missing-2"]).await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "error");
+    assert_eq!(task.total, 0);
+    assert!(task.error_msg.as_deref().unwrap_or("").contains("未发现任何媒体"));
+}
+
+#[tokio::test]
+async fn public_paged_selection_cross_page_hit() {
+    let server = LocalHttpServer::start(HttpBehavior::Success(b"cross-page")).await;
+    let harness = TaskHarness::new();
+    let plan1 = harness.paged_plan(server.url(), &["page1"], true, Some(50));
+    let plan2 = harness.paged_plan(server.url(), &["page2"], false, None);
+    let resolver = FixedPagedResolver::multi(vec![
+        PagedResolverResult::Plan(plan1),
+        PagedResolverResult::Plan(plan2),
+    ]);
+    let task_id = harness.start_paged_selection(resolver.clone(), &["page1", "page2"]).await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "completed");
+    assert_eq!(task.completed, 2);
+    assert_eq!(
+        resolver.calls().iter().map(|c| c.cursor).collect::<Vec<_>>(),
+        [0, 50]
+    );
+}
+
+#[tokio::test]
+async fn public_paged_selection_duplicate_input_ids_no_duplicate_download() {
+    let server = LocalHttpServer::start(HttpBehavior::Success(b"dedup")).await;
+    let harness = TaskHarness::new();
+    let plan = harness.paged_plan(server.url(), &["item"], false, None);
+    let task_id = harness.start_paged_selection(FixedPagedResolver::single(plan), &["item", "item", "item"]).await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "completed");
+    assert_eq!(task.completed, 1);
+}
+
+#[tokio::test]
+async fn public_paged_selection_cancelled_after_resolver_does_not_report_missing() {
+    let harness = TaskHarness::new();
+    let plan = harness.paged_plan("http://127.0.0.1:1/unused", &["hit"], false, None);
+    let resolver = FixedPagedResolver::multi(vec![PagedResolverResult::DelayedPlan(
+        plan,
+        Duration::from_millis(150),
+    )]);
+    let task_id = harness.start_paged_selection(resolver, &["hit", "never-seen"]).await;
+    wait_until(|| harness.state.get_cancel_signal(&task_id).is_some()).await;
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert!(harness.state.cancel_task(&task_id));
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "cancelled");
+    // Cancelled tasks should not report missing IDs
+    assert!(task.error_msg.is_none() || !task.error_msg.as_deref().unwrap_or("").contains("missing"));
+}
+
+#[tokio::test]
+async fn public_paged_selection_unavailable_ids_error() {
+    let server = LocalHttpServer::start(HttpBehavior::Success(b"avail")).await;
+    let harness = TaskHarness::new();
+    // First item has media, second item is in page_aweme_ids but has no items
+    let mut plan = harness.paged_plan(server.url(), &["has-media"], false, None);
+    plan.page_aweme_ids = vec!["has-media".to_string(), "no-media".to_string()];
+    let task_id = harness.start_paged_selection(FixedPagedResolver::single(plan), &["has-media", "no-media"]).await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "error");
+    assert!(task.error_msg.as_deref().unwrap_or("").contains("unavailable_aweme_ids"));
+    assert!(task.error_msg.as_deref().unwrap_or("").contains("no-media"));
+    // Successful files are retained
+    assert_eq!(task.completed, 1);
+}
+
+#[tokio::test]
+async fn public_paged_selection_media_free_nonterminal_page_is_unavailable_not_protocol_error() {
+    let harness = TaskHarness::new();
+    let mut plan = harness.paged_plan(
+        "http://127.0.0.1:1/unused",
+        &[],
+        true,
+        Some(50),
+    );
+    plan.page_aweme_ids = vec!["no-media".to_string()];
+    let resolver = FixedPagedResolver::single(plan);
+    let task_id = harness
+        .start_paged_selection(resolver.clone(), &["no-media"])
+        .await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "error");
+    assert_eq!(task.total, 0);
+    assert!(task
+        .error_msg
+        .as_deref()
+        .unwrap_or("")
+        .contains("unavailable_aweme_ids=[no-media]"));
+    assert!(!task
+        .error_msg
+        .as_deref()
+        .unwrap_or("")
+        .contains("协议错误"));
+    assert_eq!(resolver.calls().len(), 1);
+}
+
+#[tokio::test]
+async fn public_paged_selection_repeated_selected_page_does_not_redownload() {
+    let server = LocalHttpServer::start(HttpBehavior::Success(b"selection-repeat")).await;
+    let harness = TaskHarness::new();
+    let first = harness.paged_plan(server.url(), &["repeat"], true, Some(50));
+    let second = harness.paged_plan(server.url(), &["repeat", "later"], false, None);
+    let resolver = FixedPagedResolver::multi(vec![
+        PagedResolverResult::Plan(first),
+        PagedResolverResult::Plan(second),
+    ]);
+    let task_id = harness
+        .start_paged_selection(resolver, &["repeat", "later"])
+        .await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "completed");
+    assert_eq!(task.total, 2);
+    assert_eq!(task.completed, 2);
+    assert_eq!(task.skipped, 0);
+    let items = harness.state.db.get_task_items(&task_id, None).unwrap();
+    assert_eq!(items.len(), 2);
+}
+
+#[tokio::test]
+async fn public_paged_selection_ignores_repeated_unselected_media_key() {
+    let server = LocalHttpServer::start(HttpBehavior::Success(b"selected-only")).await;
+    let harness = TaskHarness::new();
+    let first = harness.paged_plan(server.url(), &["other"], true, Some(50));
+    let second = harness.paged_plan(server.url(), &["other", "target"], false, None);
+    let resolver = FixedPagedResolver::multi(vec![
+        PagedResolverResult::Plan(first),
+        PagedResolverResult::Plan(second),
+    ]);
+    let task_id = harness
+        .start_paged_selection(resolver, &["target"])
+        .await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "completed");
+    assert_eq!(task.total, 1);
+    assert_eq!(task.completed, 1);
+    assert!(!harness.media_path("other").exists());
+    assert!(harness.media_path("target").exists());
+}
+
+#[tokio::test]
+async fn public_paged_selection_overrides_global_max_counts() {
+    let server = LocalHttpServer::start(HttpBehavior::Success(b"selection-max")).await;
+    let harness = TaskHarness::with_max_counts(1);
+    let first = harness.paged_plan(server.url(), &["first"], true, Some(50));
+    let second = harness.paged_plan(server.url(), &["second"], false, None);
+    let resolver = FixedPagedResolver::multi(vec![
+        PagedResolverResult::Plan(first),
+        PagedResolverResult::Plan(second),
+    ]);
+    let task_id = harness
+        .start_paged_selection(resolver.clone(), &["first", "second"])
+        .await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "completed");
+    assert_eq!(task.total, 2);
+    assert_eq!(task.completed, 2);
+    assert_eq!(resolver.calls().len(), 2);
+    assert!(resolver.calls().iter().all(|call| call.count > 1));
+}
+
+#[tokio::test]
+async fn public_paged_selection_resolver_error_includes_current_selection_state() {
+    let server = LocalHttpServer::start(HttpBehavior::Success(b"selection-state")).await;
+    let harness = TaskHarness::new();
+    let first = harness.paged_plan(server.url(), &["first"], true, Some(50));
+    let resolver = FixedPagedResolver::multi(vec![
+        PagedResolverResult::Plan(first),
+        PagedResolverResult::Error("later page failed".to_string()),
+    ]);
+    let task_id = harness
+        .start_paged_selection(resolver, &["first", "missing"])
+        .await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "error");
+    let error = task.error_msg.as_deref().unwrap_or("");
+    assert!(error.contains("第 2 页解析失败 (cursor=50)"), "{error}");
+    assert!(error.contains("selection_state"), "{error}");
+    assert!(error.contains("requested=[first,missing]"), "{error}");
+    assert!(error.contains("seen=[first]"), "{error}");
+    assert!(error.contains("planned=[first]"), "{error}");
+}
+
+#[tokio::test]
+async fn public_paged_selection_keeps_complete_media_group_for_selected_work() {
+    let server = LocalHttpServer::start(HttpBehavior::Success(b"media-group")).await;
+    let harness = TaskHarness::new();
+    let mut plan = harness.paged_plan(server.url(), &["gallery"], false, None);
+    let mut image = plan.items[0].clone();
+    image.media_key = "gallery:image:1".to_string();
+    image.kind = SingleMediaKind::Image;
+    image.output.filename = "gallery-image-1".to_string();
+    image.output.suffix = ".webp".to_string();
+    plan.items.push(image);
+    let task_id = harness
+        .start_paged_selection(FixedPagedResolver::single(plan), &["gallery"])
+        .await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "completed");
+    assert_eq!(task.total, 2);
+    assert_eq!(task.completed, 2);
+    let items = harness.state.db.get_task_items(&task_id, None).unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0].aweme_id.as_deref(), Some("gallery"));
+    assert_eq!(items[1].aweme_id.as_deref(), Some("gallery"));
+    assert!(harness.media_path("gallery").exists());
+    assert!(harness.root.join("gallery-image-1.webp").exists());
+}
+
+#[tokio::test]
+async fn public_paged_selection_cancelled_during_media_does_not_report_missing() {
+    let server = LocalHttpServer::start(HttpBehavior::Chunked {
+        chunks: 50,
+        chunk_size: 16 * 1024,
+        delay: Duration::from_millis(20),
+    })
+    .await;
+    let harness = TaskHarness::new();
+    let plan = harness.paged_plan(server.url(), &["selected"], false, None);
+    let task_id = harness
+        .start_paged_selection(
+            FixedPagedResolver::single(plan),
+            &["selected", "not-seen"],
+        )
+        .await;
+
+    wait_until(|| harness.state.get_cancel_signal(&task_id).is_some()).await;
+    tokio::time::sleep(Duration::from_millis(80)).await;
+    assert!(harness.state.cancel_task(&task_id));
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "cancelled");
+    assert_eq!(task.failed, 0);
+    assert!(task
+        .error_msg
+        .as_deref()
+        .is_none_or(|error| !error.contains("missing_aweme_ids")));
+    assert_terminal_event(&harness, &task_id, TaskStatus::Cancelled);
 }

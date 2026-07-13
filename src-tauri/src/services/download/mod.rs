@@ -10,6 +10,7 @@ pub mod task_service;
 pub mod engine;
 pub mod live;
 pub mod contract;
+mod selection;
 #[cfg(test)]
 pub(crate) mod task_test_support;
 
