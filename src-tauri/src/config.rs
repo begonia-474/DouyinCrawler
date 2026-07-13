@@ -92,6 +92,17 @@ pub struct ConfigManager {
 }
 
 impl ConfigManager {
+    #[cfg(test)]
+    pub(crate) fn for_test(config: AppConfig) -> Self {
+        Self {
+            config_path: std::env::temp_dir().join("douyin-crawler-test-config.json"),
+            config: ConfigFile {
+                douyin: Some(config),
+                tiktok: None,
+            },
+        }
+    }
+
     /// 创建配置管理器
     pub fn new() -> Self {
         let config_dir = Self::get_config_dir();

@@ -107,6 +107,11 @@ pub struct PythonBridge {
 }
 
 impl PythonBridge {
+    #[cfg(test)]
+    pub(crate) fn for_test() -> Self {
+        Self {}
+    }
+
     /// 创建新的 Python 桥接器
     pub fn new() -> PyResult<Self> {
         // 确保 Python 路径只初始化一次

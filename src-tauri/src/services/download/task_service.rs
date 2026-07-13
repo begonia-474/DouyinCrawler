@@ -18,7 +18,9 @@
 //! - 任务完成后清理取消信号
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use parking_lot::Mutex;
@@ -171,6 +173,7 @@ struct ProgressTracker {
     task_id: String,
     last_emit_ms: AtomicU64,
     interval_ms: u64,
+    event_sink: Arc<dyn TaskEventSink>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -180,12 +183,50 @@ enum SingleTaskTerminal {
     Error(String),
 }
 
+pub(super) type SinglePlanFuture =
+    Pin<Box<dyn Future<Output = Result<SingleDownloadPlanV1, String>> + Send>>;
+
+pub(super) trait SingleDownloadResolver: Send + Sync {
+    fn resolve(&self, url: String) -> SinglePlanFuture;
+}
+
+pub(super) trait TaskEventSink: Send + Sync {
+    fn emit(&self, event: TaskEvent);
+}
+
+struct PythonSingleDownloadResolver;
+
+impl SingleDownloadResolver for PythonSingleDownloadResolver {
+    fn resolve(&self, url: String) -> SinglePlanFuture {
+        Box::pin(async move { TaskApplicationService::resolve_single_download(&url).await })
+    }
+}
+
+struct TauriTaskEventSink;
+
+impl TaskEventSink for TauriTaskEventSink {
+    fn emit(&self, event: TaskEvent) {
+        events::emit_task_event(&event);
+    }
+}
+
+#[derive(Clone)]
+struct TaskRuntimeAdapters {
+    single_resolver: Arc<dyn SingleDownloadResolver>,
+    event_sink: Arc<dyn TaskEventSink>,
+}
+
 impl ProgressTracker {
     fn new(task_id: String) -> Self {
+        Self::with_sink(task_id, Arc::new(TauriTaskEventSink))
+    }
+
+    fn with_sink(task_id: String, event_sink: Arc<dyn TaskEventSink>) -> Self {
         Self {
             task_id,
             last_emit_ms: AtomicU64::new(0),
             interval_ms: 500,
+            event_sink,
         }
     }
 
@@ -199,7 +240,10 @@ impl ProgressTracker {
         // 完成时或超过间隔时发射
         if downloaded >= total || now_ms.saturating_sub(last) >= self.interval_ms {
             self.last_emit_ms.store(now_ms, Ordering::Relaxed);
-            events::emit_progress(&self.task_id, downloaded, total);
+            self.event_sink.emit(TaskEvent::progress(
+                TaskPatch::new(&self.task_id)
+                    .with_counts(total as i64, downloaded as i64, 0, 0),
+            ));
         }
     }
 }
@@ -214,11 +258,33 @@ impl ProgressTracker {
 /// 所有任务的创建、状态更新、DB 写入都通过此服务。
 pub struct TaskApplicationService<'a> {
     state: &'a AppState,
+    adapters: TaskRuntimeAdapters,
 }
 
 impl<'a> TaskApplicationService<'a> {
     pub fn new(state: &'a AppState) -> Self {
-        Self { state }
+        Self {
+            state,
+            adapters: TaskRuntimeAdapters {
+                single_resolver: Arc::new(PythonSingleDownloadResolver),
+                event_sink: Arc::new(TauriTaskEventSink),
+            },
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_test_adapters(
+        state: &'a AppState,
+        single_resolver: Arc<dyn SingleDownloadResolver>,
+        event_sink: Arc<dyn TaskEventSink>,
+    ) -> Self {
+        Self {
+            state,
+            adapters: TaskRuntimeAdapters {
+                single_resolver,
+                event_sink,
+            },
+        }
     }
 
     /// 获取数据库引用
@@ -857,6 +923,7 @@ impl<'a> TaskApplicationService<'a> {
         plan: SingleDownloadPlanV1,
         cancel_signal: &Arc<AtomicBool>,
         app_config: &crate::config::AppConfig,
+        event_sink: Arc<dyn TaskEventSink>,
     ) -> Result<(), String> {
         let save_dir = plan.save_dir;
         tokio::fs::create_dir_all(&save_dir)
@@ -867,7 +934,7 @@ impl<'a> TaskApplicationService<'a> {
         let total = plan.items.len() as i64;
         let mut completed = 0_i64;
         let mut failed = 0_i64;
-        let progress = ProgressTracker::new(task_id.to_string());
+        let progress = ProgressTracker::with_sink(task_id.to_string(), event_sink.clone());
 
         for (index, item) in plan.items.iter().enumerate() {
             if cancel_signal.load(Ordering::Relaxed) {
@@ -989,7 +1056,11 @@ impl<'a> TaskApplicationService<'a> {
         }
 
         // 2. 发射任务启动事件
-        events::emit_started(&task_id, request.mode, &request.url);
+        self.adapters.event_sink.emit(TaskEvent::started(
+            &task_id,
+            request.mode,
+            &request.url,
+        ));
 
         // 3. 注册取消信号
         let cancel_signal = self.state.register_cancel_signal(&task_id);
@@ -1001,6 +1072,7 @@ impl<'a> TaskApplicationService<'a> {
         let task_id_clone = task_id.clone();
         let mode = request.mode;
         let url = request.url;
+        let adapters = self.adapters.clone();
 
         // 5. 启动后台下载任务
         tokio::spawn(async move {
@@ -1011,6 +1083,7 @@ impl<'a> TaskApplicationService<'a> {
                 &url,
                 &cancel_signal,
                 &app_config,
+                &adapters,
             )
             .await;
 
@@ -1021,13 +1094,15 @@ impl<'a> TaskApplicationService<'a> {
                 cancel_signal.load(Ordering::Relaxed),
             ) {
                 SingleTaskTerminal::Completed => {
-                    events::emit_finished(
+                    adapters.event_sink.emit(TaskEvent::finished(
                         TaskPatch::new(&task_id_clone).with_status(TaskStatus::Completed),
-                    );
+                    ));
                     info!("[TaskService] 下载任务完成: task_id={}", task_id_clone);
                 }
                 SingleTaskTerminal::Cancelled => {
-                    events::emit_cancelled(&task_id_clone);
+                    adapters.event_sink.emit(TaskEvent::finished(
+                        TaskPatch::new(&task_id_clone).with_status(TaskStatus::Cancelled),
+                    ));
                     info!("[TaskService] 下载任务已取消: task_id={}", task_id_clone);
                 }
                 SingleTaskTerminal::Error(message) => {
@@ -1035,7 +1110,11 @@ impl<'a> TaskApplicationService<'a> {
                         "[TaskService] 下载任务失败: task_id={}, error={}",
                         task_id_clone, message
                     );
-                    events::emit_error(&task_id_clone, &message);
+                    adapters.event_sink.emit(TaskEvent::finished(
+                        TaskPatch::new(&task_id_clone)
+                            .with_status(TaskStatus::Error)
+                            .with_error(&message),
+                    ));
                 }
             }
 
@@ -1058,15 +1137,17 @@ impl<'a> TaskApplicationService<'a> {
         url: &str,
         cancel_signal: &Arc<AtomicBool>,
         app_config: &crate::config::AppConfig,
+        adapters: &TaskRuntimeAdapters,
     ) -> Result<(), String> {
         if mode == DownloadMode::One {
-            let plan = Self::resolve_single_download(url).await?;
+            let plan = adapters.single_resolver.resolve(url.to_string()).await?;
             return Self::execute_single_download_plan(
                 db,
                 task_id,
                 plan,
                 cancel_signal,
                 app_config,
+                adapters.event_sink.clone(),
             )
             .await;
         }
