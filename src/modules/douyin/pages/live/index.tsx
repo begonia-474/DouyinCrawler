@@ -97,16 +97,18 @@ export default function LivePage() {
 
   // 监听任务完成/出错，显示错误并延迟清理（DB 保存由后端完成）
   useEffect(() => {
-    const doneTasks = Object.values(liveTasks).filter((t) => t.status === "completed" || t.status === "error");
+    const doneTasks = Object.values(liveTasks).filter(
+      (t) => t.status === "completed" || t.status === "error" || t.status === "cancelled"
+    );
     for (const task of doneTasks) {
       if (notifiedTaskIds.current.has(task.task_id)) continue;
       notifiedTaskIds.current.add(task.task_id);
 
       if (task.status === "error") {
-        setError(task.error || "录制出错");
+        setError(task.error_msg || task.error || "录制出错");
       }
       // 延迟清理已完成/出错的任务
-      setTimeout(() => removeTask(task.task_id), task.status === "completed" ? 3000 : 5000);
+      setTimeout(() => removeTask(task.task_id), task.status === "error" ? 5000 : 3000);
     }
   }, [liveTasks, removeTask]);
 

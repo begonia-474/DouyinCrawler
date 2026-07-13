@@ -182,7 +182,7 @@ export interface LiveInfo {
   title: string;
   nickname: string;
   is_live: boolean;
-  user_count: number;
+  user_count: number | string;
   room_id: string;
   cover: string;
   flv_urls: string[];
@@ -288,6 +288,16 @@ export interface TaskPatch {
   failed?: number;
   error_msg?: string;
   current_item?: string;
+  title?: string;
+  nickname?: string;
+  room_id?: string;
+  web_rid?: string;
+  cover_url?: string;
+  file?: string;
+  file_size?: number;
+  duration_sec?: number;
+  started_at?: number;
+  ended_at?: number;
 }
 
 /** 类型化任务事件（对齐 Rust TaskEvent，通过 Tauri event 发射） */

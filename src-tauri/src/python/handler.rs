@@ -170,19 +170,9 @@ pub fn get_live_info(url: &str) -> PyResult<LiveInfoResult> {
     call_py_typed("get_live_info", (url,))
 }
 
-/// 开始直播录制
-pub fn start_live_record(url: &str) -> PyResult<LiveRecordResult> {
-    call_py_typed("start_live_record", (url,))
-}
-
-/// 停止直播录制
-pub fn stop_live_record(task_id: &str) -> PyResult<LiveStatusResult> {
-    call_py_typed("stop_live_record", (task_id,))
-}
-
-/// 获取直播录制状态
-pub fn get_live_status() -> PyResult<LiveStatusResult> {
-    call_py_typed("get_live_status", ())
+/// 解析直播录制参数，录制本身由 Rust 执行
+pub fn resolve_live(url: &str) -> PyResult<Value> {
+    call_py_json("resolve_live", (url,))
 }
 
 /// 获取关注直播列表

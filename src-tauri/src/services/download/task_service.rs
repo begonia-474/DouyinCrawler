@@ -27,15 +27,16 @@ use log::{error, info, warn};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::db::{Database, NewTaskItem, UserInfo, VideoInfo};
+use crate::db::{Database, NewLiveRecord, NewTaskItem, UserInfo, VideoInfo};
 use crate::state::AppState;
 
 use super::{
     DownloadMode, DownloadRequest, ResolvedAccessory, ResolvedItem, ResolvedUrls,
-    TaskPatch, TaskStatus,
+    TaskEvent, TaskEventType, TaskPatch, TaskStatus,
 };
 use super::engine::{DownloadEngine, DownloadItem, DownloadUrl, EngineConfig};
 use super::events;
+use super::live::{LiveRecorder, ResolvedLive};
 
 // ============================================================
 // 辅助函数
@@ -46,6 +47,15 @@ fn json_str(value: Option<&Value>, key: &str) -> Option<String> {
         .and_then(|v| v.get(key))
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
+}
+
+fn nonempty_string(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_string())
+    }
 }
 
 fn cleaned_json(value: &Value) -> Value {
@@ -194,6 +204,27 @@ impl<'a> TaskApplicationService<'a> {
 
         serde_json::from_value::<ResolvedUrls>(json_value)
             .map_err(|e| format!("resolve_urls 返回值解析失败: {}", e))
+    }
+
+    /// 通过 Python 解析直播元数据和 f2 FULL_HD1 录制地址。
+    async fn resolve_live(url: &str) -> Result<ResolvedLive, String> {
+        let url = url.to_string();
+        let json_value = tokio::task::spawn_blocking(move || {
+            crate::python::handler::resolve_live(&url)
+                .map_err(|e| format!("resolve_live 调用失败: {}", e))
+        })
+        .await
+        .map_err(|e| format!("spawn_blocking 失败: {}", e))??;
+
+        let resolved = serde_json::from_value::<ResolvedLive>(json_value)
+            .map_err(|e| format!("resolve_live 返回值解析失败: {}", e))?;
+        if !resolved.success {
+            return Err(resolved.error.clone().unwrap_or_else(|| "直播解析失败".to_string()));
+        }
+        if resolved.m3u8_url.trim().is_empty() {
+            return Err("未获取到 FULL_HD1 直播流".to_string());
+        }
+        Ok(resolved)
     }
 
     /// 创建下载引擎并绑定取消信号
@@ -345,6 +376,161 @@ impl<'a> TaskApplicationService<'a> {
     fn cleanup_cancel_signal(cancel_signals: &Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>, task_id: &str) {
         let mut signals = cancel_signals.lock();
         signals.remove(task_id);
+    }
+
+    /// 启动 Rust 原生直播录制。
+    ///
+    /// Python 只负责解析直播元数据和 FULL_HD1 流地址；Rust 负责录制、取消、
+    /// 事件和数据库持久化。
+    pub async fn start_live_record(&self, url: &str) -> Result<String, String> {
+        let task_id = Uuid::new_v4().to_string();
+        let task_id = task_id[..8].to_string();
+
+        let new_task = crate::db::NewDownloadTask {
+            id: task_id.clone(),
+            mode: DownloadMode::Live.as_str().to_string(),
+            url: url.to_string(),
+            title: None,
+            author_nickname: None,
+        };
+        self.db()
+            .create_task(&new_task)
+            .map_err(|e| format!("创建直播任务失败: {}", e))?;
+        self.db()
+            .update_task_status(&task_id, "starting", None)
+            .map_err(|e| format!("更新直播任务状态失败: {}", e))?;
+
+        events::emit_task_event(&TaskEvent {
+            event_type: TaskEventType::Started,
+            task_id: task_id.clone(),
+            mode: Some(DownloadMode::Live),
+            url: Some(url.to_string()),
+            patch: TaskPatch::new(&task_id).with_status(TaskStatus::Starting),
+        });
+
+        let cancel_signal = self.state.register_cancel_signal(&task_id);
+        let db = self.state.db.clone();
+        let cancel_signals = self.state.cancel_signals.clone();
+        let app_config = self.state.config.lock().get_douyin_config();
+        let task_id_clone = task_id.clone();
+        let url = url.to_string();
+
+        tokio::spawn(async move {
+            let resolved = match Self::resolve_live(&url).await {
+                Ok(resolved) => resolved,
+                Err(error) => {
+                    let _ = db.update_task_status(&task_id_clone, "error", Some(&error));
+                    events::emit_live_error(&task_id_clone, &error);
+                    Self::cleanup_cancel_signal(&cancel_signals, &task_id_clone);
+                    return;
+                }
+            };
+
+            if cancel_signal.load(Ordering::Relaxed) {
+                let _ = db.update_task_status(&task_id_clone, "cancelled", None);
+                events::emit_live_cancelled(&task_id_clone);
+                Self::cleanup_cancel_signal(&cancel_signals, &task_id_clone);
+                return;
+            }
+
+            let _ = db.update_task_metadata(
+                &task_id_clone,
+                Some(&resolved.title),
+                Some(&resolved.nickname),
+            );
+            let _ = db.update_task_status(&task_id_clone, "recording", None);
+            events::emit_task_event(&TaskEvent::progress(
+                TaskPatch::new(&task_id_clone)
+                    .with_status(TaskStatus::Recording)
+                    .with_live_metadata(
+                        &resolved.title,
+                        &resolved.nickname,
+                        &resolved.room_id,
+                        &resolved.web_rid,
+                        &resolved.cover_url,
+                    ),
+            ));
+
+            let recorder = match LiveRecorder::new(&app_config, cancel_signal.clone()) {
+                Ok(recorder) => recorder,
+                Err(error) => {
+                    let _ = db.update_task_status(&task_id_clone, "error", Some(&error));
+                    events::emit_live_error(&task_id_clone, &error);
+                    Self::cleanup_cancel_signal(&cancel_signals, &task_id_clone);
+                    return;
+                }
+            };
+
+            let progress_task_id = task_id_clone.clone();
+            match recorder
+                .record(&resolved, move |downloaded| {
+                    events::emit_progress(&progress_task_id, downloaded, 0);
+                })
+                .await
+            {
+                Ok(output) => {
+                    let file_path = output.path.to_string_lossy().to_string();
+                    let record = NewLiveRecord {
+                        room_id: nonempty_string(&resolved.room_id),
+                        web_rid: nonempty_string(&resolved.web_rid),
+                        title: nonempty_string(&resolved.title),
+                        nickname: nonempty_string(&resolved.nickname),
+                        sec_user_id: nonempty_string(&resolved.sec_user_id),
+                        file_path: nonempty_string(&file_path),
+                        file_size: output.file_size as i64,
+                        duration_sec: output.duration_sec(),
+                        status: "completed".to_string(),
+                        started_at: Some(output.started_at),
+                        ended_at: Some(output.ended_at),
+                        cover_url: nonempty_string(&resolved.cover_url),
+                    };
+
+                    if let Err(error) = db.save_live_record(&record) {
+                        let message = format!("保存直播记录失败: {}", error);
+                        let _ = db.update_task_status(&task_id_clone, "error", Some(&message));
+                        events::emit_live_error(&task_id_clone, &message);
+                    } else {
+                        let _ = db.update_task_status(&task_id_clone, "completed", None);
+                        events::emit_live_finished(
+                            TaskPatch::new(&task_id_clone)
+                                .with_status(TaskStatus::Completed)
+                                .with_live_metadata(
+                                    &resolved.title,
+                                    &resolved.nickname,
+                                    &resolved.room_id,
+                                    &resolved.web_rid,
+                                    &resolved.cover_url,
+                                )
+                                .with_live_result(
+                                    file_path,
+                                    output.file_size as i64,
+                                    output.duration_sec(),
+                                    output.started_at,
+                                    output.ended_at,
+                                ),
+                        );
+                        info!(
+                            "[TaskService] 直播录制完成: task_id={}, stopped={}, skipped={}",
+                            task_id_clone, output.stopped, output.skipped
+                        );
+                    }
+                }
+                Err(error) => {
+                    if cancel_signal.load(Ordering::Relaxed) {
+                        let _ = db.update_task_status(&task_id_clone, "cancelled", None);
+                        events::emit_live_cancelled(&task_id_clone);
+                    } else {
+                        let message = error.to_string();
+                        let _ = db.update_task_status(&task_id_clone, "error", Some(&message));
+                        events::emit_live_error(&task_id_clone, &message);
+                    }
+                }
+            }
+
+            Self::cleanup_cancel_signal(&cancel_signals, &task_id_clone);
+        });
+
+        Ok(task_id)
     }
 
     // ============================================================

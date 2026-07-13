@@ -255,6 +255,16 @@ export interface TaskPatch {
   failed?: number;
   error_msg?: string;
   current_item?: string;
+  title?: string;
+  nickname?: string;
+  room_id?: string;
+  web_rid?: string;
+  cover_url?: string;
+  file?: string;
+  file_size?: number;
+  duration_sec?: number;
+  started_at?: number;
+  ended_at?: number;
 }
 
 export interface TaskEvent {

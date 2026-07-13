@@ -38,7 +38,11 @@ export default function DownloadsPage() {
   const liveRecordsQuery = useLiveRecordsQuery({ limit: 50 });
   const dbTasksQuery = useDownloadTasksQuery({ limit: 100 });
   const liveRecords = liveRecordsQuery.data ?? [];
-  const dbTasks = useMemo(() => dbTasksQuery.data ?? [], [dbTasksQuery.data]);
+  // 直播任务的历史展示由 live_records 负责，避免在“下载任务”和“直播录制”重复出现。
+  const dbTasks = useMemo(
+    () => (dbTasksQuery.data ?? []).filter((task) => task.mode !== "live"),
+    [dbTasksQuery.data]
+  );
   const { tasks: liveTasks, connect, clearCompleted, removeTask } = useTaskStore();
   const deleteLive = useDeleteLiveRecord();
   const deleteTask = useDeleteDownloadTask();

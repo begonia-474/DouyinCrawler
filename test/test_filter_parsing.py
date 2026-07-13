@@ -200,7 +200,11 @@ def live_data():
                         "flv_pull_url": {"FULL_HD1": "https://example.com/live.flv"},
                         "hls_pull_url_map": {"FULL_HD1": "https://example.com/live.m3u8"},
                     },
-                    "owner": {"nickname": "主播"},
+                    "owner": {
+                        "id_str": "USER123",
+                        "sec_uid": "SEC123",
+                        "nickname": "主播",
+                    },
                 }
             ]
         }
@@ -426,6 +430,8 @@ class TestUserLiveFilter:
         assert f.is_live is True
         assert f.live_title == "测试直播"
         assert f.nickname == "主播"
+        assert f.user_id == "USER123"
+        assert f.sec_user_id == "SEC123"
 
     def test_stream_urls(self, live_data):
         f = UserLiveFilter(live_data)

@@ -75,6 +75,24 @@ impl super::connection::Database {
         Ok(())
     }
 
+    pub fn update_task_metadata(
+        &self,
+        task_id: &str,
+        title: Option<&str>,
+        author_nickname: Option<&str>,
+    ) -> Result<()> {
+        let conn = lock_conn!(self);
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        conn.execute(
+            "UPDATE download_tasks SET title = ?1, author_nickname = ?2, updated_at = ?3 WHERE id = ?4",
+            rusqlite::params![title, author_nickname, now, task_id],
+        )?;
+        Ok(())
+    }
+
     pub fn update_task_counts(&self, task_id: &str) -> Result<()> {
         let conn = lock_conn!(self);
         let now = SystemTime::now()

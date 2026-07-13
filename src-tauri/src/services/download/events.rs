@@ -82,3 +82,28 @@ pub fn emit_cancelled(task_id: &str) {
     let event = TaskEvent::finished(patch);
     emit_task_event(&event);
 }
+
+/// 发射直播终态事件，并保留 mode=live，供前端刷新直播记录查询。
+pub fn emit_live_finished(patch: TaskPatch) {
+    emit_task_event(&TaskEvent {
+        event_type: super::TaskEventType::Finished,
+        task_id: patch.task_id.clone(),
+        mode: Some(DownloadMode::Live),
+        url: None,
+        patch,
+    });
+}
+
+pub fn emit_live_error(task_id: &str, error: &str) {
+    emit_live_finished(
+        TaskPatch::new(task_id)
+            .with_status(TaskStatus::Error)
+            .with_error(error),
+    );
+}
+
+pub fn emit_live_cancelled(task_id: &str) {
+    emit_live_finished(
+        TaskPatch::new(task_id).with_status(TaskStatus::Cancelled),
+    );
+}

@@ -352,32 +352,6 @@ pub struct PostStatsResult {
 // 直播类响应
 // ============================================================
 
-/// start_live_record() 返回值 — 对齐 Python LiveRecordResult
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LiveRecordResult {
-    #[serde(default = "default_success")]
-    pub success: bool,
-    #[serde(default = "default_error_code")]
-    pub error_code: String,
-    #[serde(default = "default_empty_string")]
-    pub error: String,
-    #[serde(default)]
-    pub task_id: Option<String>,
-}
-
-/// get_live_status() 返回值 — 对齐 Python LiveStatusResult
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LiveStatusResult {
-    #[serde(default = "default_success")]
-    pub success: bool,
-    #[serde(default = "default_error_code")]
-    pub error_code: String,
-    #[serde(default = "default_empty_string")]
-    pub error: String,
-    #[serde(default)]
-    pub tasks: Option<Vec<Value>>,
-}
-
 /// get_following_live() 返回值 — 对齐 Python FollowingLiveResult
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FollowingLiveResult {
@@ -412,6 +386,4 @@ impl_bridge_response!(FollowFeedResult);
 impl_bridge_response!(FriendFeedResult);
 impl_bridge_response!(UserLikesResult);
 impl_bridge_response!(PostStatsResult);
-impl_bridge_response!(LiveRecordResult);
-impl_bridge_response!(LiveStatusResult);
 impl_bridge_response!(FollowingLiveResult);

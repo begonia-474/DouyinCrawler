@@ -78,4 +78,12 @@ impl AppState {
             false
         }
     }
+
+    /// 应用退出时向所有后台任务发送停止信号。
+    pub fn cancel_all_tasks(&self) {
+        let signals = self.cancel_signals.lock();
+        for signal in signals.values() {
+            signal.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
 }

@@ -10,7 +10,8 @@ use tauri::State;
 
 use crate::state::AppState;
 use crate::services::download::task_service::TaskApplicationService;
-use crate::services::download::{DownloadMode, DownloadRequest};
+use crate::services::download::{DownloadMode, DownloadRequest, TaskEvent, TaskPatch, TaskStatus};
+use crate::services::download::events;
 
 /// 统一下载入口（Rust-owned）
 ///
@@ -59,12 +60,87 @@ pub async fn start_download(
             }))
         }
         DownloadMode::Live => {
-            // live 当前通过 Python bridge 实现（后续将改为 Rust 原生路径）
-            let result = crate::python::handler::start_download(&mode, &url)
-                .map_err(|e| format!("Python 调用失败: {}", e))?;
-            Ok(result)
+            let task_id = service.start_live_record(&url).await?;
+            Ok(serde_json::json!({
+                "success": true,
+                "task_id": task_id,
+            }))
         }
     }
+}
+
+/// 启动 Rust 原生直播录制。
+#[tauri::command(rename_all = "snake_case")]
+pub async fn start_live_record(
+    state: State<'_, AppState>,
+    url: String,
+) -> Result<Value, String> {
+    let service = TaskApplicationService::new(&state);
+    let task_id = service.start_live_record(&url).await?;
+    Ok(serde_json::json!({
+        "success": true,
+        "data": { "task_id": task_id },
+    }))
+}
+
+/// 停止直播录制。停止信号由 Rust 录制循环消费，已写入的文件会正常入库。
+#[tauri::command(rename_all = "snake_case")]
+pub fn stop_live_record(
+    state: State<'_, AppState>,
+    task_id: String,
+) -> Result<Value, String> {
+    if !state.cancel_task(&task_id) {
+        return Err("录制任务不存在或已完成".to_string());
+    }
+
+    state
+        .db
+        .update_task_status(&task_id, "stopping", None)
+        .map_err(|e| e.to_string())?;
+    events::emit_task_event(&TaskEvent::progress(
+        TaskPatch::new(&task_id).with_status(TaskStatus::Stopping),
+    ));
+
+    Ok(serde_json::json!({
+        "success": true,
+        "data": { "task_id": task_id },
+    }))
+}
+
+/// 返回仍在运行的 Rust 直播任务，供页面刷新后恢复停止按钮。
+#[tauri::command(rename_all = "snake_case")]
+pub fn get_live_status(state: State<'_, AppState>) -> Result<Value, String> {
+    let tasks = state
+        .db
+        .get_tasks(100, 0, None, Some("live".to_string()))
+        .map_err(|e| e.to_string())?;
+    let mut active = serde_json::Map::new();
+
+    for task in tasks {
+        if !matches!(
+            task.status.as_str(),
+            "starting" | "running" | "recording" | "stopping"
+        ) || state.get_cancel_signal(&task.id).is_none()
+        {
+            continue;
+        }
+        active.insert(
+            task.id.clone(),
+            serde_json::json!({
+                "task_id": task.id,
+                "status": task.status,
+                "url": task.url,
+                "title": task.title,
+                "nickname": task.author_nickname,
+                "error": task.error_msg,
+            }),
+        );
+    }
+
+    Ok(serde_json::json!({
+        "success": true,
+        "data": active,
+    }))
 }
 
 /// 取消任务

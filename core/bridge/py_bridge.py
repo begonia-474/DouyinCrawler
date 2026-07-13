@@ -119,7 +119,94 @@ def get_live_info(url: str) -> dict:
     handler = _get_task_manager().handler
     result = _run_async(handler.handle_user_live(url))
     logger.info("[py_bridge] get_live_info 返回: success=%s", result.get("success"))
-    return result
+    if not result.get("success"):
+        return result
+
+    flv_urls = result.get("flv_urls") or list((result.get("flv_pull_url") or {}).values())
+    m3u8_urls = result.get("m3u8_urls") or list((result.get("m3u8_pull_url") or {}).values())
+    return {
+        "success": True,
+        "live_info": {
+            "title": result.get("title", ""),
+            "nickname": result.get("nickname", ""),
+            "is_live": result.get("is_live", False),
+            "user_count": result.get("user_count", 0),
+            "room_id": result.get("room_id", ""),
+            "cover": result.get("cover") or result.get("cover_url", ""),
+            "flv_urls": flv_urls,
+            "m3u8_urls": m3u8_urls,
+        },
+    }
+
+
+@_safe_call
+def resolve_live(url: str) -> dict:
+    """解析直播录制参数，下载和任务生命周期由 Rust 负责。
+
+    保持 f2 的直播录制约定：固定选择 FULL_HD1 HLS 流，文件名以
+    ``_live.flv`` 结尾，保存到 ``download_path/app_name/live/nickname``。
+    """
+    import time
+    from pathlib import Path
+
+    from core.download.downloader import format_filename
+    from core.utils import sanitize_filename
+
+    handler = _get_task_manager().handler
+    result = _run_async(handler.handle_user_live(url))
+    if not result.get("success"):
+        return result
+
+    m3u8_urls = result.get("m3u8_pull_url") or {}
+    m3u8_url = m3u8_urls.get("FULL_HD1")
+    if not m3u8_url:
+        return {"success": False, "error": "未获取到 FULL_HD1 直播流"}
+
+    config = handler.config
+    download_path = (
+        config.download_path
+        if isinstance(config.download_path, Path)
+        else Path(config.download_path)
+    )
+    nickname = sanitize_filename(result.get("nickname") or "unknown")
+    base_dir = download_path / config.app_name / "live" / nickname
+    formatted_name = format_filename(
+        config.naming,
+        {
+            "create_time": int(time.time()),
+            "desc": result.get("title") or "live",
+            "author": result.get("nickname") or "",
+            "aweme_id": result.get("room_id") or "",
+            "author_uid": result.get("user_id") or "",
+        },
+    )
+    save_dir = base_dir / formatted_name if getattr(config, "folderize", False) else base_dir
+    filename = formatted_name + "_live"
+
+    return {
+        "success": True,
+        "web_rid": result.get("web_rid", ""),
+        "room_id": result.get("room_id", ""),
+        "title": result.get("title", ""),
+        "nickname": result.get("nickname", ""),
+        "sec_user_id": result.get("sec_user_id", ""),
+        "user_id": result.get("user_id", ""),
+        "cover_url": result.get("cover_url", ""),
+        "user_count": result.get("user_count", 0),
+        "m3u8_url": m3u8_url,
+        "save_dir": str(save_dir),
+        "filename": filename,
+        "suffix": ".flv",
+        "headers": {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/130.0.0.0 Safari/537.36"
+            ),
+            "Referer": "https://www.douyin.com/",
+            "Cookie": config.cookie,
+        },
+    }
 
 
 @_safe_call

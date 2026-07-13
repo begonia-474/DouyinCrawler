@@ -74,7 +74,6 @@ py_command_str!(py_parse_video, crate::python::handler::parse_video, VideoParseR
 py_command_str!(py_get_live_info, crate::python::handler::get_live_info, LiveInfoResult);
 py_command_str!(py_get_user_profile, crate::python::handler::get_user_profile, UserProfileResult);
 py_command_str!(py_get_post_stats, crate::python::handler::get_post_stats, PostStatsResult);
-py_command_str!(py_start_live_record, crate::python::handler::start_live_record, LiveRecordResult);
 
 // 模式 2: (url: String, cursor: Option<i64>, count: Option<i64>)
 py_command_str_opts!(py_get_user_posts, crate::python::handler::get_user_posts, UserPostsResult);
@@ -169,22 +168,4 @@ pub async fn py_download_music(play_url: String, title: String, author: String) 
     run_python_blocking("download_music", move || {
         crate::python::handler::download_music(&play_url, &title, &author)
     }).await.map_err(AppError::from)
-}
-
-// ============================================================
-// sync 命令 — 轻量操作，无需 spawn_blocking
-// ============================================================
-
-#[tauri::command(rename_all = "snake_case")]
-pub fn py_stop_live_record(task_id: String) -> Result<LiveStatusResult, AppError> {
-    crate::python::handler::stop_live_record(&task_id)
-        .map_err(|e| AppError::from(e.to_string()))?
-        .into_result()
-}
-
-#[tauri::command(rename_all = "snake_case")]
-pub fn py_get_live_status() -> Result<LiveStatusResult, AppError> {
-    crate::python::handler::get_live_status()
-        .map_err(|e| AppError::from(e.to_string()))?
-        .into_result()
 }

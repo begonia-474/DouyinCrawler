@@ -508,7 +508,7 @@ mod tests {
     #[test]
     fn test_engine_config_default() {
         let config = EngineConfig::default();
-        assert_eq!(config.max_concurrent, 5);
+        assert_eq!(config.max_concurrent, 10);
         assert_eq!(config.max_retries, 5);
         assert_eq!(config.timeout, 5);
         assert_eq!(config.max_connections, 5);

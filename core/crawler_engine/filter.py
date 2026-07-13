@@ -897,6 +897,14 @@ class UserLiveFilter(JSONModel):
         return replaceT(_str(self._get_attr_value("$.data.data[0].owner.nickname")))
 
     @property
+    def user_id(self) -> str:
+        return _str(self._get_attr_value("$.data.data[0].owner.id_str"))
+
+    @property
+    def sec_user_id(self) -> str:
+        return _str(self._get_attr_value("$.data.data[0].owner.sec_uid"))
+
+    @property
     def is_live(self) -> bool:
         return self.live_status == 2
 
@@ -906,7 +914,8 @@ class UserLiveFilter(JSONModel):
             "live_title": self.live_title, "cover_url": self.cover_url,
             "user_count": self.user_count, "nickname": self.nickname,
             "flv_pull_url": self.flv_pull_url, "m3u8_pull_url": self.m3u8_pull_url,
-            "is_live": self.is_live,
+            "is_live": self.is_live, "user_id": self.user_id,
+            "sec_user_id": self.sec_user_id,
         }
 
 
@@ -918,12 +927,24 @@ class UserLive2Filter(JSONModel):
         return _str(self._get_attr_value("$.data.room.id"))
 
     @property
+    def web_rid(self) -> str:
+        return _str(self._get_attr_value("$.data.room.owner.web_rid"))
+
+    @property
     def live_status(self) -> int:
         return _int(self._get_attr_value("$.data.room.status"))
 
     @property
     def live_title(self) -> str:
         return replaceT(_str(self._get_attr_value("$.data.room.title")))
+
+    @property
+    def cover_url(self) -> str:
+        return _str(self._get_attr_value("$.data.room.cover.url_list[0]"))
+
+    @property
+    def user_count(self) -> int:
+        return _int(self._get_attr_value("$.data.room.user_count"))
 
     @property
     def flv_pull_url(self) -> dict:
@@ -938,6 +959,14 @@ class UserLive2Filter(JSONModel):
     @property
     def nickname(self) -> str:
         return replaceT(_str(self._get_attr_value("$.data.room.owner.nickname")))
+
+    @property
+    def user_id(self) -> str:
+        return _str(self._get_attr_value("$.data.room.owner.id_str"))
+
+    @property
+    def sec_user_id(self) -> str:
+        return _str(self._get_attr_value("$.data.room.owner.sec_uid"))
 
     @property
     def is_live(self) -> bool:

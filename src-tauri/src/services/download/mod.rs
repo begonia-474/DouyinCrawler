@@ -8,6 +8,7 @@
 pub mod events;
 pub mod task_service;
 pub mod engine;
+pub mod live;
 
 use serde::{Deserialize, Serialize};
 
@@ -152,6 +153,26 @@ pub struct TaskPatch {
     pub error_msg: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_item: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nickname: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub room_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub web_rid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cover_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_size: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_sec: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<i64>,
 }
 
 // ============================================================
@@ -300,6 +321,16 @@ impl TaskPatch {
             failed: None,
             error_msg: None,
             current_item: None,
+            title: None,
+            nickname: None,
+            room_id: None,
+            web_rid: None,
+            cover_url: None,
+            file: None,
+            file_size: None,
+            duration_sec: None,
+            started_at: None,
+            ended_at: None,
         }
     }
 
@@ -322,6 +353,38 @@ impl TaskPatch {
     pub fn with_error(mut self, msg: impl Into<String>) -> Self {
         self.error_msg = Some(msg.into());
         self.status = Some(TaskStatus::Error);
+        self
+    }
+
+    pub fn with_live_metadata(
+        mut self,
+        title: impl Into<String>,
+        nickname: impl Into<String>,
+        room_id: impl Into<String>,
+        web_rid: impl Into<String>,
+        cover_url: impl Into<String>,
+    ) -> Self {
+        self.title = Some(title.into());
+        self.nickname = Some(nickname.into());
+        self.room_id = Some(room_id.into());
+        self.web_rid = Some(web_rid.into());
+        self.cover_url = Some(cover_url.into());
+        self
+    }
+
+    pub fn with_live_result(
+        mut self,
+        file: impl Into<String>,
+        file_size: i64,
+        duration_sec: i64,
+        started_at: i64,
+        ended_at: i64,
+    ) -> Self {
+        self.file = Some(file.into());
+        self.file_size = Some(file_size);
+        self.duration_sec = Some(duration_sec);
+        self.started_at = Some(started_at);
+        self.ended_at = Some(ended_at);
         self
     }
 }
@@ -360,5 +423,26 @@ impl TaskEvent {
             url: None,
             patch,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn live_task_patch_serializes_recording_metadata() {
+        let patch = TaskPatch::new("live-1")
+            .with_status(TaskStatus::Completed)
+            .with_live_metadata("标题", "主播", "room-1", "web-1", "cover")
+            .with_live_result("/tmp/live.flv", 1024, 60, 100, 160);
+
+        let value = serde_json::to_value(patch).unwrap();
+        assert_eq!(value["title"], "标题");
+        assert_eq!(value["nickname"], "主播");
+        assert_eq!(value["room_id"], "room-1");
+        assert_eq!(value["file"], "/tmp/live.flv");
+        assert_eq!(value["file_size"], 1024);
+        assert_eq!(value["duration_sec"], 60);
     }
 }

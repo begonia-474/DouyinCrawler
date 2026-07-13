@@ -3,7 +3,7 @@
 import time
 import logging
 
-from core.crawler_engine.filter import UserLiveFilter, FollowingUserLiveFilter
+from core.crawler_engine.filter import UserLive2Filter, UserLiveFilter, FollowingUserLiveFilter
 from core.utils import WebCastIdFetcher, sanitize_filename
 
 from .base import BaseService
@@ -21,9 +21,12 @@ class LiveService(BaseService):
             return {"success": False, "error": "无法从 URL 提取直播 ID"}
 
         async with self._make_crawler() as crawler:
-            data = await crawler.fetch_live_info(web_rid=webcast_id)
-
-        live_filter = UserLiveFilter(data)
+            if len(webcast_id) == 19:
+                data = await crawler.fetch_live_info_by_room_id(webcast_id)
+                live_filter = UserLive2Filter(data)
+            else:
+                data = await crawler.fetch_live_info(web_rid=webcast_id)
+                live_filter = UserLiveFilter(data)
         if not live_filter.is_live:
             return {"success": False, "error": f"未在直播中 (status={live_filter.live_status})"}
 
@@ -40,6 +43,12 @@ class LiveService(BaseService):
             "cover": live_filter.cover_url,
             "flv_urls": list(flv_dict.values()),
             "m3u8_urls": list(m3u8_dict.values()),
+            "web_rid": getattr(live_filter, "web_rid", "") or webcast_id,
+            "cover_url": live_filter.cover_url,
+            "user_id": live_filter.user_id,
+            "sec_user_id": live_filter.sec_user_id,
+            "flv_pull_url": flv_dict,
+            "m3u8_pull_url": m3u8_dict,
         }
 
     async def handle_live_record(self, url: str, task_id: str, progress_callback=None, stop_event=None) -> dict:

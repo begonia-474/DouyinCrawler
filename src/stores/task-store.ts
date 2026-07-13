@@ -10,7 +10,7 @@ export interface UnifiedTask {
   event_type?: "started" | "progress" | "finished";
   mode?: string;       // download mode: one / post / like / mix / collects / live / music
   url?: string;
-  status: string;      // starting | running | completed | error | recording | stopping
+  status: string;      // starting | running | completed | error | cancelled | recording | stopping
   total?: number;
   completed?: number;
   failed?: number;

@@ -153,6 +153,11 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                window.state::<AppState>().cancel_all_tasks();
+            }
+        })
         .setup(|app| {
             let db_path = resolve_db_path(app);
             info!("数据库路径: {:?}", db_path);
@@ -231,9 +236,6 @@ pub fn run() {
             commands::python::py_get_friend_feed,
             commands::python::py_get_user_likes,
             commands::python::py_get_post_stats,
-            commands::python::py_start_live_record,
-            commands::python::py_stop_live_record,
-            commands::python::py_get_live_status,
             // 数据库读取（commands/db.rs）
             commands::db::get_live_records,
             commands::db::get_live_record_count,
@@ -284,6 +286,10 @@ pub fn run() {
             commands::db::delete_download_task,
             // 任务系统（Rust-owned，Phase 3 新增）
             commands::tasks::start_download,
+            commands::tasks::cancel_task,
+            commands::tasks::start_live_record,
+            commands::tasks::stop_live_record,
+            commands::tasks::get_live_status,
             // Firefox Cookie 自动获取
             firefox_cookie::get_firefox_profiles_command,
             firefox_cookie::get_douyin_cookie_command,
