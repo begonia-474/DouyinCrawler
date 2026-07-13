@@ -107,13 +107,7 @@ impl SingleDownloadPlanV1 {
                 self.items.len()
             ));
         }
-        let mut seen_keys = std::collections::HashSet::new();
-        for item in &self.items {
-            item.validate()?;
-            if !seen_keys.insert(item.media_key.as_str()) {
-                return Err(format!("单视频解析项 media_key 重复: {}", item.media_key));
-            }
-        }
+        validate_media_contract(&self.items)?;
         Ok(())
     }
 }
@@ -188,12 +182,7 @@ impl PagedDownloadPlanV1 {
             return Err("items 非空但 page_aweme_ids 为空".to_string());
         }
 
-        let mut seen_keys = std::collections::HashSet::new();
         for item in &self.items {
-            item.validate()?;
-            if !seen_keys.insert(&item.media_key) {
-                return Err(format!("重复 media_key: {}", item.media_key));
-            }
             if !page_ids.contains(item.aweme_id.as_str()) {
                 return Err(format!(
                     "分页项 aweme_id={} 不在 page_aweme_ids 中",
@@ -201,6 +190,7 @@ impl PagedDownloadPlanV1 {
                 ));
             }
         }
+        validate_media_contract(&self.items)?;
         Ok(())
     }
 }
@@ -270,6 +260,105 @@ impl MediaDownloadItemV1 {
 
 pub type SingleDownloadItem = MediaDownloadItemV1;
 pub type SingleMediaKind = MediaKindV1;
+
+/// Per-work media group consistency validation.
+///
+/// Checks within the same `aweme_id`:
+/// - Contiguous 1-based indices within each `MediaKind` (no gaps).
+/// - Video and gallery kinds (image, live_photo) are mutually exclusive.
+fn validate_media_contract(items: &[MediaDownloadItemV1]) -> Result<(), String> {
+    use std::collections::{HashMap, HashSet};
+
+    #[derive(Default)]
+    struct WorkState {
+        video_key: Option<String>,
+        gallery_key: Option<String>,
+        first_image_key: Option<String>,
+        last_live_photo_index: i64,
+        last_image_index: i64,
+    }
+
+    let mut seen_keys = HashSet::new();
+    let mut work_states: HashMap<&str, WorkState> = HashMap::new();
+
+    for item in items {
+        item.validate().map_err(|error| {
+            format!(
+                "作品 {} 媒体项 {} 校验失败: {error}",
+                item.aweme_id, item.media_key
+            )
+        })?;
+        if !seen_keys.insert(item.media_key.as_str()) {
+            return Err(format!(
+                "作品 {} 存在重复 media_key: {}",
+                item.aweme_id, item.media_key
+            ));
+        }
+
+        let index = item.media_index()?;
+        let state = work_states.entry(item.aweme_id.as_str()).or_default();
+        match item.kind {
+            MediaKindV1::Video => {
+                if let Some(gallery_key) = &state.gallery_key {
+                    return Err(format!(
+                        "作品 {} 的媒体项 {} 与图集媒体项 {} 冲突: 不能同时包含 video 和 image/live_photo",
+                        item.aweme_id, item.media_key, gallery_key
+                    ));
+                }
+                state.video_key = Some(item.media_key.clone());
+            }
+            MediaKindV1::LivePhoto => {
+                if let Some(video_key) = &state.video_key {
+                    return Err(format!(
+                        "作品 {} 的媒体项 {} 与视频媒体项 {} 冲突: 不能同时包含 video 和 image/live_photo",
+                        item.aweme_id, item.media_key, video_key
+                    ));
+                }
+                if let Some(image_key) = &state.first_image_key {
+                    return Err(format!(
+                        "作品 {} 的媒体项 {} 顺序错误: live_photo 必须位于 image 媒体项 {} 之前",
+                        item.aweme_id, item.media_key, image_key
+                    ));
+                }
+                let expected = state.last_live_photo_index + 1;
+                if index != expected {
+                    return Err(format!(
+                        "作品 {} 的媒体项 {} 索引不连续: 期望 {expected}, 实际 {index}",
+                        item.aweme_id, item.media_key
+                    ));
+                }
+                state.last_live_photo_index = index;
+                state
+                    .gallery_key
+                    .get_or_insert_with(|| item.media_key.clone());
+            }
+            MediaKindV1::Image => {
+                if let Some(video_key) = &state.video_key {
+                    return Err(format!(
+                        "作品 {} 的媒体项 {} 与视频媒体项 {} 冲突: 不能同时包含 video 和 image/live_photo",
+                        item.aweme_id, item.media_key, video_key
+                    ));
+                }
+                let expected = state.last_image_index + 1;
+                if index != expected {
+                    return Err(format!(
+                        "作品 {} 的媒体项 {} 索引不连续: 期望 {expected}, 实际 {index}",
+                        item.aweme_id, item.media_key
+                    ));
+                }
+                state.last_image_index = index;
+                state
+                    .gallery_key
+                    .get_or_insert_with(|| item.media_key.clone());
+                state
+                    .first_image_key
+                    .get_or_insert_with(|| item.media_key.clone());
+            }
+        }
+    }
+    Ok(())
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -515,5 +604,147 @@ mod tests {
 
         let error = paged_rejection_error(value);
         assert!(error.contains("不支持的分页解析契约版本"), "{error}");
+    }
+
+    // ============================================================
+    // Per-work media group contract tests
+    // ============================================================
+
+    fn gallery_item(aweme_id: &str, kind: &str, index: i64, suffix: &str) -> serde_json::Value {
+        serde_json::json!({
+            "media_key": format!("{aweme_id}:{kind}:{index}"),
+            "aweme_id": aweme_id,
+            "urls": [format!("https://cdn.example/{aweme_id}_{kind}_{index}.{suffix}")],
+            "kind": kind,
+            "output": {
+                "filename": format!("{aweme_id}_{kind}_{index}"),
+                "suffix": format!(".{suffix}"),
+                "folder_name": null
+            },
+            "headers": {},
+            "accessories": [],
+            "metadata": { "aweme_id": aweme_id, "desc": "media group test", "author_nickname": "tester" }
+        })
+    }
+
+    #[test]
+    fn accepts_gallery_with_contiguous_image_indices() {
+        let mut value = valid_plan();
+        value["items"] = serde_json::json!([
+            gallery_item("gallery-id", "image", 1, "webp"),
+            gallery_item("gallery-id", "image", 2, "webp"),
+            gallery_item("gallery-id", "image", 3, "webp"),
+        ]);
+        value["total"] = serde_json::json!(3);
+        SingleDownloadPlanV1::from_value(value).unwrap();
+    }
+
+    #[test]
+    fn accepts_gallery_with_live_photo_then_images() {
+        let mut value = valid_plan();
+        value["items"] = serde_json::json!([
+            gallery_item("hybrid-id", "live_photo", 1, "mp4"),
+            gallery_item("hybrid-id", "image", 1, "webp"),
+            gallery_item("hybrid-id", "image", 2, "webp"),
+        ]);
+        value["total"] = serde_json::json!(3);
+        SingleDownloadPlanV1::from_value(value).unwrap();
+    }
+
+    #[test]
+    fn rejects_single_duplicate_media_key() {
+        let mut value = valid_plan();
+        let item = value["items"][0].clone();
+        value["items"].as_array_mut().unwrap().push(item);
+        value["total"] = serde_json::json!(2);
+
+        let error = rejection_error(value);
+        assert!(error.contains("重复 media_key"), "{error}");
+        assert!(error.contains("7650450403901017571:video:0"), "{error}");
+    }
+
+    #[test]
+    fn rejects_discontiguous_image_indices() {
+        let mut value = valid_plan();
+        value["items"] = serde_json::json!([
+            gallery_item("gap-id", "image", 1, "webp"),
+            gallery_item("gap-id", "image", 3, "webp"),
+        ]);
+        value["total"] = serde_json::json!(2);
+        let error = rejection_error(value);
+        assert!(error.contains("索引不连续"), "{error}");
+    }
+
+    #[test]
+    fn rejects_discontiguous_live_photo_indices() {
+        let mut value = valid_plan();
+        value["items"] = serde_json::json!([gallery_item("live-gap", "live_photo", 2, "mp4"),]);
+        value["total"] = serde_json::json!(1);
+        let error = rejection_error(value);
+        assert!(error.contains("索引不连续"), "{error}");
+        assert!(error.contains("live-gap:live_photo:2"), "{error}");
+    }
+
+    #[test]
+    fn rejects_live_photo_after_image() {
+        let mut value = valid_plan();
+        value["items"] = serde_json::json!([
+            gallery_item("wrong-order", "image", 1, "webp"),
+            gallery_item("wrong-order", "live_photo", 1, "mp4"),
+        ]);
+        value["total"] = serde_json::json!(2);
+
+        let error = rejection_error(value);
+        assert!(error.contains("顺序错误"), "{error}");
+        assert!(error.contains("wrong-order:live_photo:1"), "{error}");
+        assert!(error.contains("wrong-order:image:1"), "{error}");
+    }
+
+    #[test]
+    fn rejects_video_and_image_in_same_work() {
+        let mut value = valid_plan();
+        value["items"] = serde_json::json!([
+            gallery_item("mixed", "video", 0, "mp4"),
+            gallery_item("mixed", "image", 1, "webp"),
+        ]);
+        value["total"] = serde_json::json!(2);
+        let error = rejection_error(value);
+        assert!(error.contains("同时包含 video 和 image"), "{error}");
+    }
+
+    #[test]
+    fn rejects_video_and_live_photo_in_same_work() {
+        let mut value = valid_plan();
+        value["items"] = serde_json::json!([
+            gallery_item("mixed-live", "video", 0, "mp4"),
+            gallery_item("mixed-live", "live_photo", 1, "mp4"),
+        ]);
+        value["total"] = serde_json::json!(2);
+        let error = rejection_error(value);
+        assert!(error.contains("同时包含 video 和 image"), "{error}");
+    }
+
+    #[test]
+    fn paged_rejects_discontiguous_image_indices() {
+        let mut value = valid_paged_plan();
+        value["items"] = serde_json::json!([
+            gallery_item("gap-id", "image", 1, "webp"),
+            gallery_item("gap-id", "image", 3, "webp"),
+        ]);
+        value["page_aweme_ids"] = serde_json::json!(["gap-id"]);
+        let error = paged_rejection_error(value);
+        assert!(error.contains("索引不连续"), "{error}");
+    }
+
+    #[test]
+    fn paged_rejects_video_and_image_in_same_work() {
+        let mut value = valid_paged_plan();
+        value["items"] = serde_json::json!([
+            gallery_item("mixed", "video", 0, "mp4"),
+            gallery_item("mixed", "image", 1, "webp"),
+        ]);
+        value["page_aweme_ids"] = serde_json::json!(["mixed"]);
+        let error = paged_rejection_error(value);
+        assert!(error.contains("同时包含 video 和 image"), "{error}");
     }
 }

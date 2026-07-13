@@ -80,16 +80,18 @@ def build_media_items_v1(
         work_items: list[MediaDownloadItemV1] = []
 
         if detail.is_image_post and (detail.images or detail.images_video):
-            for index, live_url in enumerate(detail.images_video or [], start=1):
+            live_count = 0
+            for live_url in (detail.images_video or []):
                 if live_url:
+                    live_count += 1
                     work_items.append(
                         MediaDownloadItemV1(
-                            media_key=f"{aweme_id}:live_photo:{index}",
+                            media_key=f"{aweme_id}:live_photo:{live_count}",
                             aweme_id=aweme_id,
                             urls=[live_url],
                             kind=MediaKindV1.LIVE_PHOTO,
                             output=MediaOutputSpecV1(
-                                filename=f"{base_name}_live_{index}",
+                                filename=f"{base_name}_live_{live_count}",
                                 suffix=".mp4",
                                 folder_name=folder_name,
                             ),
@@ -97,16 +99,18 @@ def build_media_items_v1(
                             metadata=metadata,
                         )
                     )
-            for index, image_url in enumerate(detail.images or [], start=1):
+            image_count = 0
+            for image_url in (detail.images or []):
                 if image_url:
+                    image_count += 1
                     work_items.append(
                         MediaDownloadItemV1(
-                            media_key=f"{aweme_id}:image:{index}",
+                            media_key=f"{aweme_id}:image:{image_count}",
                             aweme_id=aweme_id,
                             urls=[image_url],
                             kind=MediaKindV1.IMAGE,
                             output=MediaOutputSpecV1(
-                                filename=f"{base_name}_image_{index}",
+                                filename=f"{base_name}_image_{image_count}",
                                 suffix=".webp",
                                 folder_name=folder_name,
                             ),

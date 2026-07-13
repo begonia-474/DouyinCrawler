@@ -1,6 +1,7 @@
 //! Reusable task-level regression harness for download lifecycle tests.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -10,8 +11,8 @@ use tokio::net::TcpListener;
 use uuid::Uuid;
 
 use super::contract::{
-    PagedDownloadPlanV1, SingleDownloadItem, SingleDownloadPlanV1, SingleMediaKind,
-    SingleOutputSpec,
+    PagedDownloadPlanV1, SingleAccessory, SingleAccessoryKind, SingleDownloadItem,
+    SingleDownloadPlanV1, SingleMediaKind, SingleOutputSpec,
 };
 use super::task_service::{
     PagedDownloadResolver, PagedPlanFuture, SingleDownloadResolver, SinglePlanFuture,
@@ -183,6 +184,7 @@ pub(crate) enum HttpBehavior {
 
 pub(crate) struct LocalHttpServer {
     url: String,
+    request_count: Arc<AtomicUsize>,
     task: tokio::task::JoinHandle<()>,
 }
 
@@ -192,6 +194,8 @@ impl LocalHttpServer {
             .await
             .expect("local HTTP listener should bind");
         let address = listener.local_addr().unwrap();
+        let request_count = Arc::new(AtomicUsize::new(0));
+        let server_request_count = request_count.clone();
         let task = tokio::spawn(async move {
             // Accept multiple connections (handles multi-item downloads)
             loop {
@@ -199,6 +203,7 @@ impl LocalHttpServer {
                     Ok(socket) => socket,
                     Err(_) => break,
                 };
+                server_request_count.fetch_add(1, AtomicOrdering::Relaxed);
                 let mut request = [0_u8; 2048];
                 let _ = socket.read(&mut request).await;
                 match behavior {
@@ -244,12 +249,17 @@ impl LocalHttpServer {
 
         Self {
             url: format!("http://{address}/media"),
+            request_count,
             task,
         }
     }
 
     pub(crate) fn url(&self) -> &str {
         &self.url
+    }
+
+    pub(crate) fn request_count(&self) -> usize {
+        self.request_count.load(AtomicOrdering::Relaxed)
     }
 }
 
@@ -1477,4 +1487,288 @@ async fn public_paged_selection_cancelled_during_media_does_not_report_missing()
         .as_deref()
         .is_none_or(|error| !error.contains("missing_aweme_ids")));
     assert_terminal_event(&harness, &task_id, TaskStatus::Cancelled);
+}
+
+// ============================================================
+// Gallery media item tests (issue 07)
+// ============================================================
+
+fn gallery_plan(
+    harness: &TaskHarness,
+    aweme_id: &str,
+    url: &str,
+    n_images: i64,
+) -> SingleDownloadPlanV1 {
+    use super::contract::SingleDownloadItem;
+    let items: Vec<SingleDownloadItem> = (1..=n_images)
+        .map(|i| SingleDownloadItem {
+            media_key: format!("{aweme_id}:image:{i}"),
+            aweme_id: aweme_id.to_string(),
+            urls: vec![url.to_string()],
+            kind: SingleMediaKind::Image,
+            output: SingleOutputSpec {
+                filename: format!("{aweme_id}_image_{i}"),
+                suffix: ".webp".to_string(),
+                folder_name: None,
+            },
+            headers: Default::default(),
+            accessories: Vec::new(),
+            metadata: video(aweme_id),
+        })
+        .collect();
+    SingleDownloadPlanV1 {
+        success: true,
+        contract_version: 1,
+        mode: "one".to_string(),
+        save_dir: harness.root.to_string_lossy().to_string(),
+        items,
+        total: n_images,
+    }
+}
+
+fn paged_gallery_plan(
+    harness: &TaskHarness,
+    aweme_id: &str,
+    url: &str,
+    n_images: i64,
+    n_live: i64,
+    has_more: bool,
+    next_cursor: Option<i64>,
+) -> PagedDownloadPlanV1 {
+    use super::contract::SingleDownloadItem;
+    let mut items: Vec<SingleDownloadItem> = Vec::new();
+    for i in 1..=n_live {
+        items.push(SingleDownloadItem {
+            media_key: format!("{aweme_id}:live_photo:{i}"),
+            aweme_id: aweme_id.to_string(),
+            urls: vec![url.to_string()],
+            kind: SingleMediaKind::LivePhoto,
+            output: SingleOutputSpec {
+                filename: format!("{aweme_id}_live_{i}"),
+                suffix: ".mp4".to_string(),
+                folder_name: None,
+            },
+            headers: Default::default(),
+            accessories: Vec::new(),
+            metadata: video(aweme_id),
+        });
+    }
+    for i in 1..=n_images {
+        items.push(SingleDownloadItem {
+            media_key: format!("{aweme_id}:image:{i}"),
+            aweme_id: aweme_id.to_string(),
+            urls: vec![url.to_string()],
+            kind: SingleMediaKind::Image,
+            output: SingleOutputSpec {
+                filename: format!("{aweme_id}_image_{i}"),
+                suffix: ".webp".to_string(),
+                folder_name: None,
+            },
+            headers: Default::default(),
+            accessories: Vec::new(),
+            metadata: video(aweme_id),
+        });
+    }
+    PagedDownloadPlanV1 {
+        success: true,
+        contract_version: 1,
+        mode: "post".to_string(),
+        save_dir: harness.root.to_string_lossy().to_string(),
+        items,
+        next_cursor,
+        has_more,
+        page_aweme_ids: vec![aweme_id.to_string()],
+        user_profile: None,
+    }
+}
+
+#[tokio::test]
+async fn public_gallery_single_work_multi_row_persistence() {
+    let server = LocalHttpServer::start(HttpBehavior::Success(b"gallery-data")).await;
+    let harness = TaskHarness::new();
+    let plan = gallery_plan(&harness, "gallery-multi", server.url(), 3);
+    let task_id = harness.start(FixedSingleResolver::plan(plan)).await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "completed");
+    assert_eq!(task.total, 3);
+    assert_eq!(task.completed, 3);
+
+    let detail = harness.state.db.get_task_detail(&task_id).unwrap().unwrap();
+    assert_eq!(detail.items.len(), 3);
+    assert_eq!(detail.items[0].aweme_id.as_deref(), Some("gallery-multi"));
+    assert_eq!(detail.items[1].aweme_id.as_deref(), Some("gallery-multi"));
+    assert_eq!(detail.items[2].aweme_id.as_deref(), Some("gallery-multi"));
+    assert_eq!(detail.items[0].status, "completed");
+    assert_eq!(detail.items[1].status, "completed");
+    assert_eq!(detail.items[2].status, "completed");
+    assert!(harness.root.join("gallery-multi_image_1.webp").exists());
+    assert!(harness.root.join("gallery-multi_image_2.webp").exists());
+    assert!(harness.root.join("gallery-multi_image_3.webp").exists());
+}
+
+#[tokio::test]
+async fn public_gallery_paged_multi_row_persistence() {
+    let server = LocalHttpServer::start(HttpBehavior::Success(b"gallery-page")).await;
+    let harness = TaskHarness::new();
+    let plan = paged_gallery_plan(&harness, "gallery-page", server.url(), 2, 1, false, None);
+    let task_id = harness.start_paged(FixedPagedResolver::single(plan)).await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "completed");
+    assert_eq!(task.total, 3);
+    assert_eq!(task.completed, 3);
+
+    let detail = harness.state.db.get_task_detail(&task_id).unwrap().unwrap();
+    assert_eq!(detail.items.len(), 3);
+    assert_eq!(detail.items[0].media_kind.as_deref(), Some("live_photo"));
+    assert_eq!(
+        detail.items[0].media_key.as_deref(),
+        Some("gallery-page:live_photo:1")
+    );
+    assert_eq!(detail.items[1].media_kind.as_deref(), Some("image"));
+    assert_eq!(
+        detail.items[1].media_key.as_deref(),
+        Some("gallery-page:image:1")
+    );
+    assert_eq!(detail.items[2].media_kind.as_deref(), Some("image"));
+    assert_eq!(
+        detail.items[2].media_key.as_deref(),
+        Some("gallery-page:image:2")
+    );
+    assert!(harness.root.join("gallery-page_live_1.mp4").exists());
+    assert!(harness.root.join("gallery-page_image_1.webp").exists());
+    assert!(harness.root.join("gallery-page_image_2.webp").exists());
+}
+
+#[tokio::test]
+async fn public_gallery_partial_failure_retains_successful_files() {
+    let success = LocalHttpServer::start(HttpBehavior::Success(b"gallery-ok")).await;
+    let failure = LocalHttpServer::start(HttpBehavior::NotFound).await;
+    let harness = TaskHarness::new();
+    let mut plan = gallery_plan(&harness, "gallery-partial", success.url(), 3);
+    plan.items[1].urls = vec![failure.url().to_string()];
+    let task_id = harness.start(FixedSingleResolver::plan(plan)).await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "completed");
+    assert_eq!(task.completed, 2);
+    assert_eq!(task.failed, 1);
+    assert!(harness.root.join("gallery-partial_image_1.webp").exists());
+    assert!(!harness.root.join("gallery-partial_image_2.webp").exists());
+    assert!(harness.root.join("gallery-partial_image_3.webp").exists());
+}
+
+#[tokio::test]
+async fn public_gallery_selection_keeps_complete_group() {
+    let server = LocalHttpServer::start(HttpBehavior::Success(b"sel-gallery")).await;
+    let harness = TaskHarness::new();
+    let plan = paged_gallery_plan(&harness, "sel-gallery", server.url(), 2, 0, false, None);
+    let task_id = harness
+        .start_paged_selection(FixedPagedResolver::single(plan), &["sel-gallery"])
+        .await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "completed");
+    assert_eq!(task.total, 2);
+    assert_eq!(task.completed, 2);
+    let items = harness.state.db.get_task_items(&task_id, None).unwrap();
+    assert_eq!(items.len(), 2);
+    assert!(items
+        .iter()
+        .all(|item| item.aweme_id.as_deref() == Some("sel-gallery")));
+    assert!(harness.root.join("sel-gallery_image_1.webp").exists());
+    assert!(harness.root.join("sel-gallery_image_2.webp").exists());
+}
+
+#[tokio::test]
+async fn public_gallery_webp_and_mp4_mixed_download() {
+    let server = LocalHttpServer::start(HttpBehavior::Success(b"gallery-mixed")).await;
+    let harness = TaskHarness::new();
+    let plan = paged_gallery_plan(&harness, "gallery-mixed", server.url(), 1, 1, false, None);
+    let task_id = harness.start_paged(FixedPagedResolver::single(plan)).await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "completed");
+    assert_eq!(task.completed, 2);
+    assert!(harness.root.join("gallery-mixed_live_1.mp4").exists());
+    assert!(harness.root.join("gallery-mixed_image_1.webp").exists());
+}
+
+#[tokio::test]
+async fn public_gallery_downloads_first_item_accessory_once() {
+    let media_server = LocalHttpServer::start(HttpBehavior::Success(b"gallery-media")).await;
+    let accessory_server = LocalHttpServer::start(HttpBehavior::Success(b"gallery-music")).await;
+    let harness = TaskHarness::with_config(AppConfig {
+        music: true,
+        cover: false,
+        desc: false,
+        ..AppConfig::default()
+    });
+    let mut plan = gallery_plan(&harness, "gallery-accessory", media_server.url(), 2);
+    plan.items[0].accessories.push(SingleAccessory {
+        kind: SingleAccessoryKind::Music,
+        output: SingleOutputSpec {
+            filename: "gallery-accessory_music".to_string(),
+            suffix: ".mp3".to_string(),
+            folder_name: None,
+        },
+        url: Some(accessory_server.url().to_string()),
+        content: None,
+    });
+
+    let task_id = harness.start(FixedSingleResolver::plan(plan)).await;
+    let task = harness.wait_for_terminal(&task_id).await;
+
+    assert_eq!(task.status, "completed");
+    assert_eq!(task.total, 2);
+    assert_eq!(task.completed, 2);
+    assert_eq!(accessory_server.request_count(), 1);
+    assert!(harness.root.join("gallery-accessory_music.mp3").exists());
+}
+
+#[tokio::test]
+async fn public_gallery_skipped_file_does_not_overwrite() {
+    let harness = TaskHarness::new();
+    std::fs::write(
+        harness.root.join("gallery-skip_image_1.webp"),
+        b"existing-1",
+    )
+    .unwrap();
+    std::fs::write(
+        harness.root.join("gallery-skip_image_2.webp"),
+        b"existing-2",
+    )
+    .unwrap();
+    let plan = gallery_plan(&harness, "gallery-skip", "http://127.0.0.1:1/unused", 2);
+    let task_id = harness.start(FixedSingleResolver::plan(plan)).await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "completed");
+    assert_eq!(task.skipped, 2);
+    assert_eq!(
+        std::fs::read(harness.root.join("gallery-skip_image_1.webp")).unwrap(),
+        b"existing-1"
+    );
+    assert_eq!(
+        std::fs::read(harness.root.join("gallery-skip_image_2.webp")).unwrap(),
+        b"existing-2"
+    );
+}
+
+#[tokio::test]
+async fn public_gallery_all_failure_is_error() {
+    let failure = LocalHttpServer::start(HttpBehavior::NotFound).await;
+    let harness = TaskHarness::new();
+    let plan = gallery_plan(&harness, "gallery-all-fail", failure.url(), 2);
+    let task_id = harness.start(FixedSingleResolver::plan(plan)).await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "error");
+    assert_eq!(task.failed, 2);
+    assert!(task
+        .error_msg
+        .as_deref()
+        .unwrap_or("")
+        .contains("所有下载均失败"));
 }
