@@ -19,6 +19,7 @@ import {
   Download,
   Layers,
   CheckCircle2,
+  Check,
   ListVideo,
 } from "lucide-react";
 import { ErrorBanner } from "@/components/shared/error-banner";
@@ -32,6 +33,7 @@ export default function MixPage() {
   const [downloading, setDownloading] = useState(false);
   const [downloadedCount, setDownloadedCount] = useState(0);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const batchTask = useActiveTask(activeTaskId);
   const downloadProgress = batchTask ? ((batchTask.total ?? 0) > 0 ? Math.round(((batchTask.completed ?? 0) / (batchTask.total ?? 1)) * 100) : 0) : 0;
   const [mixName, setMixName] = useState("");
@@ -100,17 +102,57 @@ export default function MixPage() {
     setDownloading(false);
   };
 
+  const handleSelectChange = useCallback((awemeId: string, selected: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (selected) next.add(awemeId);
+      else next.delete(awemeId);
+      return next;
+    });
+  }, []);
+
+  const handleSelectAll = useCallback(() => {
+    if (selectedIds.size === videos.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(videos.map((v) => v.aweme_id)));
+    }
+  }, [selectedIds.size, videos]);
+
+  const handleDownloadSelected = async () => {
+    if (selectedIds.size === 0) return;
+    setDownloading(true);
+    setDownloadedCount(0);
+    setActiveTaskId(null);
+
+    const res = await downloadMix(currentUrl, Array.from(selectedIds));
+    if (res.success && res.task_id) {
+      setActiveTaskId(res.task_id);
+      setSelectedIds(new Set());
+    } else {
+      setError(res.error || "下载失败");
+    }
+    setDownloading(false);
+  };
+
   return (
     <>
       <AnimateEntry>
         <Header title="合集" description="下载整个合集/播放列表" parent={{ label: "首页", path: "/douyin" }}>
           {videos.length > 0 && (
-            <DownloadAllButton
-              downloading={downloading}
-              downloadedCount={downloadedCount}
-              total={videos.length}
-              onClick={handleDownloadAll}
-            />
+            <div className="flex items-center gap-2">
+              {selectedIds.size > 0 && (
+                <Button variant="capsule" size="sm" onClick={handleDownloadSelected} disabled={downloading}>
+                  下载选中 ({selectedIds.size})
+                </Button>
+              )}
+              <DownloadAllButton
+                downloading={downloading}
+                downloadedCount={downloadedCount}
+                total={videos.length}
+                onClick={handleDownloadAll}
+              />
+            </div>
           )}
         </Header>
       </AnimateEntry>
@@ -149,6 +191,19 @@ export default function MixPage() {
               </Bezel>
             </AnimateEntry>
 
+            <div className="flex items-center gap-2 mb-4">
+              <button
+                type="button"
+                onClick={handleSelectAll}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {selectedIds.size === videos.length ? "取消全选" : "全选"}
+              </button>
+              {selectedIds.size > 0 && (
+                <span className="text-xs text-muted-foreground">已选 {selectedIds.size} 个</span>
+              )}
+            </div>
+
             <div className="space-y-2">
               {videos.map((video, i) => (
                 <AnimateEntry key={video.aweme_id} delay={Math.min(i * 25, 500)}>
@@ -157,9 +212,17 @@ export default function MixPage() {
                       className={`flex items-center gap-4 p-4 bg-card transition-all duration-300 cursor-pointer hover:bg-foreground/[0.02] ${video.downloaded ? "bg-success/[0.02]" : ""}`}
                       onClick={() => navigate(`/douyin/video/${video.aweme_id}`, { state: { from: "合集", fromPath: "/douyin/mix" } })}
                     >
-                      <div className="h-8 w-8 rounded-full bg-foreground/[0.04] ring-1 ring-foreground/[0.06] flex items-center justify-center text-sm font-medium shrink-0">
-                        {video.downloaded ? <CheckCircle2 className="h-4 w-4 text-success" /> : i + 1}
-                      </div>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); handleSelectChange(video.aweme_id, !selectedIds.has(video.aweme_id)); }}
+                        className={`h-5 w-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${
+                          selectedIds.has(video.aweme_id)
+                            ? "bg-primary border-primary text-primary-foreground"
+                            : "border-foreground/20 hover:border-foreground/40"
+                        }`}
+                      >
+                        {selectedIds.has(video.aweme_id) && <Check className="h-3 w-3" />}
+                      </button>
                       <div className="flex-1 min-w-0">
                         <h4 className="text-sm font-medium truncate">{video.desc}</h4>
                         <p className="text-xs text-muted-foreground tracking-wide">
@@ -170,6 +233,10 @@ export default function MixPage() {
                         variant={video.downloaded ? "capsule" : "default"}
                         size="sm"
                         disabled={video.downloaded}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          downloadMix(currentUrl, [video.aweme_id]);
+                        }}
                       >
                         {video.downloaded ? (
                           <><CheckCircle2 className="h-3.5 w-3.5 mr-1" />已下载</>

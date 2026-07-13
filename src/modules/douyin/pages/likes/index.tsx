@@ -7,6 +7,7 @@ import { VideoCard } from "@/components/shared/video-card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Bezel } from "@/components/shared/bezel";
 import { DownloadAllButton } from "@/components/shared/download-all-button";
+import { Button } from "@/components/ui/button";
 import { DownloadProgressOverlay } from "@/components/shared/download-progress-overlay";
 import { InfiniteScrollSentinel } from "@/components/shared/infinite-scroll-sentinel";
 import { LoadingSpinner } from "@/components/shared/loading-spinner";
@@ -26,6 +27,7 @@ export default function LikesPage() {
   const [downloading, setDownloading] = useState(false);
   const [downloadedCount, setDownloadedCount] = useState(0);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [currentUrl, setCurrentUrl] = usePersistedUrl("likes");
   const batchTask = useActiveTask(activeTaskId);
   const downloadProgress = batchTask ? ((batchTask.total ?? 0) > 0 ? Math.round(((batchTask.completed ?? 0) / (batchTask.total ?? 1)) * 100) : 0) : 0;
@@ -100,19 +102,65 @@ export default function LikesPage() {
     setDownloading(false);
   };
 
+  const handleSelectChange = useCallback((awemeId: string, selected: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (selected) next.add(awemeId);
+      else next.delete(awemeId);
+      return next;
+    });
+  }, []);
+
+  const handleSelectAll = useCallback(() => {
+    if (selectedIds.size === likes.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(likes.map((v) => v.aweme_id)));
+    }
+  }, [selectedIds.size, likes]);
+
+  const handleDownloadSelected = async () => {
+    if (selectedIds.size === 0) return;
+    setDownloading(true);
+    setDownloadedCount(0);
+    setActiveTaskId(null);
+
+    const url = profile?.sec_user_id ? `https://www.douyin.com/user/${profile.sec_user_id}` : "";
+    const res = await downloadUserLikes(url, Array.from(selectedIds));
+    if (res.success && res.task_id) {
+      setActiveTaskId(res.task_id);
+      setSelectedIds(new Set());
+    } else {
+      setError(res.error || "下载失败");
+    }
+    setDownloading(false);
+  };
+
+  const handleCardDownload = useCallback((video: VideoItem) => {
+    const url = profile?.sec_user_id ? `https://www.douyin.com/user/${profile.sec_user_id}` : "";
+    downloadUserLikes(url, [video.aweme_id]);
+  }, [profile]);
+
   return (
     <>
       <AnimateEntry>
         <Header title="用户点赞" description="查看用户的点赞列表" parent={{ label: "首页", path: "/douyin" }}>
           {likes.length > 0 && (
-            <DownloadAllButton
-              downloading={downloading}
-              downloadedCount={downloadedCount}
-              total={likes.length}
-              onClick={handleDownloadAll}
-              variant="capsule"
-              size="sm"
-            />
+            <div className="flex items-center gap-2">
+              {selectedIds.size > 0 && (
+                <Button variant="capsule" size="sm" onClick={handleDownloadSelected} disabled={downloading}>
+                  下载选中 ({selectedIds.size})
+                </Button>
+              )}
+              <DownloadAllButton
+                downloading={downloading}
+                downloadedCount={downloadedCount}
+                total={likes.length}
+                onClick={handleDownloadAll}
+                variant="capsule"
+                size="sm"
+              />
+            </div>
           )}
         </Header>
       </AnimateEntry>
@@ -145,6 +193,20 @@ export default function LikesPage() {
               </Bezel>
             </AnimateEntry>
 
+            {likes.length > 0 && (
+              <div className="flex items-center gap-2 mb-4">
+                <button
+                  type="button"
+                  onClick={handleSelectAll}
+                  className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  {selectedIds.size === likes.length ? "取消全选" : "全选"}
+                </button>
+                {selectedIds.size > 0 && (
+                  <span className="text-xs text-muted-foreground">已选 {selectedIds.size} 个</span>
+                )}
+              </div>
+            )}
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
               {likes.map((video) => (
                 <VideoCard
@@ -157,6 +219,10 @@ export default function LikesPage() {
                   commentCount={video.comment_count}
                   shareCount={video.share_count}
                   onClick={() => navigate(`/douyin/video/${video.aweme_id}`, { state: { from: "点赞", fromPath: "/douyin/likes" } })}
+                  selectable
+                  selected={selectedIds.has(video.aweme_id)}
+                  onSelectChange={(sel) => handleSelectChange(video.aweme_id, sel)}
+                  onDownload={() => handleCardDownload(video)}
                 />
               ))}
             </div>

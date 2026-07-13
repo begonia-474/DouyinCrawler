@@ -10,6 +10,7 @@ import { useTabFeedQuery, useFollowFeedQuery, useFriendFeedQuery } from "@/lib/q
 import type { VideoItem } from "@/lib/api-types";
 import { RefreshCw, Loader2, Rss } from "lucide-react";
 import { CommentDialog } from "@/components/shared/comment-dialog";
+import { startDownload } from "@/lib/api/download";
 
 export default function FeedPage() {
   const [commentAwemeId, setCommentAwemeId] = useState<string | null>(null);
@@ -63,6 +64,7 @@ export default function FeedPage() {
                 commentCount={video.comment_count}
                 shareCount={video.share_count}
                 onClick={() => setCommentAwemeId(video.aweme_id)}
+                onDownload={() => startDownload("one", `https://www.douyin.com/video/${video.aweme_id}`)}
               />
             </AnimateEntry>
           ))}

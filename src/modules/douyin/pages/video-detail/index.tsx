@@ -293,6 +293,7 @@ function RelatedSection({ awemeId, onVideoClick }: { awemeId: string; onVideoCli
             commentCount={video.comment_count}
             shareCount={video.share_count}
             onClick={() => onVideoClick(video)}
+            onDownload={() => startDownload("one", `https://www.douyin.com/video/${video.aweme_id}`)}
           />
         ))}
       </div>

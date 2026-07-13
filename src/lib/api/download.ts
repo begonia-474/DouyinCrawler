@@ -16,7 +16,7 @@ export async function downloadOne(url: string): Promise<ApiResponse<DownloadResu
 }
 
 /** 通用批量下载入口，返回 task_id 供页面订阅进度。所有模式走 Rust-owned start_download。 */
-export async function startBatchDownload(download_type: string, url: string): Promise<ApiResponse & { task_id?: string }> {
+export async function startBatchDownload(download_type: string, url: string, awemeIds?: string[]): Promise<ApiResponse & { task_id?: string }> {
   try {
     const typeToMode: Record<string, DownloadMode> = {
       user_post: "post",
@@ -25,7 +25,7 @@ export async function startBatchDownload(download_type: string, url: string): Pr
       collects: "collects",
     };
     const mode = typeToMode[download_type] ?? download_type;
-    const raw = await invoke<BackendResponse>("start_download", { mode, url });
+    const raw = await invoke<BackendResponse>("start_download", { mode, url, aweme_ids: awemeIds });
     let taskId: string | undefined;
     if (raw?.success && raw.task_id != null) {
       taskId = String(raw.task_id);
@@ -36,10 +36,10 @@ export async function startBatchDownload(download_type: string, url: string): Pr
   }
 }
 
-export const downloadUserPosts = (url: string) => startBatchDownload("user_post", url);
-export const downloadUserLikes = (url: string) => startBatchDownload("user_like", url);
-export const downloadMix = (url: string) => startBatchDownload("mix", url);
-export const downloadCollectsVideo = (collectsId: string) => startBatchDownload("collects", collectsId);
+export const downloadUserPosts = (url: string, awemeIds?: string[]) => startBatchDownload("user_post", url, awemeIds);
+export const downloadUserLikes = (url: string, awemeIds?: string[]) => startBatchDownload("user_like", url, awemeIds);
+export const downloadMix = (url: string, awemeIds?: string[]) => startBatchDownload("mix", url, awemeIds);
+export const downloadCollectsVideo = (collectsId: string, awemeIds?: string[]) => startBatchDownload("collects", collectsId, awemeIds);
 
 // ============================================================
 // 合集信息
@@ -50,9 +50,9 @@ export async function getMixInfo(url: string, cursor: number = 0, count: number 
 }
 
 /** 统一下载入口（通过 mode 分发） */
-export async function startDownload(mode: DownloadMode, url: string): Promise<ApiResponse & { task_id?: string }> {
+export async function startDownload(mode: DownloadMode, url: string, awemeIds?: string[]): Promise<ApiResponse & { task_id?: string }> {
   try {
-    const raw = await invoke<BackendResponse>("start_download", { mode, url });
+    const raw = await invoke<BackendResponse>("start_download", { mode, url, aweme_ids: awemeIds });
     let taskId: string | undefined;
     if (raw?.success && raw.task_id != null) {
       taskId = String(raw.task_id);

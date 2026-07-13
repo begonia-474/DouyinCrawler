@@ -10,6 +10,7 @@ import { useInfiniteScroll } from "@/hooks/use-infinite-scroll";
 import { getRelated } from "@/lib/api/related";
 import { formatDurationSec } from "@/lib/utils";
 import type { VideoItem } from "@/lib/api-types";
+import { startDownload } from "@/lib/api/download";
 import { Compass } from "lucide-react";
 
 export default function RelatedPage() {
@@ -102,6 +103,7 @@ export default function RelatedPage() {
                   commentCount={video.comment_count}
                   shareCount={video.share_count}
                   onClick={() => handleVideoClick(video)}
+                  onDownload={() => startDownload("one", `https://www.douyin.com/video/${video.aweme_id}`)}
                 />
               ))}
             </div>

@@ -24,6 +24,7 @@ export default function CollectsDetailPage() {
   const [downloading, setDownloading] = useState(false);
   const [downloadedCount, setDownloadedCount] = useState(0);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const batchTask = useActiveTask(activeTaskId);
   const downloadProgress = batchTask ? ((batchTask.total ?? 0) > 0 ? Math.round(((batchTask.completed ?? 0) / (batchTask.total ?? 1)) * 100) : 0) : 0;
 
@@ -67,6 +68,43 @@ export default function CollectsDetailPage() {
     setDownloading(false);
   };
 
+  const handleSelectChange = useCallback((awemeId: string, selected: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (selected) next.add(awemeId);
+      else next.delete(awemeId);
+      return next;
+    });
+  }, []);
+
+  const handleSelectAll = useCallback(() => {
+    if (selectedIds.size === videos.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(videos.map((v) => v.aweme_id)));
+    }
+  }, [selectedIds.size, videos]);
+
+  const handleDownloadSelected = async () => {
+    if (selectedIds.size === 0 || !id) return;
+    setDownloading(true);
+    setDownloadedCount(0);
+    setActiveTaskId(null);
+
+    const res = await downloadCollectsVideo(id, Array.from(selectedIds));
+    if (res.success && res.task_id) {
+      setActiveTaskId(res.task_id);
+      setSelectedIds(new Set());
+    } else {
+      setError(res.error || "下载失败");
+    }
+    setDownloading(false);
+  };
+
+  const handleCardDownload = useCallback((video: VideoItem) => {
+    downloadCollectsVideo(id!, [video.aweme_id]);
+  }, [id]);
+
   return (
     <>
       <Header title="收藏夹详情" description={`共 ${videos.length}${hasMore ? "+" : ""} 个视频`} parent={{ label: "我的收藏", path: "/douyin/favorites" }}>
@@ -76,13 +114,20 @@ export default function CollectsDetailPage() {
             返回
           </Button>
           {videos.length > 0 && (
-            <DownloadAllButton
-              downloading={downloading}
-              downloadedCount={downloadedCount}
-              total={videos.length}
-              onClick={handleDownloadAll}
-              size="sm"
-            />
+            <>
+              {selectedIds.size > 0 && (
+                <Button variant="capsule" size="sm" onClick={handleDownloadSelected} disabled={downloading}>
+                  下载选中 ({selectedIds.size})
+                </Button>
+              )}
+              <DownloadAllButton
+                downloading={downloading}
+                downloadedCount={downloadedCount}
+                total={videos.length}
+                onClick={handleDownloadAll}
+                size="sm"
+              />
+            </>
           )}
         </div>
       </Header>
@@ -110,6 +155,18 @@ export default function CollectsDetailPage() {
 
         {!initialLoading && videos.length > 0 && (
           <>
+            <div className="flex items-center gap-2 mb-4">
+              <button
+                type="button"
+                onClick={handleSelectAll}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {selectedIds.size === videos.length ? "取消全选" : "全选"}
+              </button>
+              {selectedIds.size > 0 && (
+                <span className="text-xs text-muted-foreground">已选 {selectedIds.size} 个</span>
+              )}
+            </div>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
               {videos.map((video) => (
                 <VideoCard
@@ -122,6 +179,10 @@ export default function CollectsDetailPage() {
                   commentCount={video.comment_count}
                   shareCount={video.share_count}
                   onClick={() => navigate(`/douyin/video/${video.aweme_id}`, { state: { from: "收藏夹", fromPath: "/douyin/favorites" } })}
+                  selectable
+                  selected={selectedIds.has(video.aweme_id)}
+                  onSelectChange={(sel) => handleSelectChange(video.aweme_id, sel)}
+                  onDownload={() => handleCardDownload(video)}
                 />
               ))}
             </div>

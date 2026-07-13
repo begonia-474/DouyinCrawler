@@ -1,7 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Bezel } from "@/components/shared/bezel";
-import { Download, Play, Heart, MessageSquare, Share2 } from "lucide-react";
+import { Download, Play, Heart, MessageSquare, Share2, Check } from "lucide-react";
 
 interface VideoCardProps {
   title: string;
@@ -13,6 +13,9 @@ interface VideoCardProps {
   shareCount?: number;
   onDownload?: () => void;
   onClick?: () => void;
+  selectable?: boolean;
+  selected?: boolean;
+  onSelectChange?: (selected: boolean) => void;
 }
 
 export function VideoCard({
@@ -25,6 +28,9 @@ export function VideoCard({
   shareCount,
   onDownload,
   onClick,
+  selectable,
+  selected,
+  onSelectChange,
 }: VideoCardProps) {
   return (
     <Bezel radius="lg" padding="sm">
@@ -46,6 +52,22 @@ export function VideoCard({
                 <Play className="h-6 w-6 text-muted-foreground/60" />
               </div>
             </div>
+          )}
+          {selectable && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelectChange?.(!selected);
+              }}
+              className={`absolute top-2.5 left-2.5 z-10 h-5 w-5 rounded-full border-2 flex items-center justify-center transition-all duration-200 ${
+                selected
+                  ? "bg-primary border-primary text-primary-foreground"
+                  : "bg-background/80 border-foreground/20 opacity-0 group-hover:opacity-100 backdrop-blur-sm"
+              }`}
+            >
+              {selected && <Check className="h-3 w-3" />}
+            </button>
           )}
           {duration && (
             <Badge

@@ -21,10 +21,12 @@ pub async fn start_download(
     state: State<'_, AppState>,
     mode: String,
     url: String,
+    aweme_ids: Option<Vec<String>>,
 ) -> Result<Value, String> {
     let download_mode = DownloadMode::from_str(&mode)
         .ok_or_else(|| format!("未知的下载模式: {}", mode))?;
 
+    let aweme_ids = aweme_ids.unwrap_or_default();
     let service = TaskApplicationService::new(&state);
 
     match download_mode {
@@ -32,6 +34,7 @@ pub async fn start_download(
             let request = DownloadRequest {
                 mode: download_mode,
                 url,
+                aweme_ids,
             };
             let task_id = service.start_download(request).await?;
             Ok(serde_json::json!({
@@ -48,7 +51,7 @@ pub async fn start_download(
         }
         DownloadMode::Post | DownloadMode::Like | DownloadMode::Mix | DownloadMode::Collects => {
             let task_id = service
-                .start_batch_download_mode(download_mode, &url)
+                .start_batch_download_mode(download_mode, &url, &aweme_ids)
                 .await?;
             Ok(serde_json::json!({
                 "success": true,

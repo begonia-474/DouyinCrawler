@@ -60,6 +60,7 @@ export default function UserPage() {
   const [downloading, setDownloading] = useState(false);
   const [downloadedCount, setDownloadedCount] = useState(0);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [currentUrl, setCurrentUrl] = usePersistedUrl("user");
   const batchTask = useActiveTask(activeTaskId);
   const downloadProgress = batchTask ? ((batchTask.total ?? 0) > 0 ? Math.round(((batchTask.completed ?? 0) / (batchTask.total ?? 1)) * 100) : 0) : 0;
@@ -142,17 +143,64 @@ export default function UserPage() {
     setDownloading(false);
   };
 
+  const handleSelectChange = useCallback((awemeId: string, selected: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (selected) next.add(awemeId);
+      else next.delete(awemeId);
+      return next;
+    });
+  }, []);
+
+  const handleSelectAll = useCallback(() => {
+    if (selectedIds.size === videos.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(videos.map((v) => v.aweme_id)));
+    }
+  }, [selectedIds.size, videos]);
+
+  const handleDownloadSelected = async () => {
+    if (selectedIds.size === 0) return;
+    setDownloading(true);
+    setDownloadedCount(0);
+    setActiveTaskId(null);
+
+    const url = profile?.sec_user_id ? `https://www.douyin.com/user/${profile.sec_user_id}` : "";
+    const res = await downloadUserPosts(url, Array.from(selectedIds));
+    if (res.success && res.task_id) {
+      setActiveTaskId(res.task_id);
+      setSelectedIds(new Set());
+    } else {
+      setError(res.error || "下载失败");
+    }
+    setDownloading(false);
+  };
+
+  const handleCardDownload = useCallback((video: VideoItem) => {
+    // 单个下载：选中后触发选择下载
+    const url = profile?.sec_user_id ? `https://www.douyin.com/user/${profile.sec_user_id}` : "";
+    downloadUserPosts(url, [video.aweme_id]);
+  }, [profile]);
+
   return (
     <>
       <AnimateEntry>
         <Header title="用户主页" description="查看用户资料和作品" parent={{ label: "首页", path: "/douyin" }}>
           {profile && (
-            <DownloadAllButton
-              downloading={downloading}
-              downloadedCount={downloadedCount}
-              total={videos.length}
-              onClick={handleDownloadAll}
-            />
+            <div className="flex items-center gap-2">
+              {selectedIds.size > 0 && (
+                <Button variant="capsule" size="sm" onClick={handleDownloadSelected} disabled={downloading}>
+                  下载选中 ({selectedIds.size})
+                </Button>
+              )}
+              <DownloadAllButton
+                downloading={downloading}
+                downloadedCount={downloadedCount}
+                total={videos.length}
+                onClick={handleDownloadAll}
+              />
+            </div>
           )}
         </Header>
       </AnimateEntry>
@@ -221,6 +269,20 @@ export default function UserPage() {
               </TabsList>
 
               <TabsContent value="posts" className="mt-6">
+                {videos.length > 0 && (
+                  <div className="flex items-center gap-2 mb-4">
+                    <button
+                      type="button"
+                      onClick={handleSelectAll}
+                      className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      {selectedIds.size === videos.length ? "取消全选" : "全选"}
+                    </button>
+                    {selectedIds.size > 0 && (
+                      <span className="text-xs text-muted-foreground">已选 {selectedIds.size} 个</span>
+                    )}
+                  </div>
+                )}
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
                   {videos.map((video) => (
                     <VideoCard
@@ -233,6 +295,10 @@ export default function UserPage() {
                       commentCount={video.comment_count}
                       shareCount={video.share_count}
                       onClick={() => navigate(`/douyin/video/${video.aweme_id}`, { state: { from: "用户主页", fromPath: "/douyin/user" } })}
+                      selectable
+                      selected={selectedIds.has(video.aweme_id)}
+                      onSelectChange={(sel) => handleSelectChange(video.aweme_id, sel)}
+                      onDownload={() => handleCardDownload(video)}
                     />
                   ))}
                 </div>

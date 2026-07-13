@@ -683,13 +683,19 @@ impl<'a> TaskApplicationService<'a> {
     // ============================================================
 
     /// 通过 Python resolve_page 解析单页下载 URL（异步，使用 spawn_blocking）
-    async fn resolve_download_page(mode: &str, url: &str, cursor: i64, count: i64) -> Result<ResolvedUrls, String> {
+    async fn resolve_download_page(mode: &str, url: &str, cursor: i64, count: i64, aweme_ids: &[String]) -> Result<ResolvedUrls, String> {
         let mode = mode.to_string();
         let url = url.to_string();
+        let aweme_ids = aweme_ids.to_vec();
 
         let json_value = tokio::task::spawn_blocking(move || {
-            crate::python::handler::resolve_page(&mode, &url, cursor, count)
-                .map_err(|e| format!("resolve_page 调用失败: {}", e))
+            if aweme_ids.is_empty() {
+                crate::python::handler::resolve_page(&mode, &url, cursor, count)
+                    .map_err(|e| format!("resolve_page 调用失败: {}", e))
+            } else {
+                crate::python::handler::resolve_page_filtered(&mode, &url, cursor, count, aweme_ids)
+                    .map_err(|e| format!("resolve_page_filtered 调用失败: {}", e))
+            }
         })
         .await
         .map_err(|e| format!("spawn_blocking 失败: {}", e))??;
@@ -711,6 +717,7 @@ impl<'a> TaskApplicationService<'a> {
         url: &str,
         cancel_signal: &Arc<AtomicBool>,
         app_config: &crate::config::AppConfig,
+        aweme_ids: &[String],
     ) -> Result<(), String> {
         let page_counts = app_config.page_counts as i64;
         let mut cursor: i64 = 0;
@@ -738,7 +745,7 @@ impl<'a> TaskApplicationService<'a> {
                 page_index, task_id, cursor, page_counts
             );
 
-            let resolved = Self::resolve_download_page(mode.as_str(), url, cursor, page_counts).await?;
+            let resolved = Self::resolve_download_page(mode.as_str(), url, cursor, page_counts, aweme_ids).await?;
             if !resolved.success {
                 let err = resolved.error.unwrap_or_else(|| "解析失败".to_string());
                 // 首页失败直接报错；后续页失败则停止分页但保留已下载内容
@@ -779,6 +786,12 @@ impl<'a> TaskApplicationService<'a> {
             }
 
             let items = resolved.items;
+            let items: Vec<_> = if aweme_ids.is_empty() {
+                items
+            } else {
+                let filter: std::collections::HashSet<&str> = aweme_ids.iter().map(|s| s.as_str()).collect();
+                items.into_iter().filter(|item| filter.contains(item.aweme_id.as_str())).collect()
+            };
             if items.is_empty() {
                 info!("[TaskService] 第 {} 页无数据，停止分页", page_index);
                 break;
@@ -870,6 +883,16 @@ impl<'a> TaskApplicationService<'a> {
                 page_index, total_completed, total_failed
             );
 
+            // 如果指定了 aweme_ids，已收集到所有目标则提前停止
+            if !aweme_ids.is_empty() && (total_completed + total_failed) as usize >= aweme_ids.len() {
+                info!(
+                    "[TaskService] 已完成所有指定 aweme_ids ({}/{})，停止分页",
+                    total_completed + total_failed,
+                    aweme_ids.len()
+                );
+                break;
+            }
+
             // 检查是否还有更多数据
             if resolved.has_more != Some(true) {
                 info!("[TaskService] 所有页面下载完成 (共 {} 页)", page_index);
@@ -913,13 +936,14 @@ impl<'a> TaskApplicationService<'a> {
         &self,
         mode: DownloadMode,
         url: &str,
+        aweme_ids: &[String],
     ) -> Result<String, String> {
         let task_id = Uuid::new_v4().to_string();
         let task_id = task_id[..8].to_string();
 
         info!(
-            "[TaskService] start_batch_download_mode: task_id={}, mode={}",
-            task_id, mode
+            "[TaskService] start_batch_download_mode: task_id={}, mode={}, aweme_ids={:?}",
+            task_id, mode, aweme_ids
         );
 
         // 1. 创建任务记录
@@ -948,6 +972,7 @@ impl<'a> TaskApplicationService<'a> {
         let task_id_clone = task_id.clone();
         let mode_val = mode;
         let url_val = url.to_string();
+        let aweme_ids_val: Vec<String> = aweme_ids.to_vec();
 
         // 5. 启动后台下载任务（分页模式）
         tokio::spawn(async move {
@@ -958,6 +983,7 @@ impl<'a> TaskApplicationService<'a> {
                 &url_val,
                 &cancel_signal,
                 &app_config,
+                &aweme_ids_val,
             )
             .await;
 

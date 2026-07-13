@@ -807,7 +807,7 @@ def resolve_urls(mode: str, url: str) -> dict:
 
 
 @_safe_call
-def resolve_page(mode: str, url: str, cursor: int = 0, count: int = 20) -> dict:
+def resolve_page(mode: str, url: str, cursor: int = 0, count: int = 20, aweme_ids: list = None) -> dict:
     """解析单页下载 URL（分页模式）
 
     与 resolve_urls 的区别：只返回一页数据 + 分页元数据 (next_cursor, has_more)，
@@ -946,6 +946,35 @@ def resolve_page(mode: str, url: str, cursor: int = 0, count: int = 20) -> dict:
         return result
 
     elif mode in ("post", "like", "mix", "collects"):
+        # 单个 aweme_id 优化：直接获取单个视频，跳过分页
+        if aweme_ids and len(aweme_ids) == 1 and cursor == 0:
+            from core.crawler_engine.filter import PostDetailFilter
+            from core.utils import AwemeIdFetcher
+
+            target_id = aweme_ids[0]
+            logger.info("[py_bridge] 单视频优化: aweme_id=%s, 跳过分页", target_id)
+
+            async def _fetch_single():
+                async with handler._video._make_crawler() as crawler:
+                    data = await crawler.fetch_post_detail(target_id)
+                    return PostDetailFilter(data) if data else None
+
+            detail = _run_async(_fetch_single())
+            if not detail:
+                return {"success": False, "error": f"无法获取视频 {target_id}"}
+
+            nickname = getattr(detail, "author_nickname", None) or "unknown"
+            save_dir = download_path / app_name / mode / nickname
+            items = _build_items_from_details([detail], mode)
+
+            return {
+                "success": True,
+                "items": items,
+                "save_dir": str(save_dir),
+                "total": len(items),
+                "next_cursor": None,
+                "has_more": False,
+            }
         from core.crawler_engine.filter import UserPostFilter, UserProfileFilter
         from core.utils import SecUserIdFetcher, MixIdFetcher
 

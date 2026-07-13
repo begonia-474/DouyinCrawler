@@ -118,6 +118,11 @@ pub fn resolve_page(mode: &str, url: &str, cursor: i64, count: i64) -> PyResult<
     call_py_json("resolve_page", (mode, url, cursor, count))
 }
 
+pub fn resolve_page_filtered(mode: &str, url: &str, cursor: i64, count: i64, aweme_ids: Vec<String>) -> PyResult<Value> {
+    info!("[handler.rs] resolve_page_filtered, mode={}, cursor={}, count={}, aweme_ids={:?}", mode, cursor, count, aweme_ids);
+    call_py_json("resolve_page", (mode, url, cursor, count, aweme_ids))
+}
+
 // ============================================================
 // 搜索
 // ============================================================

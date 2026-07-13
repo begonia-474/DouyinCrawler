@@ -125,6 +125,8 @@ impl TaskStatus {
 pub struct DownloadRequest {
     pub mode: DownloadMode,
     pub url: String,
+    #[serde(default)]
+    pub aweme_ids: Vec<String>,
 }
 
 // ============================================================
