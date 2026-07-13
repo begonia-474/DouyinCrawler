@@ -287,6 +287,7 @@ function RelatedSection({ awemeId, onVideoClick }: { awemeId: string; onVideoCli
             key={video.aweme_id}
             title={video.desc}
             author={video.author}
+            cover={video.cover_url}
             duration={formatDurationSec(video.duration)}
             diggCount={video.digg_count}
             commentCount={video.comment_count}

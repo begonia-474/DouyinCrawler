@@ -151,6 +151,7 @@ export default function LikesPage() {
                   key={video.aweme_id}
                   title={video.desc}
                   author={profile.nickname}
+                  cover={video.cover_url}
                   duration={formatDurationSec(video.duration)}
                   diggCount={video.digg_count}
                   commentCount={video.comment_count}

@@ -18,6 +18,7 @@ interface VideoCardProps {
 export function VideoCard({
   title,
   author,
+  cover,
   duration,
   diggCount,
   commentCount,
@@ -31,12 +32,21 @@ export function VideoCard({
         className={`group overflow-hidden bg-card ${onClick ? "cursor-pointer hover:ring-1 hover:ring-foreground/10 transition-all duration-200" : ""}`}
         onClick={onClick}
       >
-        <div className="aspect-video bg-foreground/[0.03] relative overflow-hidden">
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="h-14 w-14 rounded-full bg-foreground/[0.06] backdrop-blur-sm flex items-center justify-center ring-1 ring-foreground/[0.06]">
-              <Play className="h-6 w-6 text-muted-foreground/60" />
+        <div className="aspect-[3/4] bg-foreground/[0.03] relative overflow-hidden">
+          {cover ? (
+            <img
+              src={cover}
+              alt={title}
+              className="absolute inset-0 h-full w-full object-cover"
+              loading="lazy"
+            />
+          ) : (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="h-14 w-14 rounded-full bg-foreground/[0.06] backdrop-blur-sm flex items-center justify-center ring-1 ring-foreground/[0.06]">
+                <Play className="h-6 w-6 text-muted-foreground/60" />
+              </div>
             </div>
-          </div>
+          )}
           {duration && (
             <Badge
               variant="secondary"
@@ -57,8 +67,8 @@ export function VideoCard({
           </div>
         </div>
         <div className="p-4">
-          <h4 className="text-sm font-medium line-clamp-2 leading-relaxed">{title}</h4>
-          <p className="text-xs text-muted-foreground mt-1.5 tracking-wide">{author}</p>
+          <h4 className="text-sm font-medium truncate">&nbsp;{title}</h4>
+          <p className="text-xs text-muted-foreground mt-1.5 tracking-wide truncate">{author}</p>
           <div className="flex items-center gap-4 mt-3 text-xs text-muted-foreground">
             {diggCount !== undefined && (
               <span className="flex items-center gap-1 font-mono text-[11px] tabular-nums">

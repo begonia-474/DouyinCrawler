@@ -57,6 +57,7 @@ export default function FeedPage() {
               <VideoCard
                 title={video.desc}
                 author={video.author}
+                cover={video.cover_url}
                 duration={String(video.duration)}
                 diggCount={video.digg_count}
                 commentCount={video.comment_count}
