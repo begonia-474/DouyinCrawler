@@ -27,7 +27,9 @@ use log::{error, info, warn};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::db::{Database, NewLiveRecord, NewTaskItem, UserInfo, VideoInfo};
+use crate::db::{
+    Database, MediaItemOutcome, MediaItemResult, NewLiveRecord, NewTaskItem, UserInfo, VideoInfo,
+};
 use crate::state::AppState;
 
 use super::{
@@ -169,6 +171,13 @@ struct ProgressTracker {
     task_id: String,
     last_emit_ms: AtomicU64,
     interval_ms: u64,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum SingleTaskTerminal {
+    Completed,
+    Cancelled,
+    Error(String),
 }
 
 impl ProgressTracker {
@@ -512,20 +521,6 @@ impl<'a> TaskApplicationService<'a> {
         Ok(())
     }
 
-    /// Persist mode=one metadata from the typed contract.
-    fn save_single_download_metadata(
-        db: &Database,
-        item: &SingleDownloadItem,
-    ) -> Result<(), String> {
-        db.save_video(&item.metadata).map_err(|error| {
-            error!(
-                "[TaskService] 保存单视频信息失败: aweme_id={}, error={}",
-                item.aweme_id, error
-            );
-            format!("保存视频信息失败: {error}")
-        })
-    }
-
     /// 清理取消信号
     fn cleanup_cancel_signal(cancel_signals: &Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>, task_id: &str) {
         let mut signals = cancel_signals.lock();
@@ -739,27 +734,121 @@ impl<'a> TaskApplicationService<'a> {
         }
     }
 
-    /// Persist a completed mode=one item directly from typed metadata.
-    fn save_typed_single_result(
+    /// 通过结果级事务接口提交 mode=one 媒体项。
+    ///
+    /// 首次事务失败时，原事务已经回滚。这里使用同一接口发起独立的
+    /// failed 结果事务，尽最大可能留下可见 item 错误；恢复写入失败会被
+    /// 明确记录并合并到返回错误，最终由顶层任务终态协调器处理。
+    fn persist_single_media_item_outcome<'result>(
+        db: &Database,
+        task_item: &NewTaskItem,
+        video_info: &VideoInfo,
+        outcome: MediaItemOutcome<'result>,
+    ) -> Result<(), String> {
+        let result = MediaItemResult {
+            item: task_item,
+            outcome,
+            video_info: Some(video_info),
+            user_info: None,
+        };
+        if let Err(db_error) = db.commit_media_item_result(&result) {
+            let message = format!("提交媒体项结果失败: {db_error}");
+            error!(
+                "[TaskService] {}: task_id={}, aweme_id={}",
+                message,
+                task_item.task_id,
+                task_item.aweme_id.as_deref().unwrap_or("<missing>")
+            );
+
+            let recovery_message = match outcome {
+                MediaItemOutcome::Failed { error_msg } => {
+                    format!("{message}; 原始媒体错误: {error_msg}")
+                }
+                MediaItemOutcome::Completed { .. } | MediaItemOutcome::Skipped { .. } => {
+                    format!("{message}; 已下载文件可能仍保留在磁盘")
+                }
+            };
+            let recovery_result = MediaItemResult {
+                item: task_item,
+                outcome: MediaItemOutcome::Failed {
+                    error_msg: &recovery_message,
+                },
+                video_info: None,
+                user_info: None,
+            };
+            if let Err(recovery_error) = db.commit_media_item_result(&recovery_result) {
+                error!(
+                    "[TaskService] 媒体项错误状态恢复写入失败: task_id={}, aweme_id={}, error={}",
+                    task_item.task_id,
+                    task_item.aweme_id.as_deref().unwrap_or("<missing>"),
+                    recovery_error
+                );
+                return Err(format!(
+                    "{message}; 媒体项错误状态恢复写入失败: {recovery_error}"
+                ));
+            }
+            return Err(message);
+        }
+
+        Ok(())
+    }
+
+    /// 将 mode=one 执行结果转换为唯一允许发射的终态语义。
+    ///
+    /// `Completed` 仅在 task completed 状态成功提交后返回，因此调用者按
+    /// 返回值发事件时不会在数据库失败后误发 finished/completed。
+    fn finalize_single_task(
         db: &Database,
         task_id: &str,
-        item: &SingleDownloadItem,
-        file_path: &str,
-        file_size: i64,
-    ) -> Result<(), String> {
-        let new_item = Self::typed_single_task_item(task_id, item);
-        db.create_task_item(&new_item)
-            .map_err(|error| format!("创建任务子项失败: {error}"))?;
-        db.update_task_item_status(
-            task_id,
-            &item.aweme_id,
-            "completed",
-            Some(file_path),
-            file_size,
-            None,
-        )
-        .map_err(|error| format!("更新任务子项状态失败: {error}"))?;
-        Self::save_single_download_metadata(db, item)
+        execution_result: Result<(), String>,
+        cancelled: bool,
+    ) -> SingleTaskTerminal {
+        let is_explicit_cancellation = cancelled
+            && execution_result
+                .as_ref()
+                .is_err_and(|message| message == "下载已取消");
+        if is_explicit_cancellation {
+            return match db.update_task_status(task_id, "cancelled", None) {
+                Ok(()) => SingleTaskTerminal::Cancelled,
+                Err(db_error) => {
+                    let message = format!("更新取消状态失败: {db_error}");
+                    error!("[TaskService] task_id={}, {}", task_id, message);
+                    SingleTaskTerminal::Error(message)
+                }
+            };
+        }
+
+        match execution_result {
+            Ok(()) => match db.update_task_status(task_id, "completed", None) {
+                Ok(()) => SingleTaskTerminal::Completed,
+                Err(db_error) => {
+                    let mut message = format!("提交任务完成状态失败: {db_error}");
+                    error!("[TaskService] task_id={}, {}", task_id, message);
+                    if let Err(error_status_error) =
+                        db.update_task_status(task_id, "error", Some(&message))
+                    {
+                        error!(
+                            "[TaskService] 任务完成状态失败后的 error 标记也失败: task_id={}, error={}",
+                            task_id, error_status_error
+                        );
+                        message.push_str(&format!(
+                            "; 任务 error 状态写入失败: {error_status_error}"
+                        ));
+                    }
+                    SingleTaskTerminal::Error(message)
+                }
+            },
+            Err(mut message) => {
+                if let Err(db_error) = db.update_task_status(task_id, "error", Some(&message)) {
+                    error!(
+                        "[TaskService] 更新任务错误状态失败: task_id={}, error={}",
+                        task_id, db_error
+                    );
+                    message.push_str(&format!("; 任务 error 状态写入失败: {db_error}"));
+                }
+                SingleTaskTerminal::Error(message)
+            }
+        }
     }
 
     async fn execute_single_download_plan(
@@ -810,57 +899,55 @@ impl<'a> TaskApplicationService<'a> {
                     )
                     .await;
 
-                    let persistence_result = if result.skipped {
-                        let new_item = Self::typed_single_task_item(task_id, item);
-                        db.create_task_item(&new_item)
-                            .map_err(|error| format!("创建任务子项失败: {error}"))?;
-                        db.update_task_item_status(
-                            task_id,
-                            &item.aweme_id,
-                            "skipped",
-                            Some(&file_path),
+                    let task_item = Self::typed_single_task_item(task_id, item);
+                    let outcome = if result.skipped {
+                        MediaItemOutcome::Skipped {
+                            file_path: &file_path,
                             file_size,
-                            None,
-                        )
-                        .map_err(|error| format!("更新任务子项状态失败: {error}"))?;
-                        Self::save_single_download_metadata(db, item)
+                        }
                     } else {
-                        Self::save_typed_single_result(db, task_id, item, &file_path, file_size)
+                        MediaItemOutcome::Completed {
+                            file_path: &file_path,
+                            file_size,
+                        }
                     };
-
-                    if let Err(error) = persistence_result {
-                        warn!("[TaskService] 保存单视频结果失败: {error}");
-                        failed += 1;
-                        continue;
-                    }
+                    Self::persist_single_media_item_outcome(
+                        db,
+                        &task_item,
+                        &item.metadata,
+                        outcome,
+                    )?;
 
                     completed += 1;
                     progress.update((completed + failed) as u64, total as u64);
                 }
                 Err(error) => {
+                    if matches!(error, super::engine::DownloadError::Cancelled) {
+                        info!(
+                            "[TaskService] 单视频下载被取消: task_id={}, aweme_id={}",
+                            task_id, item.aweme_id
+                        );
+                        return Err("下载已取消".to_string());
+                    }
                     warn!(
                         "[TaskService] 单视频下载失败: aweme_id={}, error={}",
                         item.aweme_id, error
                     );
-                    let new_item = Self::typed_single_task_item(task_id, item);
-                    db.create_task_item(&new_item)
-                        .map_err(|db_error| format!("创建任务子项失败: {db_error}"))?;
-                    db.update_task_item_status(
-                        task_id,
-                        &item.aweme_id,
-                        "failed",
-                        None,
-                        0,
-                        Some(&error.to_string()),
-                    )
-                    .map_err(|db_error| format!("更新任务子项状态失败: {db_error}"))?;
+                    let task_item = Self::typed_single_task_item(task_id, item);
+                    let error_message = error.to_string();
+                    Self::persist_single_media_item_outcome(
+                        db,
+                        &task_item,
+                        &item.metadata,
+                        MediaItemOutcome::Failed {
+                            error_msg: &error_message,
+                        },
+                    )?;
                     failed += 1;
                 }
             }
         }
 
-        db.update_task_counts(task_id)
-            .map_err(|error| format!("更新任务计数失败: {error}"))?;
         if failed > 0 && completed == 0 {
             return Err(format!("所有下载均失败: {failed}/{total} failed"));
         }
@@ -927,48 +1014,28 @@ impl<'a> TaskApplicationService<'a> {
             )
             .await;
 
-            match result {
-                Ok(()) => {
-                    // 更新任务状态为 completed
-                    if let Err(e) = db.update_task_status(&task_id_clone, "completed", None) {
-                        error!(
-                            "[TaskService] 更新任务完成状态失败: task_id={}, error={}",
-                            task_id_clone, e
-                        );
-                    }
+            match Self::finalize_single_task(
+                &db,
+                &task_id_clone,
+                result,
+                cancel_signal.load(Ordering::Relaxed),
+            ) {
+                SingleTaskTerminal::Completed => {
                     events::emit_finished(
                         TaskPatch::new(&task_id_clone).with_status(TaskStatus::Completed),
                     );
                     info!("[TaskService] 下载任务完成: task_id={}", task_id_clone);
                 }
-                Err(e) => {
-                    // 检查是否是取消
-                    if cancel_signal.load(Ordering::Relaxed) {
-                        if let Err(db_err) =
-                            db.update_task_status(&task_id_clone, "cancelled", None)
-                        {
-                            error!(
-                                "[TaskService] 更新取消状态失败: task_id={}, error={}",
-                                task_id_clone, db_err
-                            );
-                        }
-                        events::emit_cancelled(&task_id_clone);
-                        info!("[TaskService] 下载任务已取消: task_id={}", task_id_clone);
-                    } else {
-                        error!(
-                            "[TaskService] 下载任务失败: task_id={}, error={}",
-                            task_id_clone, e
-                        );
-                        if let Err(db_err) =
-                            db.update_task_status(&task_id_clone, "error", Some(&e))
-                        {
-                            error!(
-                                "[TaskService] 更新错误状态失败: task_id={}, error={}",
-                                task_id_clone, db_err
-                            );
-                        }
-                        events::emit_error(&task_id_clone, &e);
-                    }
+                SingleTaskTerminal::Cancelled => {
+                    events::emit_cancelled(&task_id_clone);
+                    info!("[TaskService] 下载任务已取消: task_id={}", task_id_clone);
+                }
+                SingleTaskTerminal::Error(message) => {
+                    error!(
+                        "[TaskService] 下载任务失败: task_id={}, error={}",
+                        task_id_clone, message
+                    );
+                    events::emit_error(&task_id_clone, &message);
                 }
             }
 
@@ -1823,5 +1890,358 @@ impl<'a> TaskApplicationService<'a> {
         );
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod single_media_outcome_tests {
+    use std::path::PathBuf;
+
+    use serde_json::json;
+    use uuid::Uuid;
+
+    use super::{SingleTaskTerminal, TaskApplicationService};
+    use crate::db::{Database, MediaItemOutcome, NewDownloadTask, NewTaskItem, VideoInfo};
+
+    fn test_database(task_id: &str) -> (Database, PathBuf) {
+        let path = std::env::temp_dir().join(format!(
+            "douyin-crawler-media-outcome-{}.sqlite",
+            Uuid::new_v4()
+        ));
+        let db = Database::open(&path).expect("temporary database should open");
+        db.create_task(&NewDownloadTask {
+            id: task_id.to_string(),
+            mode: "one".to_string(),
+            url: "https://www.douyin.com/video/test".to_string(),
+            title: None,
+            author_nickname: None,
+        })
+        .expect("task should be created");
+        (db, path)
+    }
+
+    fn task_item(task_id: &str, aweme_id: &str) -> NewTaskItem {
+        NewTaskItem {
+            task_id: task_id.to_string(),
+            aweme_id: Some(aweme_id.to_string()),
+            title: Some("transactional result".to_string()),
+            author_nickname: Some("tester".to_string()),
+            author_sec_uid: Some("sec-user".to_string()),
+            cover_url: Some("https://cdn.example/cover.jpeg".to_string()),
+        }
+    }
+
+    fn video(aweme_id: &str) -> VideoInfo {
+        serde_json::from_value(json!({
+            "aweme_id": aweme_id,
+            "desc": "transactional result",
+            "author_nickname": "tester",
+            "author_sec_uid": "sec-user"
+        }))
+        .expect("video fixture should deserialize")
+    }
+
+    fn remove_database_files(path: &PathBuf) {
+        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_file(format!("{}-wal", path.display()));
+        let _ = std::fs::remove_file(format!("{}-shm", path.display()));
+    }
+
+    fn has_video(db: &Database, aweme_id: &str) -> bool {
+        db.get_videos(100, 0, None, None, None, None, None)
+            .expect("video query should succeed")
+            .iter()
+            .any(|stored| stored.aweme_id == aweme_id)
+    }
+
+    #[test]
+    fn completed_single_media_outcome_commits_item_metadata_and_counts() {
+        let task_id = "completed-outcome";
+        let aweme_id = "aweme-completed";
+        let (db, path) = test_database(task_id);
+
+        TaskApplicationService::persist_single_media_item_outcome(
+            &db,
+            &task_item(task_id, aweme_id),
+            &video(aweme_id),
+            MediaItemOutcome::Completed {
+                file_path: "/tmp/video.mp4",
+                file_size: 42,
+            },
+        )
+        .expect("completed outcome should persist");
+
+        let detail = db
+            .get_task_detail(task_id)
+            .expect("task detail query should succeed")
+            .expect("task should exist");
+        assert_eq!(detail.task.status, "running");
+        assert_eq!(detail.task.total, 1);
+        assert_eq!(detail.task.completed, 1);
+        assert_eq!(detail.task.skipped, 0);
+        assert_eq!(detail.task.failed, 0);
+        assert_eq!(detail.items.len(), 1);
+        assert_eq!(detail.items[0].status, "completed");
+        assert_eq!(detail.items[0].file_path.as_deref(), Some("/tmp/video.mp4"));
+        assert_eq!(detail.items[0].file_size, 42);
+        assert!(has_video(&db, aweme_id));
+
+        assert_eq!(
+            TaskApplicationService::finalize_single_task(&db, task_id, Ok(()), false),
+            SingleTaskTerminal::Completed
+        );
+        assert_eq!(
+            db.get_task_by_id(task_id)
+                .unwrap()
+                .expect("task should exist")
+                .status,
+            "completed"
+        );
+
+        drop(db);
+        remove_database_files(&path);
+    }
+
+    #[test]
+    fn skipped_single_media_outcome_commits_path_metadata_and_skipped_count() {
+        let task_id = "skipped-outcome";
+        let aweme_id = "aweme-skipped";
+        let (db, path) = test_database(task_id);
+
+        TaskApplicationService::persist_single_media_item_outcome(
+            &db,
+            &task_item(task_id, aweme_id),
+            &video(aweme_id),
+            MediaItemOutcome::Skipped {
+                file_path: "/tmp/existing.mp4",
+                file_size: 84,
+            },
+        )
+        .expect("skipped outcome should persist");
+
+        let detail = db.get_task_detail(task_id).unwrap().unwrap();
+        assert_eq!(detail.task.status, "running");
+        assert_eq!(detail.task.total, 1);
+        assert_eq!(detail.task.completed, 0);
+        assert_eq!(detail.task.skipped, 1);
+        assert_eq!(detail.task.failed, 0);
+        assert_eq!(detail.items[0].status, "skipped");
+        assert_eq!(
+            detail.items[0].file_path.as_deref(),
+            Some("/tmp/existing.mp4")
+        );
+        assert_eq!(detail.items[0].file_size, 84);
+        assert!(has_video(&db, aweme_id));
+
+        assert_eq!(
+            TaskApplicationService::finalize_single_task(&db, task_id, Ok(()), false),
+            SingleTaskTerminal::Completed
+        );
+
+        drop(db);
+        remove_database_files(&path);
+    }
+
+    #[test]
+    fn failed_single_media_outcome_commits_error_metadata_counts_and_task_error() {
+        let task_id = "failed-outcome";
+        let aweme_id = "aweme-failed";
+        let (db, path) = test_database(task_id);
+        let download_error = "HTTP 503";
+
+        TaskApplicationService::persist_single_media_item_outcome(
+            &db,
+            &task_item(task_id, aweme_id),
+            &video(aweme_id),
+            MediaItemOutcome::Failed {
+                error_msg: download_error,
+            },
+        )
+        .expect("download failure outcome should persist");
+
+        let terminal = TaskApplicationService::finalize_single_task(
+            &db,
+            task_id,
+            Err(format!("所有下载均失败: {download_error}")),
+            false,
+        );
+        assert!(matches!(terminal, SingleTaskTerminal::Error(_)));
+
+        let detail = db.get_task_detail(task_id).unwrap().unwrap();
+        assert_eq!(detail.task.status, "error");
+        assert_eq!(detail.task.total, 1);
+        assert_eq!(detail.task.completed, 0);
+        assert_eq!(detail.task.skipped, 0);
+        assert_eq!(detail.task.failed, 1);
+        assert!(detail
+            .task
+            .error_msg
+            .as_deref()
+            .is_some_and(|message| message.contains(download_error)));
+        assert_eq!(detail.items[0].status, "failed");
+        assert_eq!(detail.items[0].error_msg.as_deref(), Some(download_error));
+        assert_eq!(detail.items[0].file_path, None);
+        assert!(has_video(&db, aweme_id));
+
+        drop(db);
+        remove_database_files(&path);
+    }
+
+    #[test]
+    fn metadata_db_failure_rolls_back_success_and_recovers_visible_item_error() {
+        let task_id = "metadata-db-failure";
+        let aweme_id = "aweme-db-failure";
+        let (db, path) = test_database(task_id);
+        db.with_transaction(|tx| {
+            tx.execute_batch(
+                "CREATE TRIGGER fail_video_insert \
+                 BEFORE INSERT ON video_info \
+                 BEGIN SELECT RAISE(ABORT, 'forced metadata failure'); END;",
+            )?;
+            Ok(())
+        })
+        .expect("failure trigger should be installed");
+
+        let execution_error = TaskApplicationService::persist_single_media_item_outcome(
+            &db,
+            &task_item(task_id, aweme_id),
+            &video(aweme_id),
+            MediaItemOutcome::Completed {
+                file_path: "/tmp/downloaded-before-db-failure.mp4",
+                file_size: 128,
+            },
+        )
+        .expect_err("metadata failure must fail the result transaction");
+        assert!(execution_error.contains("forced metadata failure"));
+
+        let terminal = TaskApplicationService::finalize_single_task(
+            &db,
+            task_id,
+            Err(execution_error),
+            true,
+        );
+        assert!(matches!(terminal, SingleTaskTerminal::Error(_)));
+
+        let detail = db.get_task_detail(task_id).unwrap().unwrap();
+        assert_eq!(detail.task.status, "error");
+        assert_eq!(detail.task.completed, 0);
+        assert_eq!(detail.task.skipped, 0);
+        assert_eq!(detail.task.failed, 1);
+        assert_eq!(detail.task.total, 1);
+        assert_eq!(detail.items.len(), 1);
+        assert_eq!(detail.items[0].status, "failed");
+        assert_eq!(detail.items[0].file_path, None);
+        assert_eq!(detail.items[0].file_size, 0);
+        assert!(detail.items[0]
+            .error_msg
+            .as_deref()
+            .is_some_and(|message| message.contains("forced metadata failure")));
+        assert!(!has_video(&db, aweme_id));
+
+        drop(db);
+        remove_database_files(&path);
+    }
+
+    #[test]
+    fn fallback_failure_is_reported_while_task_error_update_remains_visible() {
+        let task_id = "fallback-db-failure";
+        let aweme_id = "aweme-fallback-failure";
+        let (db, path) = test_database(task_id);
+        db.with_transaction(|tx| {
+            tx.execute_batch(
+                "CREATE TRIGGER fail_item_insert \
+                 BEFORE INSERT ON download_task_items \
+                 BEGIN SELECT RAISE(ABORT, 'forced item failure'); END;",
+            )?;
+            Ok(())
+        })
+        .expect("failure trigger should be installed");
+
+        let execution_error = TaskApplicationService::persist_single_media_item_outcome(
+            &db,
+            &task_item(task_id, aweme_id),
+            &video(aweme_id),
+            MediaItemOutcome::Completed {
+                file_path: "/tmp/untracked.mp4",
+                file_size: 256,
+            },
+        )
+        .expect_err("both result and fallback writes must fail");
+        assert!(execution_error.contains("forced item failure"));
+        assert!(execution_error.contains("错误状态恢复写入失败"));
+
+        let terminal = TaskApplicationService::finalize_single_task(
+            &db,
+            task_id,
+            Err(execution_error),
+            false,
+        );
+        assert!(matches!(terminal, SingleTaskTerminal::Error(_)));
+        let detail = db.get_task_detail(task_id).unwrap().unwrap();
+        assert_eq!(detail.task.status, "error");
+        assert!(detail
+            .task
+            .error_msg
+            .as_deref()
+            .is_some_and(|message| message.contains("错误状态恢复写入失败")));
+        assert!(detail.items.is_empty());
+
+        drop(db);
+        remove_database_files(&path);
+    }
+
+    #[test]
+    fn completed_terminal_signal_is_gated_by_completed_status_commit() {
+        let task_id = "terminal-gate";
+        let (db, path) = test_database(task_id);
+        db.with_transaction(|tx| {
+            tx.execute_batch(
+                "CREATE TRIGGER fail_completed_status \
+                 BEFORE UPDATE OF status ON download_tasks \
+                 WHEN NEW.status = 'completed' \
+                 BEGIN SELECT RAISE(ABORT, 'forced completed status failure'); END;",
+            )?;
+            Ok(())
+        })
+        .expect("failure trigger should be installed");
+
+        let terminal =
+            TaskApplicationService::finalize_single_task(&db, task_id, Ok(()), false);
+        let SingleTaskTerminal::Error(message) = terminal else {
+            panic!("completed status DB failure must not produce completed semantics");
+        };
+        assert!(message.contains("forced completed status failure"));
+        let task = db.get_task_by_id(task_id).unwrap().unwrap();
+        assert_eq!(task.status, "error");
+        assert!(task
+            .error_msg
+            .as_deref()
+            .is_some_and(|error| error.contains("forced completed status failure")));
+
+        drop(db);
+        remove_database_files(&path);
+    }
+
+    #[test]
+    fn explicit_cancellation_does_not_create_a_failed_item() {
+        let task_id = "cancelled-outcome";
+        let (db, path) = test_database(task_id);
+
+        let terminal = TaskApplicationService::finalize_single_task(
+            &db,
+            task_id,
+            Err("下载已取消".to_string()),
+            true,
+        );
+
+        assert_eq!(terminal, SingleTaskTerminal::Cancelled);
+        let detail = db.get_task_detail(task_id).unwrap().unwrap();
+        assert_eq!(detail.task.status, "cancelled");
+        assert_eq!(detail.task.total, 0);
+        assert_eq!(detail.task.failed, 0);
+        assert!(detail.items.is_empty());
+
+        drop(db);
+        remove_database_files(&path);
     }
 }

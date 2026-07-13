@@ -93,6 +93,28 @@ pub struct NewTaskItem {
     pub cover_url: Option<String>,
 }
 
+/// 单个媒体项的最终执行结果。
+///
+/// 该类型刻意描述“媒体项”而不是“作品”，后续图文任务可在
+/// `NewTaskItem` 扩展更细粒度的媒体身份，而无需改变结果语义。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MediaItemOutcome<'a> {
+    Completed { file_path: &'a str, file_size: i64 },
+    Skipped { file_path: &'a str, file_size: i64 },
+    Failed { error_msg: &'a str },
+}
+
+/// 媒体项结果事务的完整输入。
+///
+/// 调用者只提交一个结果对象；task item、可用元数据和任务计数由数据库
+/// 在同一事务内处理。任务本身的终态不属于该事务。
+pub struct MediaItemResult<'a> {
+    pub item: &'a NewTaskItem,
+    pub outcome: MediaItemOutcome<'a>,
+    pub video_info: Option<&'a VideoInfo>,
+    pub user_info: Option<&'a UserInfo>,
+}
+
 #[derive(Serialize, Clone, specta::Type)]
 pub struct TaskItemCounts {
     pub total: i64,

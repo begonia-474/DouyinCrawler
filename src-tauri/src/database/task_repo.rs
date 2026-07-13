@@ -4,48 +4,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::database::models::*;
 use crate::lock_conn;
 
-// ============================================================
-// TaskRepository trait — support unit testing with mock impls
-// ============================================================
-
-/// 任务仓库抽象
-///
-/// 定义 TaskApplicationService 对 task 实体的核心 CRUD 操作。
-/// 实现此 trait 的类型可用于替代 Database 进行单元测试（纯 Rust，无 PyO3 依赖）。
-///
-/// # Example
-///
-/// ```ignore
-/// struct MockTaskRepo { ... }
-/// impl TaskRepository for MockTaskRepo { ... }
-/// let service = TaskApplicationService::new(&mock_repo, adapter);
-/// ```
-#[allow(dead_code)] // TODO P2-01: may become used after download entry unification
-pub trait TaskRepository {
-    fn create_task(&self, task: &NewDownloadTask) -> Result<()>;
-    fn update_task_status(&self, task_id: &str, status: &str, error_msg: Option<&str>) -> Result<()>;
-    fn update_task_counts(&self, task_id: &str) -> Result<()>;
-    fn create_task_item(&self, item: &NewTaskItem) -> Result<()>;
-    fn update_task_item_status(
-        &self,
-        task_id: &str,
-        aweme_id: &str,
-        status: &str,
-        file_path: Option<&str>,
-        file_size: i64,
-        error_msg: Option<&str>,
-    ) -> Result<()>;
-    fn complete_single_download(
-        &self,
-        task_id: &str,
-        item: &NewTaskItem,
-        file_path: Option<&str>,
-        file_size: i64,
-        video_info: Option<&VideoInfo>,
-        user_info: Option<&UserInfo>,
-    ) -> Result<()>;
-}
-
 impl super::connection::Database {
     pub fn create_task(&self, task: &NewDownloadTask) -> Result<()> {
         let conn = lock_conn!(self);
@@ -287,70 +245,76 @@ impl super::connection::Database {
         })
     }
 
-    /// 原子操作：完成单视频下载的全部持久化（单次事务）
+    /// 原子提交一个媒体项的最终结果、元数据和任务计数。
     ///
-    /// F2.1: 替代 service.rs 中多个独立 DB 写入，保证原子性。
-    /// 事务覆盖：
-    /// 1. 创建任务子项 (download_task_items INSERT)
-    /// 2. 更新任务子项状态为 completed
-    /// 3. 保存视频信息 (video_info)
-    /// 4. 保存用户信息 (user_info) — 仅当用户不存在时
-    /// 5. 更新任务计数 (download_tasks)
-    /// 6. 更新任务状态为 completed (download_tasks)
-    ///
-    /// 任何一步失败，整个事务回滚。
-    pub fn complete_single_download(
-        &self,
-        task_id: &str,
-        item: &NewTaskItem,
-        file_path: Option<&str>,
-        file_size: i64,
-        video_info: Option<&VideoInfo>,
-        user_info: Option<&UserInfo>,
-    ) -> Result<()> {
+    /// 整个任务的 completed/error 终态由应用层在本事务成功后单独提交，
+    /// 防止结果事务回滚时仍向前端宣告任务完成。
+    pub fn commit_media_item_result(&self, result: &MediaItemResult<'_>) -> Result<()> {
+        let aweme_id = result.item.aweme_id.as_deref().ok_or_else(|| {
+            rusqlite::Error::InvalidParameterName("media item result requires aweme_id".to_string())
+        })?;
+        if result
+            .video_info
+            .is_some_and(|video| video.aweme_id != aweme_id)
+        {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "media item video_info.aweme_id must match item aweme_id".to_string(),
+            ));
+        }
+
+        let (status, file_path, file_size, error_msg) = match result.outcome {
+            MediaItemOutcome::Completed {
+                file_path,
+                file_size,
+            } => ("completed", Some(file_path), file_size, None),
+            MediaItemOutcome::Skipped {
+                file_path,
+                file_size,
+            } => ("skipped", Some(file_path), file_size, None),
+            MediaItemOutcome::Failed { error_msg } => ("failed", None, 0, Some(error_msg)),
+        };
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
 
         self.with_transaction(|tx| {
-            // 1. 创建任务子项
             tx.execute(
-                "INSERT INTO download_task_items (task_id, aweme_id, title, author_nickname, author_sec_uid, cover_url, created_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                rusqlite::params![item.task_id, item.aweme_id, item.title, item.author_nickname, item.author_sec_uid, item.cover_url, now],
+                "INSERT INTO download_task_items \
+                 (task_id, aweme_id, title, author_nickname, author_sec_uid, cover_url, \
+                  file_path, file_size, status, error_msg, created_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) \
+                 ON CONFLICT(task_id, aweme_id) DO UPDATE SET \
+                  title = excluded.title, author_nickname = excluded.author_nickname, \
+                  author_sec_uid = excluded.author_sec_uid, cover_url = excluded.cover_url, \
+                  file_path = excluded.file_path, file_size = excluded.file_size, \
+                  status = excluded.status, error_msg = excluded.error_msg",
+                rusqlite::params![
+                    result.item.task_id,
+                    aweme_id,
+                    result.item.title,
+                    result.item.author_nickname,
+                    result.item.author_sec_uid,
+                    result.item.cover_url,
+                    file_path,
+                    file_size,
+                    status,
+                    error_msg,
+                    now,
+                ],
             )?;
 
-            // 2. 更新任务子项状态为 completed
-            let aweme_id = item.aweme_id.as_deref().unwrap_or("unknown");
-            tx.execute(
-                "UPDATE download_task_items SET status = 'completed', file_path = ?1, file_size = ?2 \
-                 WHERE task_id = ?3 AND aweme_id = ?4",
-                rusqlite::params![file_path, file_size, task_id, aweme_id],
-            )?;
-
-            // 3. 保存视频信息
-            if let Some(video) = video_info {
+            if let Some(video) = result.video_info {
                 Self::save_video_inner(tx, video)?;
             }
 
-            // 4. 保存用户信息（仅当用户不存在时）
-            if let Some(user) = user_info {
-                let sec_uid = &user.sec_user_id;
-                if !sec_uid.is_empty() {
-                    let exists: bool = tx.query_row(
-                        "SELECT COUNT(*) > 0 FROM user_info WHERE sec_user_id = ?1",
-                        rusqlite::params![sec_uid],
-                        |row| row.get(0),
-                    )?;
-                    if !exists {
-                        Self::save_user_inner(tx, user)?;
-                    }
+            if let Some(user) = result.user_info {
+                if !user.sec_user_id.trim().is_empty() {
+                    Self::save_user_inner(tx, user)?;
                 }
             }
 
-            // 5. 更新任务计数
-            tx.execute(
+            let updated_tasks = tx.execute(
                 "UPDATE download_tasks SET \
                  completed = (SELECT COUNT(*) FROM download_task_items WHERE task_id = ?1 AND status = 'completed'), \
                  skipped = (SELECT COUNT(*) FROM download_task_items WHERE task_id = ?1 AND status = 'skipped'), \
@@ -358,14 +322,11 @@ impl super::connection::Database {
                  total = (SELECT COUNT(*) FROM download_task_items WHERE task_id = ?1), \
                  updated_at = ?2 \
                  WHERE id = ?1",
-                rusqlite::params![task_id, now],
+                rusqlite::params![result.item.task_id, now],
             )?;
-
-            // 6. 更新任务状态为 completed
-            tx.execute(
-                "UPDATE download_tasks SET status = 'completed', updated_at = ?1 WHERE id = ?2",
-                rusqlite::params![now, task_id],
-            )?;
+            if updated_tasks != 1 {
+                return Err(rusqlite::Error::QueryReturnedNoRows);
+            }
 
             Ok(())
         })
@@ -458,51 +419,5 @@ impl super::connection::Database {
             }
             None => Ok(None),
         }
-    }
-}
-
-// ============================================================
-// TaskRepository trait implementation for Database
-// ============================================================
-
-impl TaskRepository for super::connection::Database {
-    fn create_task(&self, task: &NewDownloadTask) -> Result<()> {
-        self.create_task(task)
-    }
-
-    fn update_task_status(&self, task_id: &str, status: &str, error_msg: Option<&str>) -> Result<()> {
-        self.update_task_status(task_id, status, error_msg)
-    }
-
-    fn update_task_counts(&self, task_id: &str) -> Result<()> {
-        self.update_task_counts(task_id)
-    }
-
-    fn create_task_item(&self, item: &NewTaskItem) -> Result<()> {
-        self.create_task_item(item)
-    }
-
-    fn update_task_item_status(
-        &self,
-        task_id: &str,
-        aweme_id: &str,
-        status: &str,
-        file_path: Option<&str>,
-        file_size: i64,
-        error_msg: Option<&str>,
-    ) -> Result<()> {
-        self.update_task_item_status(task_id, aweme_id, status, file_path, file_size, error_msg)
-    }
-
-    fn complete_single_download(
-        &self,
-        task_id: &str,
-        item: &NewTaskItem,
-        file_path: Option<&str>,
-        file_size: i64,
-        video_info: Option<&VideoInfo>,
-        user_info: Option<&UserInfo>,
-    ) -> Result<()> {
-        self.complete_single_download(task_id, item, file_path, file_size, video_info, user_info)
     }
 }
