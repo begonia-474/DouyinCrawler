@@ -209,23 +209,11 @@ pub struct TaskEvent {
 }
 
 // ============================================================
-// resolve_urls 返回值（Python → Rust）
+// 音乐 resolver 返回值（Python → Rust）
 // ============================================================
 
-/// resolve_urls 返回的附属文件
-#[derive(Debug, Clone, Deserialize)]
-pub struct ResolvedAccessory {
-    pub url: Option<String>,
-    pub filename: String,
-    pub suffix: String,
-    pub content_type: String,
-    #[serde(default)]
-    pub content: Option<String>,  // 文案内容
-}
-
-
 /// 自定义反序列化函数，支持字符串或字符串列表
-fn deserialize_download_url<'de, D>(deserializer: D) -> Result<serde_json::Value, D::Error>
+fn deserialize_music_download_url<'de, D>(deserializer: D) -> Result<serde_json::Value, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -267,49 +255,34 @@ where
     deserializer.deserialize_any(DownloadUrlVisitor)
 }
 
-/// resolve_urls 返回的单个下载项
+/// 音乐 resolver 返回的单个下载项
 #[derive(Debug, Clone, Deserialize)]
-pub struct ResolvedItem {
+pub struct MusicResolvedItem {
     pub aweme_id: String,
-    #[serde(deserialize_with = "deserialize_download_url")]
+    #[serde(deserialize_with = "deserialize_music_download_url")]
     pub download_url: serde_json::Value,
     pub filename: String,
     pub suffix: String,
     #[serde(default)]
     pub headers: std::collections::HashMap<String, String>,
-    pub content_type: String,
     #[serde(default)]
     pub detail: Option<serde_json::Value>,
-    #[serde(default)]
-    pub accessories: Vec<ResolvedAccessory>,
     /// folderize 子目录名（Python 侧在 folderize=True 时设置）
     #[serde(default)]
     pub folder_name: Option<String>,
 }
 
-/// resolve_urls 返回的完整结果
+/// music-only resolver 返回值
 #[derive(Debug, Clone, Deserialize)]
-pub struct ResolvedUrls {
+pub struct MusicResolvedUrls {
     pub success: bool,
     #[serde(default)]
     pub error: Option<String>,
     #[serde(default)]
-    pub items: Vec<ResolvedItem>,
+    pub items: Vec<MusicResolvedItem>,
     /// 建议的保存目录
     #[serde(default)]
     pub save_dir: Option<String>,
-    /// 总数
-    #[serde(default)]
-    pub total: Option<i64>,
-    /// 用户资料（batch 模式下可能返回）
-    #[serde(default)]
-    pub user_profile: Option<serde_json::Value>,
-    /// 下一页游标（resolve_page 返回）
-    #[serde(default)]
-    pub next_cursor: Option<i64>,
-    /// 是否还有更多数据（resolve_page 返回）
-    #[serde(default)]
-    pub has_more: Option<bool>,
 }
 
 // ============================================================

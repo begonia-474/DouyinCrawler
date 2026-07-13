@@ -21,13 +21,13 @@ def test_config():
     print("测试配置加载")
     print("=" * 50)
 
-    from core.py_bridge import _get_task_manager
-    tm = _get_task_manager()
+    from core.py_bridge import _get_context
+    ctx = _get_context()
 
-    print(f"Cookie 长度: {len(tm._cookie)}")
-    print(f"下载路径: {tm._download_path}")
-    print(f"命名模板: {tm._naming}")
-    print(f"应用名称: {tm._app_name}")
+    print(f"Cookie 长度: {len(ctx._cookie)}")
+    print(f"下载路径: {ctx._download_path}")
+    print(f"命名模板: {ctx._naming}")
+    print(f"应用名称: {ctx._app_name}")
     print()
 
 
@@ -99,44 +99,6 @@ def test_get_following_live():
     print()
 
 
-def test_download_video():
-    """测试视频下载"""
-    print("=" * 50)
-    print("测试视频下载")
-    print("=" * 50)
-
-    from core.py_bridge import download_video
-    import os
-
-    url = "https://www.douyin.com/video/7650450403901017571"
-    print(f"URL: {url}")
-
-    result = download_video(url)
-    print(f"成功: {result.get('success')}")
-
-    if result.get('success'):
-        print(f"类型: {result.get('type')}")
-        print(f"返回路径: {result.get('path')}")
-
-        detail = result.get('detail', {})
-        print(f"返回作者: {detail.get('author_nickname', 'N/A')}")
-
-        # 检查实际文件
-        download_dir = Path("Download/douyin/one")
-        if download_dir.exists():
-            print(f"\n实际下载目录:")
-            for user_dir in os.listdir(download_dir):
-                user_path = download_dir / user_dir
-                if user_path.is_dir():
-                    print(f"  {user_dir}/")
-                    for file in os.listdir(user_path):
-                        file_path = user_path / file
-                        print(f"    {file} ({file_path.stat().st_size} bytes)")
-    else:
-        print(f"错误: {result.get('error')}")
-    print()
-
-
 def main():
     """主测试函数"""
     print("PyO3 集成测试")
@@ -147,7 +109,6 @@ def main():
         test_parse_video()
         test_get_user_profile()
         test_get_following_live()
-        test_download_video()
 
         print("=" * 50)
         print("测试完成")

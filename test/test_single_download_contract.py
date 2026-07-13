@@ -79,7 +79,7 @@ def _install_single_resolver(monkeypatch, tmp_path: Path, detail: FakeDetail, *,
     async def get_aweme_id(_url):
         return detail.aweme_id
 
-    monkeypatch.setattr(py_bridge, "_get_task_manager", lambda: SimpleNamespace(handler=handler))
+    monkeypatch.setattr(py_bridge, "_get_context", lambda: SimpleNamespace(handler=handler))
     monkeypatch.setattr(
         "core.utils.AwemeIdFetcher.get_aweme_id",
         get_aweme_id,
@@ -112,7 +112,7 @@ def test_resolve_one_returns_versioned_typed_contract(monkeypatch, tmp_path):
     detail = FakeDetail()
     _install_single_resolver(monkeypatch, tmp_path, detail)
 
-    result = py_bridge.resolve_urls("one", "https://www.douyin.com/video/7650450403901017571")
+    result = py_bridge.resolve_single( "https://www.douyin.com/video/7650450403901017571")
 
     assert result["success"] is True
     assert result["contract_version"] == 1
@@ -149,7 +149,7 @@ def test_resolve_one_preserves_live_photo_before_image_order(monkeypatch, tmp_pa
     detail.images = ["https://cdn.example/image-1.webp", "https://cdn.example/image-2.webp"]
     _install_single_resolver(monkeypatch, tmp_path, detail, folderize=True)
 
-    result = py_bridge.resolve_urls("one", "https://www.douyin.com/note/7650450403901017571")
+    result = py_bridge.resolve_single( "https://www.douyin.com/note/7650450403901017571")
 
     assert [item["kind"] for item in result["items"]] == [
         "live_photo",

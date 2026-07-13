@@ -3,9 +3,7 @@
 import logging
 
 from core.crawler_engine.filter import UserPostFilter, UserProfileFilter
-from core.utils import (
-    SecUserIdFetcher, filter_by_date_interval,
-)
+from core.utils import SecUserIdFetcher
 
 from .base import BaseService
 
@@ -36,34 +34,6 @@ class UserService(BaseService):
             "has_more": bool(video_filter.has_more),
             "next_cursor": video_filter.max_cursor,
         }
-
-    async def handle_user_post(self, url: str, progress_callback=None) -> dict:
-        """下载用户主页视频"""
-        sec_user_id = await SecUserIdFetcher.get_sec_user_id(url)
-        if not sec_user_id:
-            return {"success": False, "error": "无法从 URL 提取 sec_user_id"}
-
-        async with self._make_crawler() as crawler:
-            profile_data = await crawler.fetch_user_profile(sec_user_id)
-            profile = UserProfileFilter(profile_data)
-            user_profile = profile.to_dict()
-            nickname = profile.nickname or "unknown"
-
-            all_details = await self._paginate_and_collect(
-                lambda c, n: crawler.fetch_user_post(sec_user_id, c, n),
-                skip_prohibited=True,
-            )
-
-        if self.interval and self.interval != "all":
-            all_details = filter_by_date_interval(all_details, self.interval, "create_time")
-
-        user_dir = self.download_path / self.app_name / "post" / nickname
-        user_dir.mkdir(parents=True, exist_ok=True)
-
-        result = await self._batch_download(all_details, user_dir, download_accessories=True)
-        result["user_profile"] = user_profile
-        return result
-
     # ============================================================
     # 用户点赞 (like)
     # ============================================================
@@ -87,35 +57,6 @@ class UserService(BaseService):
             "has_more": bool(video_filter.has_more),
             "next_cursor": video_filter.max_cursor,
         }
-
-    async def handle_user_like(self, url: str, progress_callback=None) -> dict:
-        """下载用户点赞视频"""
-        sec_user_id = await SecUserIdFetcher.get_sec_user_id(url)
-        if not sec_user_id:
-            return {"success": False, "error": "无法从 URL 提取 sec_user_id"}
-
-        downloaded = 0
-        max_cursor = 0
-        all_details = []
-
-        async with self._make_crawler() as crawler:
-            profile_data = await crawler.fetch_user_profile(sec_user_id)
-            profile = UserProfileFilter(profile_data)
-            nickname = profile.nickname or "unknown"
-
-            all_details = await self._paginate_and_collect(
-                lambda c, n: crawler.fetch_user_favorite(sec_user_id, c, n),
-                skip_prohibited=False,
-            )
-
-        if self.interval and self.interval != "all":
-            all_details = filter_by_date_interval(all_details, self.interval, "create_time")
-
-        save_dir = self.download_path / self.app_name / "like" / nickname
-        save_dir.mkdir(parents=True, exist_ok=True)
-
-        return await self._batch_download(all_details, save_dir, download_accessories=True)
-
     # ============================================================
     # 用户资料 (profile)
     # ============================================================
@@ -167,5 +108,3 @@ class UserService(BaseService):
         from core.crawler_engine.filter import UserFollowerFilter
         f = UserFollowerFilter(data)
         return {"success": True, "followers": f.followers, "has_more": f.has_more}
-
-    # _batch_download 已移至 BaseService（消除 user/collection/mix 三处重复）

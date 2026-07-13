@@ -3,6 +3,7 @@
 import logging
 
 from core.crawler_engine.filter import UserMusicCollectionFilter
+from core.download.downloader import Downloader
 from core.utils import sanitize_filename
 
 from .base import BaseService
@@ -12,6 +13,15 @@ logger = logging.getLogger(__name__)
 
 class MusicService(BaseService):
     """音乐收藏和下载"""
+
+    def _make_downloader(self) -> Downloader:
+        return Downloader(
+            self.cookie,
+            max_connections=self.max_connections,
+            max_concurrent=self.max_tasks,
+            max_retries=self.max_retries,
+            timeout=self.timeout,
+        )
 
     async def handle_user_music_collection(self, cursor: int = 0, count: int = 18) -> dict:
         """获取用户音乐收藏"""

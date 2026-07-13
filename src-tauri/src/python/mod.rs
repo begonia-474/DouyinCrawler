@@ -16,10 +16,10 @@ pub use bridge::PythonBridge;
 pub use responses::*;
 pub use config::init_config;
 pub use db_bridge::register_db_bridge;
-pub use emit::register_app_handle;
 #[allow(unused_imports)]
 pub use handler::{
-    parse_video, get_live_info, resolve_live, start_download,
+    parse_video, get_live_info, resolve_live,
+    resolve_single, resolve_music_urls,
     get_user_profile, get_user_posts, search_videos, get_mix_info,
     get_collects_list, get_collects_video_list, get_following_list,
     get_follower_list, get_music_collection, download_music, get_following_live,

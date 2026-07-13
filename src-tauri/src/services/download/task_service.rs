@@ -2,7 +2,7 @@
 //!
 //! 职责：
 //! 1. 创建任务（Rust 拥有 DB 写入）
-//! 2. 通过 resolve_urls 获取下载 URL（Python 解析）
+//! 2. 通过 typed resolver 获取媒体计划（Python 解析）
 //! 3. 通过 DownloadEngine 执行实际下载（Rust 原生 HTTP）
 //! 4. 写入 DB 事务（task + items + video_info + user_info）
 //! 5. 发射类型化事件（TaskEvent → 前端）
@@ -12,7 +12,7 @@
 //! - start_download / start_batch_download_mode / start_music_download 改为 async
 //! - 下载逻辑移到 tokio::spawn 后台任务
 //! - 集成 DownloadEngine 替代 Python 下载
-//! - 集成 resolve_urls 调用
+//! - 集成 typed single/paged/live resolver 与 music-only resolver
 //! - 集成取消信号（通过 AppState）
 //! - 使用 emit_progress 发射进度事件
 //! - 任务完成后清理取消信号
@@ -31,7 +31,7 @@ use uuid::Uuid;
 
 use crate::db::{
     Database, LiveTerminalCommit, LiveTerminalStatus, MediaItemOutcome, MediaItemResult,
-    NewTaskItem, RecordingLiveRecord, UserInfo, VideoInfo,
+    NewTaskItem, RecordingLiveRecord, VideoInfo,
 };
 use crate::state::AppState;
 
@@ -46,7 +46,7 @@ use super::live::{
 };
 use super::selection::SelectionTracker;
 use super::{
-    DownloadMode, DownloadRequest, ResolvedAccessory, ResolvedItem, ResolvedUrls, TaskEvent,
+    DownloadMode, DownloadRequest, MusicResolvedItem, MusicResolvedUrls, TaskEvent,
     TaskEventType, TaskPatch, TaskStatus,
 };
 
@@ -54,30 +54,11 @@ use super::{
 // 辅助函数
 // ============================================================
 
-fn json_str(value: Option<&Value>, key: &str) -> Option<String> {
-    value
-        .and_then(|v| v.get(key))
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-}
-
-fn cleaned_json(value: &Value) -> Value {
-    let mut value = value.clone();
-    crate::python::db_bridge::bool_to_int(&mut value);
-    value
-}
-
 fn unix_timestamp() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64
-}
-
-fn parse_user_info(value: &Value) -> Option<UserInfo> {
-    serde_json::from_value::<UserInfo>(cleaned_json(value))
-        .ok()
-        .filter(|user| !user.sec_user_id.trim().is_empty())
 }
 
 /// 从 serde_json::Value 构建 DownloadUrl（支持字符串或数组）
@@ -99,10 +80,14 @@ fn build_download_url(url_value: &Value) -> DownloadUrl {
     }
 }
 
-/// 从 ResolvedItem 构建 DownloadItem
+/// 从 music-only resolver item 构建 DownloadItem
 ///
 /// 当 item.folder_name 存在时（folderize=True），在 save_dir 下创建子目录。
-fn build_download_item(item: &ResolvedItem, save_dir: &str, task_id: &str) -> DownloadItem {
+fn build_music_download_item(
+    item: &MusicResolvedItem,
+    save_dir: &str,
+    task_id: &str,
+) -> DownloadItem {
     let base_dir = match &item.folder_name {
         Some(folder) if !folder.is_empty() => PathBuf::from(save_dir).join(folder),
         _ => PathBuf::from(save_dir),
@@ -425,28 +410,12 @@ impl<'a> TaskApplicationService<'a> {
     // 内部辅助方法
     // ============================================================
 
-    /// 通过 Python resolve_urls 解析下载 URL（异步，使用 spawn_blocking）
-    async fn resolve_download_urls(mode: &str, url: &str) -> Result<ResolvedUrls, String> {
-        let mode = mode.to_string();
-        let url = url.to_string();
-
-        let json_value = tokio::task::spawn_blocking(move || {
-            crate::python::handler::resolve_urls(&mode, &url)
-                .map_err(|e| format!("resolve_urls 调用失败: {}", e))
-        })
-        .await
-        .map_err(|e| format!("spawn_blocking 失败: {}", e))??;
-
-        serde_json::from_value::<ResolvedUrls>(json_value)
-            .map_err(|e| format!("resolve_urls 返回值解析失败: {}", e))
-    }
-
     /// Resolve and validate the versioned mode=one contract before downloading.
     async fn resolve_single_download(url: &str) -> Result<SingleDownloadPlanV1, String> {
         let url = url.to_string();
         let json_value = tokio::task::spawn_blocking(move || {
-            crate::python::handler::resolve_urls("one", &url)
-                .map_err(|e| format!("resolve_urls 调用失败: {}", e))
+            crate::python::handler::resolve_single(&url)
+                .map_err(|e| format!("resolve_single 调用失败: {}", e))
         })
         .await
         .map_err(|e| format!("spawn_blocking 失败: {}", e))??;
@@ -460,6 +429,20 @@ impl<'a> TaskApplicationService<'a> {
         }
 
         SingleDownloadPlanV1::from_value(json_value)
+    }
+
+    /// Resolve music download URLs (typed, mode=music-only)
+    async fn resolve_music_urls(url: &str) -> Result<MusicResolvedUrls, String> {
+        let url = url.to_string();
+        let json_value = tokio::task::spawn_blocking(move || {
+            crate::python::handler::resolve_music_urls(&url)
+                .map_err(|e| format!("resolve_music_urls 调用失败: {}", e))
+        })
+        .await
+        .map_err(|e| format!("spawn_blocking 失败: {}", e))??;
+
+        serde_json::from_value::<MusicResolvedUrls>(json_value)
+            .map_err(|e| format!("resolve_music_urls 返回值解析失败: {}", e))
     }
 
     /// Resolve a single paged page and validate the typed contract.
@@ -520,104 +503,6 @@ impl<'a> TaskApplicationService<'a> {
     ) -> DownloadEngine {
         let config = build_engine_config(app_config);
         DownloadEngine::new(config).with_cancel_signal(cancel_signal)
-    }
-
-    /// 处理单个下载项的附属文件（音乐、封面、文案）
-    ///
-    /// 根据 app_config 的 music/cover/desc 配置过滤附属文件，
-    /// 只下载用户启用的附属文件类型。
-    ///
-    /// 返回成功下载的附属文件路径列表
-    async fn download_accessories(
-        engine: &DownloadEngine,
-        accessories: &[ResolvedAccessory],
-        save_dir: &str,
-        folder_name: &Option<String>,
-        task_id: &str,
-        app_config: &crate::config::AppConfig,
-    ) -> Vec<String> {
-        let mut downloaded_paths = Vec::new();
-
-        let base_dir = match folder_name {
-            Some(folder) if !folder.is_empty() => PathBuf::from(save_dir).join(folder),
-            _ => PathBuf::from(save_dir),
-        };
-
-        for acc in accessories {
-            // 根据配置过滤附属文件
-            let should_download = match acc.content_type.as_str() {
-                "music" => app_config.music,
-                "cover" => app_config.cover,
-                "desc" => app_config.desc,
-                _ => true, // 未知类型默认下载
-            };
-            if !should_download {
-                continue;
-            }
-            let acc_path = base_dir.join(format!("{}{}", acc.filename, acc.suffix));
-
-            match acc.content_type.as_str() {
-                "desc" => {
-                    // 文案：直接写入文件
-                    if let Some(content) = &acc.content {
-                        match tokio::fs::write(&acc_path, content).await {
-                            Ok(()) => {
-                                info!("[TaskService] 文案已保存: {}", acc_path.display());
-                                downloaded_paths.push(acc_path.to_string_lossy().to_string());
-                            }
-                            Err(e) => {
-                                warn!(
-                                    "[TaskService] 文案保存失败: {}, error={}",
-                                    acc_path.display(),
-                                    e
-                                );
-                            }
-                        }
-                    }
-                }
-                "music" | "cover" => {
-                    // 音乐/封面：需要下载
-                    let url = match &acc.url {
-                        Some(u) => u.clone(),
-                        None => continue,
-                    };
-
-                    let ext = acc.suffix.trim_start_matches('.');
-                    let temp_path = acc_path.with_extension(format!("{}.tmp", ext));
-
-                    let item = DownloadItem {
-                        url: DownloadUrl::Single(url),
-                        save_path: acc_path.clone(),
-                        temp_path,
-                        headers: HashMap::new(), // 附属文件使用引擎默认 headers
-                        task_id: task_id.to_string(),
-                        file_size: None,
-                    };
-
-                    match engine.download(&item, |_, _| {}).await {
-                        Ok(result) => {
-                            info!(
-                                "[TaskService] 附属文件已下载: {} ({} bytes)",
-                                result.path.display(),
-                                result.file_size
-                            );
-                            downloaded_paths.push(result.path.to_string_lossy().to_string());
-                        }
-                        Err(e) => {
-                            warn!(
-                                "[TaskService] 附属文件下载失败: {}, error={}",
-                                acc.filename, e
-                            );
-                        }
-                    }
-                }
-                _ => {
-                    warn!("[TaskService] 未知附属文件类型: {}", acc.content_type);
-                }
-            }
-        }
-
-        downloaded_paths
     }
 
     /// Process mode=one accessories without converting them to the legacy resolver shape.
@@ -705,38 +590,6 @@ impl<'a> TaskApplicationService<'a> {
         }
 
         downloaded_paths
-    }
-
-    /// 写入任务结果到数据库（单个下载项）
-    ///
-    /// 保存 video_info。不创建 task_item，仅写入元数据表。
-    /// 用于跳过和正常下载两种场景。
-    fn save_download_metadata(db: &Database, item: &ResolvedItem) -> Result<(), String> {
-        let detail = item.detail.as_ref();
-
-        // 收集 video_info（user_info 由 execute_download 的 user_profile 路径独立保存，
-        // 不从 detail 提取，避免不完整数据覆盖完整的 user_profile）
-        let mut videos = Vec::new();
-        if let Some(d) = detail {
-            if d.get("aweme_id").and_then(|v| v.as_str()).is_some() {
-                if let Ok(video_info) = serde_json::from_value::<VideoInfo>(cleaned_json(d)) {
-                    videos.push(video_info);
-                }
-            }
-        }
-
-        // 保存到数据库（只写 video_info，不写 user_info）
-        if !videos.is_empty() {
-            if let Err(e) = db.save_batch_results(&videos, &[]) {
-                error!(
-                    "[TaskService] 保存视频信息失败: aweme_id={}, error={}",
-                    item.aweme_id, e
-                );
-                return Err(format!("保存视频信息失败: {}", e));
-            }
-        }
-
-        Ok(())
     }
 
     /// 清理取消信号
@@ -1006,59 +859,6 @@ impl<'a> TaskApplicationService<'a> {
     // ============================================================
     // 统一下载入口（mode=one）
     // ============================================================
-
-    /// 保存单个下载项的完整结果（task_item + video_info）
-    ///
-    /// 正常下载完成后调用。跳过场景请直接调用 save_download_metadata。
-    fn save_single_result(
-        db: &Database,
-        task_id: &str,
-        item: &ResolvedItem,
-        file_path: &str,
-        file_size: i64,
-    ) -> Result<(), String> {
-        let detail = item.detail.as_ref();
-        let aweme_id = &item.aweme_id;
-
-        // 创建 task_item
-        let new_item = NewTaskItem {
-            task_id: task_id.to_string(),
-            aweme_id: Some(aweme_id.clone()),
-            media_key: None,
-            media_kind: None,
-            media_index: None,
-            title: json_str(detail, "desc"),
-            author_nickname: json_str(detail, "author_nickname"),
-            author_sec_uid: json_str(detail, "author_sec_uid"),
-            cover_url: json_str(detail, "cover_url"),
-        };
-        if let Err(e) = db.create_task_item(&new_item) {
-            error!(
-                "[TaskService] 创建任务子项失败: task_id={}, error={}",
-                task_id, e
-            );
-            return Err(format!("创建任务子项失败: {}", e));
-        }
-
-        // 更新 task_item 状态
-        if let Err(e) = db.update_task_item_status(
-            task_id,
-            aweme_id,
-            "completed",
-            Some(file_path),
-            file_size,
-            None,
-        ) {
-            error!(
-                "[TaskService] 更新任务子项状态失败: task_id={}, error={}",
-                task_id, e
-            );
-            return Err(format!("更新任务子项状态失败: {}", e));
-        }
-
-        // 保存元数据
-        Self::save_download_metadata(db, item)
-    }
 
     fn typed_media_task_item(
         task_id: &str,
@@ -1730,11 +1530,9 @@ impl<'a> TaskApplicationService<'a> {
         Ok(task_id)
     }
 
-    /// 执行单个/小批量下载（内部方法）
+    /// 执行单视频下载（typed, mode=one）
     ///
-    /// 1. 调用 resolve_urls 获取下载 URL
-    /// 2. 使用 DownloadEngine 下载
-    /// 3. 保存结果到数据库
+    /// 其他 mode 走 start_batch_download_mode/start_music_download/start_live_record。
     async fn execute_download(
         db: &Database,
         task_id: &str,
@@ -1744,195 +1542,20 @@ impl<'a> TaskApplicationService<'a> {
         app_config: &crate::config::AppConfig,
         adapters: &TaskRuntimeAdapters,
     ) -> Result<(), String> {
-        if mode == DownloadMode::One {
-            let plan = adapters.single_resolver.resolve(url.to_string()).await?;
-            return Self::execute_single_download_plan(
-                db,
-                task_id,
-                plan,
-                cancel_signal,
-                app_config,
-                adapters.event_sink.clone(),
-            )
-            .await;
+        if mode != DownloadMode::One {
+            return Err(format!("execute_download 不支持 mode={}", mode.as_str()));
         }
 
-        // 1. 解析下载 URL
-        let resolved = Self::resolve_download_urls(mode.as_str(), url).await?;
-        if !resolved.success {
-            let err = resolved.error.unwrap_or_else(|| "解析失败".to_string());
-            return Err(err);
-        }
-
-        let items = resolved.items;
-        let save_dir = resolved
-            .save_dir
-            .unwrap_or_else(|| format!("./Download/{}", mode.as_str()));
-
-        if items.is_empty() {
-            return Err("没有可下载的内容".to_string());
-        }
-
-        // 2. 创建下载引擎
-        let engine = Self::create_engine(app_config, cancel_signal.clone());
-
-        // 3. 处理用户资料（batch 模式）
-        if let Some(profile) = resolved.user_profile.as_ref() {
-            if matches!(mode, DownloadMode::Post | DownloadMode::Mix) {
-                if let Some(user_info) = parse_user_info(profile) {
-                    if db
-                        .get_user_by_sec_uid(&user_info.sec_user_id)
-                        .ok()
-                        .flatten()
-                        .is_none()
-                    {
-                        let _ = db.save_user(&user_info);
-                    }
-                }
-            }
-        }
-
-        // 4. 创建保存目录
-        if let Err(e) = tokio::fs::create_dir_all(&save_dir).await {
-            warn!("[TaskService] 创建保存目录失败: {}, error={}", save_dir, e);
-        }
-
-        // 5. 下载每个项目
-        let total = items.len() as i64;
-        let mut completed: i64 = 0;
-        let mut failed: i64 = 0;
-        let progress = ProgressTracker::new(task_id.to_string());
-
-        for (index, item) in items.iter().enumerate() {
-            // 检查取消信号
-            if cancel_signal.load(Ordering::Relaxed) {
-                info!(
-                    "[TaskService] 下载被取消: task_id={}, 已完成 {}/{}",
-                    task_id, index, total
-                );
-                return Err("下载已取消".to_string());
-            }
-
-            let download_item = build_download_item(item, &save_dir, task_id);
-
-            // 进度回调（节流）
-            let progress_ref = &progress;
-            let result = engine
-                .download(&download_item, |downloaded, total_size| {
-                    progress_ref.update(downloaded, total_size);
-                })
-                .await;
-
-            match result {
-                Ok(download_result) => {
-                    let file_path = download_result.path.to_string_lossy().to_string();
-                    let file_size = download_result.file_size as i64;
-
-                    // 下载附属文件
-                    let _accessory_paths = Self::download_accessories(
-                        &engine,
-                        &item.accessories,
-                        &save_dir,
-                        &item.folder_name,
-                        task_id,
-                        app_config,
-                    )
-                    .await;
-
-                    // 保存到数据库
-                    if download_result.skipped {
-                        // 文件已存在，跳过下载但仍写入 video_info
-                        let new_item = NewTaskItem {
-                            task_id: task_id.to_string(),
-                            aweme_id: Some(item.aweme_id.clone()),
-                            media_key: None,
-                            media_kind: None,
-                            media_index: None,
-                            title: json_str(item.detail.as_ref(), "desc"),
-                            author_nickname: json_str(item.detail.as_ref(), "author_nickname"),
-                            author_sec_uid: json_str(item.detail.as_ref(), "author_sec_uid"),
-                            cover_url: json_str(item.detail.as_ref(), "cover_url"),
-                        };
-                        let _ = db.create_task_item(&new_item);
-                        let _ = db.update_task_item_status(
-                            task_id,
-                            &item.aweme_id,
-                            "skipped",
-                            Some(&file_path),
-                            file_size,
-                            None,
-                        );
-                        // 跳过也需要写入 video_info
-                        if let Err(e) = Self::save_download_metadata(db, item) {
-                            warn!("[TaskService] 跳过项保存元数据失败: {}", e);
-                        }
-                        info!(
-                            "[TaskService] 文件已存在，跳过下载但已入库: {}",
-                            download_result.path.display()
-                        );
-                    } else {
-                        if let Err(e) =
-                            Self::save_single_result(db, task_id, item, &file_path, file_size)
-                        {
-                            warn!("[TaskService] 保存结果失败: {}", e);
-                            failed += 1;
-                            continue;
-                        }
-                    }
-
-                    completed += 1;
-                    // 发射最终进度
-                    progress.update((completed + failed) as u64, total as u64);
-                }
-                Err(e) => {
-                    warn!(
-                        "[TaskService] 下载失败: aweme_id={}, error={}",
-                        item.aweme_id, e
-                    );
-
-                    // 记录失败
-                    let new_item = NewTaskItem {
-                        task_id: task_id.to_string(),
-                        aweme_id: Some(item.aweme_id.clone()),
-                        media_key: None,
-                        media_kind: None,
-                        media_index: None,
-                        title: json_str(item.detail.as_ref(), "desc"),
-                        author_nickname: json_str(item.detail.as_ref(), "author_nickname"),
-                        author_sec_uid: json_str(item.detail.as_ref(), "author_sec_uid"),
-                        cover_url: json_str(item.detail.as_ref(), "cover_url"),
-                    };
-                    let _ = db.create_task_item(&new_item);
-                    let err_msg = e.to_string();
-                    let _ = db.update_task_item_status(
-                        task_id,
-                        &item.aweme_id,
-                        "failed",
-                        None,
-                        0,
-                        Some(&err_msg),
-                    );
-
-                    failed += 1;
-                }
-            }
-        }
-
-        // 6. 更新任务计数
-        if let Err(e) = db.update_task_counts(task_id) {
-            warn!("[TaskService] 更新任务计数失败: {}", e);
-        }
-
-        if failed > 0 && completed == 0 {
-            return Err(format!("所有下载均失败: {}/{} failed", failed, total));
-        }
-
-        info!(
-            "[TaskService] 下载完成: task_id={}, total={}, completed={}, failed={}",
-            task_id, total, completed, failed
-        );
-
-        Ok(())
+        let plan = adapters.single_resolver.resolve(url.to_string()).await?;
+        Self::execute_single_download_plan(
+            db,
+            task_id,
+            plan,
+            cancel_signal,
+            app_config,
+            adapters.event_sink.clone(),
+        )
+        .await
     }
 
     // execute_paged_download removed in issue 08 — all paged modes use execute_paged_download_plan.
@@ -2157,7 +1780,7 @@ impl<'a> TaskApplicationService<'a> {
         app_config: &crate::config::AppConfig,
     ) -> Result<(), String> {
         // 1. 解析下载 URL
-        let resolved = Self::resolve_download_urls("music", url).await?;
+        let resolved = Self::resolve_music_urls(url).await?;
         if !resolved.success {
             let err = resolved.error.unwrap_or_else(|| "解析失败".to_string());
             return Err(err);
@@ -2196,7 +1819,7 @@ impl<'a> TaskApplicationService<'a> {
                 return Err("下载已取消".to_string());
             }
 
-            let download_item = build_download_item(item, &save_dir, task_id);
+            let download_item = build_music_download_item(item, &save_dir, task_id);
 
             let progress_ref = &progress;
             let result = engine

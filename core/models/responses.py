@@ -193,23 +193,8 @@ class PostStatsResult(BridgeResponse):
 
 
 # ============================================================
-# 下载类响应
+# 音乐下载响应
 # ============================================================
-
-@dataclass
-class DownloadResult(BridgeResponse):
-    """download_video() 返回值 — Rust: PythonDownloadResult"""
-    detail: Optional[dict] = None
-    path: Optional[str] = None
-    paths: Optional[list] = None
-
-
-@dataclass
-class BatchDownloadResult(BridgeResponse):
-    """download_batch() 返回值 — Rust: BatchDownloadResult"""
-    count: int = 0
-    results: list = field(default_factory=list)
-
 
 @dataclass
 class MusicBatchResult(BridgeResponse):
@@ -219,20 +204,8 @@ class MusicBatchResult(BridgeResponse):
 
 
 # ============================================================
-# 直播类响应
+# 直播类响应（仅查询）
 # ============================================================
-
-@dataclass
-class LiveRecordResult(BridgeResponse):
-    """start_live_record() 返回值 — Rust: LiveRecordResult"""
-    task_id: str = ""
-
-
-@dataclass
-class LiveStatusResult(BridgeResponse):
-    """get_live_status() 返回值 — Rust: LiveStatusResult"""
-    tasks: list = field(default_factory=list)
-
 
 @dataclass
 class FollowingLiveResult(BridgeResponse):

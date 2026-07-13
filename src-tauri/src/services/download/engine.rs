@@ -443,21 +443,6 @@ impl DownloadEngine {
         Duration::from_millis(base * 1000 + jitter)
     }
     
-    /// 批量下载
-    pub async fn batch_download(
-        &self,
-        items: Vec<DownloadItem>,
-    ) -> Vec<Result<DownloadResult, DownloadError>> {
-        let mut results = Vec::with_capacity(items.len());
-        
-        for item in items {
-            let result = self.download(&item, |_, _| {}).await;
-            results.push(result);
-        }
-        
-        results
-    }
-    
     /// 发送取消信号
     pub fn cancel(&self) {
         self.cancel_signal.store(true, Ordering::Relaxed);

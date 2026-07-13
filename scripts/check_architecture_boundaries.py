@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""架构边界检查脚本
+"""架构边界检查脚本 — Issue 10 强化版
 
 检查以下架构约束：
-1. 任务生命周期桩函数不应在 Rust db_bridge.rs 中注册
-2. TaskApplicationService 中不应有 `let _ = self.db` 的使用
-3. 迁移的模式不应使用 py_start_batch_download
+1. Tauri command registry 不存在非音乐 Python download/live execution commands
+2. Rust Python handler/re-exports 不存在旧 execution wrapper
+3. Python handler/task/bridge 不写 download_tasks、task_items、live_records
+4. Python 不发非音乐 task/live lifecycle event
+5. Frontend download/record action 只调用 Rust-owned commands
+6. 唯一允许的 Python download execution 例外是 py_download_music 及其最小调用链
+7. guard 扫描当前真实文件路径，并有一个会故意触发违规的脚本自测或 fixture
 
 用法：
     python scripts/check_architecture_boundaries.py
@@ -14,340 +18,267 @@
     1 - 发现架构违规
 """
 
+import io
 import re
 import sys
+import tokenize
 from pathlib import Path
 
-# 项目根目录
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-# Phase Two 临时例外：每项 (检查名, 模式描述, 关联 issue, 说明)
-# 完成对应 issue 后必须从此处删除并让检查变为硬失败
-ALLOWED_EXCEPTIONS = []
+
+# ============================================================
+# 配置
+# ============================================================
+
+# 允许的 Python download execution 例外（精确最小集）
+MUSIC_ALLOWLIST = {
+    "py_download_music",
+}
+
+# Python execution exports 黑名单（不得出现在 Rust handler/mod/py_bridge/__init__）
+FORBIDDEN_PYTHON_EXECUTION_EXPORTS = {
+    "download_video",
+    "download_batch",
+    "start_download",
+    "start_live_record",
+    "stop_live_record",
+    "get_live_status",
+    "get_batch_status",
+}
+
+# 前端不得直接 invoke 的旧 Python execution 命令
+FORBIDDEN_FRONTEND_PYTHON_COMMANDS = {
+    "py_download_video",
+    "py_download_batch",
+    "py_start_download",
+    "py_start_live_record",
+    "py_stop_live_record",
+    "py_get_live_status",
+    "py_get_batch_status",
+}
+
+# Python 不得写入的 DB 表（硬编码表名检查）
+FORBIDDEN_DB_WRITES = {
+    "download_tasks",
+    "task_items",
+    "live_records",
+}
+
+FORBIDDEN_SERVICE_EFFECT_METHODS = {
+    "handle_one_video",
+    "handle_user_post",
+    "handle_user_like",
+    "handle_user_mix",
+    "handle_collects_video",
+    "handle_user_collection",
+    "handle_live_record",
+}
+
+MUSIC_EFFECT_ALLOWLIST = {
+    "py_download_music",
+    "download_music",
+    "download_music_batch",
+    "handle_download_music",
+}
 
 
-def _is_allowed_exception(check_name):
-    for name, _desc, issue, note in ALLOWED_EXCEPTIONS:
-        if name == check_name:
-            return issue, note
-    return None, None
-
-def check_task_lifecycle_stubs():
-    """检查 Rust db_bridge.rs 中是否注册了任务生命周期桩函数"""
-    db_bridge_path = PROJECT_ROOT / "src-tauri" / "src" / "python" / "db_bridge.rs"
-
-    if not db_bridge_path.exists():
-        print(f"✓ 文件不存在: {db_bridge_path}")
+def _is_python_execution_command(name: str) -> bool:
+    """Return whether a py_* command represents a file/task execution boundary."""
+    if name in MUSIC_ALLOWLIST:
+        return False
+    if name in FORBIDDEN_FRONTEND_PYTHON_COMMANDS:
         return True
+    return any(marker in name for marker in ("download", "record", "execute")) or name.startswith(
+        ("py_start_", "py_stop_")
+    )
 
-    content = db_bridge_path.read_text(encoding="utf-8")
 
-    # 检查是否有任务生命周期闭包注册（setattr 调用）
-    # 只检查实际的注册代码，不检查注释
-    forbidden_patterns = [
-        r'setattr.*_create_task',
-        r'setattr.*_update_task_status',
-        r'setattr.*_create_task_item',
-        r'setattr.*_update_task_item_status',
-    ]
+def find_python_execution_commands(content: str) -> set[str]:
+    """Find forbidden Python-backed execution commands in Rust/TypeScript source."""
+    commands = set(re.findall(r"\bpy_[A-Za-z0-9_]+\b", content))
+    return {name for name in commands if _is_python_execution_command(name)}
 
-    violations = []
-    for pattern in forbidden_patterns:
-        if re.search(pattern, content):
-            violations.append(f"发现禁止的任务生命周期桩函数注册: {pattern}")
 
-    if violations:
-        print("✗ 架构违规：Rust db_bridge.rs 中仍注册了任务生命周期桩函数")
-        for v in violations:
-            print(f"  - {v}")
+def _is_python_effect_export(name: str) -> bool:
+    if name in MUSIC_EFFECT_ALLOWLIST:
         return False
-
-    print("✓ Rust db_bridge.rs 中未注册任务生命周期桩函数")
-    return True
-
-def check_silent_db_errors():
-    """检查 TaskApplicationService 中是否有静默忽略 DB 错误的模式"""
-    service_path = PROJECT_ROOT / "src-tauri" / "src" / "tasks" / "service.rs"
-
-    if not service_path.exists():
-        print(f"✓ 文件不存在: {service_path}")
+    if name in FORBIDDEN_PYTHON_EXECUTION_EXPORTS:
         return True
+    if name in FORBIDDEN_SERVICE_EFFECT_METHODS:
+        return True
+    return any(marker in name for marker in ("download", "record", "execute"))
 
-    content = service_path.read_text(encoding="utf-8")
-    lines = content.split('\n')
 
-    violations = []
-
-    # 检查关键 DB 操作是否被 warn! 忽略
-    critical_operations = [
-        'create_task_item',
-        'update_task_item_status',
-        'save_batch_results',
-        'update_task_counts',
-    ]
-
-    for i, line in enumerate(lines, 1):
-        # 检查 let _ = self.db 模式
-        if 'let _ = self.db' in line:
-            violations.append(f"第{i}行: 使用 `let _ = self.db` 静默忽略错误")
-
-        # 检查关键操作是否只是 warn! 而没有返回错误
-        for op in critical_operations:
-            if op in line and 'warn!' in line and i > 0:
-                # 检查前一行是否是 if let Err(e) = self.db.xxx
-                prev_line = lines[i-2] if i >= 2 else ''
-                if f'self.db.{op}' in prev_line and 'if let Err' in prev_line:
-                    # 检查下一行是否是 return Err
-                    next_line = lines[i] if i < len(lines) else ''
-                    if 'return Err' not in next_line:
-                        violations.append(f"第{i}行: {op} 失败只是 warn!，应该返回错误")
-
-    if violations:
-        print("✗ 架构违规：TaskApplicationService 中有静默忽略 DB 错误的模式")
-        for v in violations:
-            print(f"  - {v}")
-        return False
-
-    print("✓ TaskApplicationService 中未发现静默忽略 DB 错误的模式")
-    return True
-
-def check_batch_download_fallback():
-    """检查是否还有对 py_start_batch_download 的引用"""
-    search_dirs = [
-        PROJECT_ROOT / "src",
-        PROJECT_ROOT / "src-tauri" / "src",
-        PROJECT_ROOT / "backend",
-        PROJECT_ROOT / "core",
-    ]
-
-    violations = []
-    for search_dir in search_dirs:
-        if not search_dir.exists():
-            continue
-
-        for file_path in search_dir.rglob("*"):
-            if not file_path.is_file():
-                continue
-
-            # 只检查代码文件
-            if file_path.suffix not in ['.py', '.rs', '.ts', '.tsx']:
-                continue
-
-            try:
-                content = file_path.read_text(encoding="utf-8")
-                if 'py_start_batch_download' in content:
-                    violations.append(f"{file_path.relative_to(PROJECT_ROOT)}")
-            except (UnicodeDecodeError, PermissionError):
-                continue
-
-    if violations:
-        print("✗ 架构违规：发现对 py_start_batch_download 的引用")
-        for v in violations:
-            print(f"  - {v}")
-        return False
-
-    print("✓ 未发现对 py_start_batch_download 的引用")
-    return True
-
-def check_py_download_video():
-    """检查是否还有对 py_download_video 的引用（前端 invoke 调用）"""
-    search_dirs = [
-        PROJECT_ROOT / "src",
-    ]
-
-    violations = []
-    for search_dir in search_dirs:
-        if not search_dir.exists():
-            continue
-
-        for file_path in search_dir.rglob("*"):
-            if not file_path.is_file():
-                continue
-
-            # 只检查 TypeScript 文件
-            if file_path.suffix not in ['.ts', '.tsx']:
-                continue
-
-            try:
-                content = file_path.read_text(encoding="utf-8")
-                # 检查 invoke("py_download_video") 调用
-                if 'invoke("py_download_video")' in content or "invoke('py_download_video')" in content:
-                    violations.append(f"{file_path.relative_to(PROJECT_ROOT)}: invoke(\"py_download_video\")")
-            except (UnicodeDecodeError, PermissionError):
-                continue
-
-    if violations:
-        print("✗ 架构违规：前端代码中发现对 py_download_video 的 invoke 调用")
-        for v in violations:
-            print(f"  - {v}")
-        return False
-
-    print("✓ 前端代码中未发现对 py_download_video 的 invoke 调用")
-    return True
-
-def check_redline_shims():
-    """检查 RED LINE 文件的 shim 是否正确（5行 sys.modules 别名模式）"""
-    # Each shim file should reference a specific module path via sys.modules alias
-    shim_files = {
-        "core/crawler.py": "crawler_engine.crawler",
-        "core/filter.py": "crawler_engine.filter",
-        "core/api.py": "crawler_engine.api",
-        "core/py_bridge.py": "bridge.py_bridge",
-        "core/handler.py": "bridge.handler",
-        "core/tauri_bridge.py": "bridge.events",
-        "core/db_bridge.py": "bridge.db_bridge",
-        "core/downloader.py": "download.downloader",
+def find_python_effect_exports(
+    content: str, allowed_names: set[str] | None = None
+) -> set[str]:
+    """Find forbidden Python/Rust function definitions that expose effects."""
+    allowed_names = allowed_names or set()
+    names = set(
+        re.findall(
+            r"\b(?:async\s+def|def|pub\s+(?:async\s+)?fn)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(",
+            content,
+        )
+    )
+    return {
+        name
+        for name in names
+        if name not in allowed_names and _is_python_effect_export(name)
     }
 
-    violations = []
-    for shim_path, expected_ref in shim_files.items():
-        full_path = PROJECT_ROOT / shim_path
-        if not full_path.exists():
-            violations.append(f"{shim_path} 不存在（应该是 shim 文件）")
-            continue
 
-        content = full_path.read_text(encoding="utf-8")
-        lines = content.strip().split("\n")
-
-        # Shims should be short (≤15 lines) and reference the real module
-        if len(lines) > 15:
-            violations.append(f"{shim_path} shim 过长 ({len(lines)}行)，可能不是 shim")
-        if expected_ref not in content and "import *" not in content:
-            violations.append(f"{shim_path} shim 未引用 {expected_ref}")
-
-    if violations:
-        print("✗ 架构违规：RED LINE shim 文件检查失败")
-        for v in violations:
-            print(f"  - {v}")
-        return False
-
-    print("✓ RED LINE shim 文件正确（所有旧路径均指向新位置）")
-    return True
+def find_python_reexport_effects(content: str) -> set[str]:
+    """Find effect names re-exported from Rust's python::handler module."""
+    blocks = re.findall(r"pub\s+use\s+handler::\{(.*?)\};", content, flags=re.DOTALL)
+    names: set[str] = set()
+    for block in blocks:
+        names.update(re.findall(r"\b[a-z_][a-z0-9_]*\b", block))
+    return {name for name in names if _is_python_effect_export(name)}
 
 
-def check_models_split():
-    """检查 models.py 已拆分为 models/ 子包"""
-    models_dir = PROJECT_ROOT / "core" / "models"
-    models_file = PROJECT_ROOT / "core" / "models.py"
-
-    violations = []
-    if not models_dir.is_dir():
-        violations.append("core/models/ 目录不存在")
-    else:
-        required_files = ["__init__.py", "requests.py", "config.py", "download.py", "responses.py"]
-        for f in required_files:
-            if not (models_dir / f).exists():
-                violations.append(f"core/models/{f} 缺失")
-
-    if models_file.exists():
-        content = models_file.read_text(encoding="utf-8")
-        if len(content.split("\n")) > 15:
-            violations.append("core/models.py 仍存在且不是 shim（应该删除或改为短 shim）")
-
-    if violations:
-        print("✗ 架构违规：models 拆分不完整")
-        for v in violations:
-            print(f"  - {v}")
-        return False
-
-    print("✓ models/ 子包结构正确")
-    return True
+def find_forbidden_db_refs(content: str) -> set[str]:
+    """Find task/item/live table references forbidden in Python-owned code."""
+    content = _python_code_without_comments_and_docstrings(content)
+    return {table for table in FORBIDDEN_DB_WRITES if table in content}
 
 
-def check_frontend_py_start_download():
-    """检查前端 src/ 不得 invoke py_start_download"""
-    search_dir = PROJECT_ROOT / "src"
-    violations = []
-    for file_path in search_dir.rglob("*"):
-        if not file_path.is_file() or file_path.suffix not in ('.ts', '.tsx'):
-            continue
-        try:
-            content = file_path.read_text(encoding="utf-8")
-            if 'invoke("py_start_download")' in content or "invoke('py_start_download')" in content:
-                violations.append(file_path.relative_to(PROJECT_ROOT))
-        except (UnicodeDecodeError, PermissionError):
-            continue
-
-    if violations:
-        print("✗ 架构违规：前端代码中发现 invoke(\"py_start_download\") 调用")
-        for v in violations:
-            print(f"  - {v}")
-        return False
-
-    print("✓ 前端代码中未发现对 py_start_download 的 invoke 调用")
-    return True
+def find_forbidden_event_calls(content: str) -> set[str]:
+    """Find Python lifecycle event emission calls."""
+    content = _python_code_without_comments_and_docstrings(content)
+    violations = set()
+    if re.search(r"\bemit\s*\(", content):
+        violations.add("emit(")
+    if "broadcast_" in content:
+        violations.add("broadcast_")
+    return violations
 
 
-def check_py_start_download_command_registration():
-    """检查 Tauri lib.rs 的 generate_handler! 中不得注册 py_start_download"""
+def _python_code_without_comments_and_docstrings(content: str) -> str:
+    """Remove Python comments/docstrings while preserving executable string literals."""
+    output = []
+    previous_type = tokenize.INDENT
+    try:
+        tokens = tokenize.generate_tokens(io.StringIO(content).readline)
+        for token_type, token_text, _start, _end, _line in tokens:
+            if token_type == tokenize.COMMENT:
+                continue
+            if token_type == tokenize.STRING and previous_type in {
+                tokenize.INDENT,
+                tokenize.NEWLINE,
+            }:
+                continue
+            output.append(token_text)
+            if token_type not in {
+                tokenize.NL,
+                tokenize.ENCODING,
+                tokenize.COMMENT,
+            }:
+                previous_type = token_type
+    except (IndentationError, tokenize.TokenError):
+        return content
+    return " ".join(output)
+
+
+# ============================================================
+# 检查函数
+# ============================================================
+
+def check_no_legacy_python_execution_in_command_registry():
+    """检查 Tauri lib.rs 的 generate_handler! 中不得注册非音乐 Python execution commands"""
     lib_path = PROJECT_ROOT / "src-tauri" / "src" / "lib.rs"
     if not lib_path.exists():
         print(f"✓ 文件不存在: {lib_path}")
         return True
 
     content = lib_path.read_text(encoding="utf-8")
-    for i, line in enumerate(content.split('\n'), 1):
-        if 'py_start_download' in line:
-            print(f"✗ 架构违规：lib.rs:{i} 仍注册了 py_start_download")
-            return False
-
-    print("✓ lib.rs 中未注册 py_start_download command")
-    return True
-
-
-def check_py_test_emit_registration():
-    """检查 Tauri 不得注册 py_test_emit command"""
-    search_dir = PROJECT_ROOT / "src-tauri" / "src"
-    violations = []
-    for file_path in search_dir.rglob("*.rs"):
-        if not file_path.is_file():
-            continue
-        try:
-            content = file_path.read_text(encoding="utf-8")
-            for i, line in enumerate(content.split('\n'), 1):
-                if 'py_test_emit' in line:
-                    violations.append(f"{file_path.relative_to(PROJECT_ROOT)}:{i}")
-        except (UnicodeDecodeError, PermissionError):
-            continue
+    violations = [
+        f"lib.rs: 注册了禁止的 command `{cmd}`"
+        for cmd in sorted(find_python_execution_commands(content))
+    ]
 
     if violations:
-        issue, note = _is_allowed_exception("py_test_emit_registration")
-        if note:
-            print(f"⚠ 临时例外（允许）：{note} [TODO {issue}]")
-            for v in violations:
-                print(f"  - {v}")
-            return True
-        print("✗ 架构违规：Tauri 代码中仍注册了 py_test_emit command")
+        print("✗ Tauri command registry 中包含非音乐 Python execution commands")
         for v in violations:
             print(f"  - {v}")
         return False
 
-    print("✓ Tauri 代码中未发现 py_test_emit command")
+    print("✓ Tauri command registry 不含非音乐 Python execution commands")
     return True
 
 
-def check_python_db_writes():
-    """检查 Python 普通下载路径不得写普通任务 DB；live 写入受控"""
+def check_no_legacy_python_execution_in_handler():
+    """检查 Rust handler.rs 中不得导出旧 execution wrapper"""
+    handler_path = PROJECT_ROOT / "src-tauri" / "src" / "python" / "handler.rs"
+    if not handler_path.exists():
+        print(f"✓ 文件不存在: {handler_path}")
+        return True
+
+    content = handler_path.read_text(encoding="utf-8")
+    violations = [
+        f"handler.rs: 导出禁止的执行函数 `{export}`"
+        for export in sorted(find_python_effect_exports(content))
+    ]
+
+    if violations:
+        print("✗ Rust handler.rs 导出了旧 execution wrapper")
+        for v in violations:
+            print(f"  - {v}")
+        return False
+
+    print("✓ Rust handler.rs 未导出旧 execution wrapper")
+    return True
+
+
+def check_no_legacy_execution_in_mod_reexport():
+    """检查 Rust python/mod.rs re-export 中不得包含旧 execution"""
+    mod_path = PROJECT_ROOT / "src-tauri" / "src" / "python" / "mod.rs"
+    if not mod_path.exists():
+        print(f"✓ 文件不存在: {mod_path}")
+        return True
+
+    content = mod_path.read_text(encoding="utf-8")
+    violations = [
+        f"mod.rs: re-export 禁止的执行函数 `{export}`"
+        for export in sorted(find_python_reexport_effects(content))
+    ]
+
+    if violations:
+        print("✗ Rust python/mod.rs re-export 中包含旧 execution")
+        for v in violations:
+            print(f"  - {v}")
+        return False
+
+    print("✓ Rust python/mod.rs re-export 不含旧 execution")
+    return True
+
+
+def check_no_python_db_writes():
+    """检查 Python 业务层不写禁止的 DB 表
+
+    覆盖范围：
+    - core/download, core/task, core/bridge, core/crawler_engine/services
+    - 包括 db_bridge.py，防止重新引入 task/item/live 写入
+    - __init__.py 是纯 re-export，可排除
+    """
     search_dirs = [
+        PROJECT_ROOT / "core" / "db.py",
         PROJECT_ROOT / "core" / "download",
         PROJECT_ROOT / "core" / "task",
-        PROJECT_ROOT / "backend",
+        PROJECT_ROOT / "core" / "bridge",
+        PROJECT_ROOT / "core" / "crawler_engine" / "services",
     ]
     excluded_files = {
-        PROJECT_ROOT / "core" / "db.py",
-        PROJECT_ROOT / "core" / "bridge" / "db_bridge.py",
         PROJECT_ROOT / "core" / "bridge" / "__init__.py",
         PROJECT_ROOT / "core" / "__init__.py",
     }
-    live_manager_path = (PROJECT_ROOT / "core" / "task" / "live_manager.py").resolve()
 
-    hard_violations = []
-    allowed_violations = []
-
-    for search_dir in search_dirs:
-        if not search_dir.exists():
+    violations = []
+    for search_path in search_dirs:
+        if not search_path.exists():
             continue
-        for file_path in search_dir.rglob("*.py"):
+        candidates = [search_path] if search_path.is_file() else search_path.rglob("*.py")
+        for file_path in candidates:
             if not file_path.is_file() or file_path in excluded_files:
                 continue
             try:
@@ -355,83 +286,315 @@ def check_python_db_writes():
             except (UnicodeDecodeError, PermissionError):
                 continue
 
-            for i, line in enumerate(content.split('\n'), 1):
-                if 'save_live_record(' in line:
-                    if file_path.resolve() == live_manager_path:
-                        allowed_violations.append(f"{file_path.relative_to(PROJECT_ROOT)}:{i} 调用了 save_live_record")
-                    else:
-                        hard_violations.append(f"{file_path.relative_to(PROJECT_ROOT)}:{i} 调用了 save_live_record")
-
-    for v in allowed_violations:
-        issue, note = _is_allowed_exception("python_db_writes")
-        if note:
-            print(f"⚠ 临时例外（允许）：{note} [TODO {issue}]")
-            print(f"  - {v}")
-        else:
-            hard_violations.append(v)
-
-    if hard_violations:
-        print("✗ 架构违规：Python 业务层绕过了 Rust 直接写 DB")
-        for v in hard_violations:
-            print(f"  - {v}")
-        return False
-
-    if not allowed_violations:
-        print("✓ Python 业务层中未发现直接 DB 写入")
-    return True
-
-
-def check_api_types_rust_owned_duplicates():
-    """检查 api-types.ts 不得定义 Rust-owned 基础类型"""
-    file_path = PROJECT_ROOT / "src" / "lib" / "api-types.ts"
-    if not file_path.exists():
-        print(f"✓ 文件不存在: {file_path}")
-        return True
-
-    content = file_path.read_text(encoding="utf-8")
-    rust_owned_types = ["DownloadMode", "TaskStatus", "TaskEventType", "TaskEvent", "ErrorCode"]
-    pattern = re.compile(r'export\s+(type|interface|enum)\s+(' + '|'.join(rust_owned_types) + r')\b')
-
-    violations = []
-    for i, line in enumerate(content.split('\n'), 1):
-        m = pattern.search(line)
-        if m:
-            violations.append(f"{file_path.relative_to(PROJECT_ROOT)}:{i} 定义了 Rust-owned 类型 {m.group(2)}")
+            for table in sorted(find_forbidden_db_refs(content)):
+                violations.append(
+                    f"{file_path.relative_to(PROJECT_ROOT)}: 包含禁止 DB 表名 `{table}`"
+                )
 
     if violations:
-        issue, note = _is_allowed_exception("api_types_rust_owned_duplicates")
-        if note:
-            print(f"⚠ 临时例外（允许）：{note} [TODO {issue}]")
-            for v in violations:
-                print(f"  - {v}")
-            return True
-        print("✗ 架构违规：api-types.ts 重复定义了 Rust-owned 基础类型")
+        print("✗ Python 业务层绕过了 Rust 直接写禁止的 DB 表")
         for v in violations:
             print(f"  - {v}")
         return False
 
-    print("✓ api-types.ts 未定义 Rust-owned 基础类型")
+    print("✓ Python 业务层未发现禁止的 DB 写入")
     return True
 
 
+def check_no_python_non_music_events():
+    """检查 Python 业务层不发非音乐 task/live lifecycle event（emit 调用）
+
+    覆盖范围：
+    - core/download, core/task, core/bridge, core/crawler_engine/services
+    """
+    search_dirs = [
+        PROJECT_ROOT / "core" / "download",
+        PROJECT_ROOT / "core" / "task",
+        PROJECT_ROOT / "core" / "bridge",
+        PROJECT_ROOT / "core" / "crawler_engine" / "services",
+    ]
+
+    violations = []
+    for search_dir in search_dirs:
+        if not search_dir.exists():
+            continue
+        for file_path in search_dir.rglob("*.py"):
+            if not file_path.is_file():
+                continue
+            try:
+                content = file_path.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, PermissionError):
+                continue
+
+            for marker in sorted(find_forbidden_event_calls(content)):
+                violations.append(
+                    f"{file_path.relative_to(PROJECT_ROOT)}: 禁止的事件发射 `{marker}`"
+                )
+
+    if violations:
+        print("✗ Python 业务层发送了禁止的 task/live lifecycle event")
+        for v in violations:
+            print(f"  - {v}")
+        return False
+
+    print("✓ Python 业务层未发送非音乐 lifecycle event")
+    return True
+
+
+def check_frontend_uses_rust_commands():
+    """检查前端 download/record action 只调用 Rust-owned commands"""
+    search_dir = PROJECT_ROOT / "src"
+
+    violations = []
+    for file_path in search_dir.rglob("*"):
+        if not file_path.is_file() or file_path.suffix not in ('.ts', '.tsx'):
+            continue
+        try:
+            content = file_path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, PermissionError):
+            continue
+
+        for cmd in sorted(find_python_execution_commands(content)):
+            violations.append(
+                f"{file_path.relative_to(PROJECT_ROOT)}: 调用禁止的 Python 命令 `{cmd}`"
+            )
+
+    if violations:
+        print("✗ 前端调用了禁止的 Python execution command")
+        for v in violations:
+            print(f"  - {v}")
+        return False
+
+    print("✓ 前端 download/record action 仅调用 Rust-owned commands")
+    return True
+
+
+def check_no_python_effect_exports():
+    """Check Python facade/handler/services for non-music execution functions."""
+    targets = [
+        PROJECT_ROOT / "core" / "bridge" / "py_bridge.py",
+        PROJECT_ROOT / "core" / "bridge" / "handler.py",
+        PROJECT_ROOT / "core" / "crawler_engine" / "services",
+    ]
+    violations = []
+    for target in targets:
+        if not target.exists():
+            continue
+        candidates = [target] if target.is_file() else target.rglob("*.py")
+        for file_path in candidates:
+            content = file_path.read_text(encoding="utf-8")
+            allowed_names = (
+                {"_make_downloader"}
+                if file_path.name == "music_service.py"
+                else set()
+            )
+            for export in sorted(
+                find_python_effect_exports(content, allowed_names=allowed_names)
+            ):
+                violations.append(
+                    f"{file_path.relative_to(PROJECT_ROOT)}: 禁止的 effect `{export}`"
+                )
+
+    if violations:
+        print("✗ Python facade/service 仍暴露非音乐 execution effect")
+        for violation in violations:
+            print(f"  - {violation}")
+        return False
+
+    print("✓ Python facade/service 不含非音乐 execution effect")
+    return True
+
+
+def check_music_allowlist():
+    """检查 py_download_music 及其最小调用链完整"""
+    handler_path = PROJECT_ROOT / "src-tauri" / "src" / "python" / "handler.rs"
+    mod_path = PROJECT_ROOT / "src-tauri" / "src" / "python" / "mod.rs"
+    commands_path = PROJECT_ROOT / "src-tauri" / "src" / "commands" / "python.rs"
+    lib_path = PROJECT_ROOT / "src-tauri" / "src" / "lib.rs"
+
+    violations = []
+
+    # 1. handler.rs 必须有 download_music
+    if handler_path.exists():
+        content = handler_path.read_text(encoding="utf-8")
+        if "pub fn download_music(" not in content:
+            violations.append("handler.rs 缺少 `pub fn download_music`")
+        if "call_py_json(\"download_music\"" not in content:
+            violations.append("handler.rs 的 `download_music` 未调用 Python `download_music`")
+
+    # 2. mod.rs 必须有 download_music re-export
+    if mod_path.exists():
+        content = mod_path.read_text(encoding="utf-8")
+        if "download_music" not in content:
+            violations.append("mod.rs 缺少 `download_music` re-export")
+
+    # 3. commands/python.rs 必须有 py_download_music
+    if commands_path.exists():
+        content = commands_path.read_text(encoding="utf-8")
+        if "py_download_music" not in content:
+            violations.append("commands/python.rs 缺少 `py_download_music` command")
+
+    # 4. lib.rs 必须有 py_download_music registration
+    if lib_path.exists():
+        content = lib_path.read_text(encoding="utf-8")
+        if "py_download_music" not in content:
+            violations.append("lib.rs 缺少 `py_download_music` command registration")
+
+    # 5. py_bridge.py 必须有 download_music
+    py_bridge_path = PROJECT_ROOT / "core" / "bridge" / "py_bridge.py"
+    if py_bridge_path.exists():
+        content = py_bridge_path.read_text(encoding="utf-8")
+        if "def download_music(" not in content:
+            violations.append("py_bridge.py 缺少 `def download_music`")
+        if "def download_music_batch(" not in content:
+            violations.append("py_bridge.py 缺少 `def download_music_batch`")
+
+    # 6. __init__.py 必须有 download_music in py_bridge imports
+    core_init = PROJECT_ROOT / "core" / "__init__.py"
+    if core_init.exists():
+        content = core_init.read_text(encoding="utf-8")
+        if "download_music" not in content:
+            violations.append("core/__init__.py 缺少 `download_music` export")
+        if "download_music_batch" not in content:
+            violations.append("core/__init__.py 缺少 `download_music_batch` export")
+
+    # 7. Frontend must have py_download_music
+    search_dir = PROJECT_ROOT / "src"
+    found_frontend = False
+    for file_path in search_dir.rglob("*"):
+        if file_path.suffix not in ('.ts', '.tsx'):
+            continue
+        try:
+            content = file_path.read_text(encoding="utf-8")
+            if 'py_download_music' in content:
+                found_frontend = True
+                break
+        except (UnicodeDecodeError, PermissionError):
+            continue
+    if not found_frontend:
+        violations.append("前端缺少 `py_download_music` 引用")
+
+    if violations:
+        print("✗ music allowlist 检查失败：")
+        for v in violations:
+            print(f"  - {v}")
+        return False
+
+    print("✓ Music allowlist 完整：py_download_music 及其最小调用链就位")
+    return True
+
+
+def check_task_service_path():
+    """Scan the real task_service.rs path for legacy Python execution calls."""
+    task_service_path = PROJECT_ROOT / "src-tauri" / "src" / "services" / "download" / "task_service.rs"
+    if not task_service_path.exists():
+        print(f"✗ task_service.rs 不存在于真实路径: {task_service_path}")
+        return False
+
+    content = task_service_path.read_text(encoding="utf-8")
+    forbidden = {
+        "crate::python::handler::resolve_urls",
+        "crate::python::handler::start_download",
+        "resolve_page_filtered",
+    }
+    violations = sorted(pattern for pattern in forbidden if pattern in content)
+    required = {
+        "crate::python::handler::resolve_single",
+        "crate::python::handler::resolve_music_urls",
+        "crate::python::handler::resolve_live",
+        "resolve_paged_download_plan",
+    }
+    missing = sorted(pattern for pattern in required if pattern not in content)
+    if violations or missing:
+        print("✗ task_service.rs 未保持 typed resolver 边界")
+        for pattern in violations:
+            print(f"  - 仍包含 legacy 调用: {pattern}")
+        for pattern in missing:
+            print(f"  - 缺少 typed resolver 路径: {pattern}")
+        return False
+
+    print(f"✓ 扫描真实路径: {task_service_path.relative_to(PROJECT_ROOT)}")
+    return True
+
+
+def check_negation_fixture():
+    """Run deliberately-invalid source through the production matchers."""
+    tests = [
+        (
+            "新增第二个 Python download command",
+            find_python_execution_commands,
+            "generate_handler![py_download_extra]",
+        ),
+        (
+            "Rust Python handler execution export",
+            find_python_effect_exports,
+            "pub fn download_video(url: &str) {}",
+        ),
+        (
+            "Python facade execution export",
+            find_python_effect_exports,
+            "def start_download(mode, url): pass",
+        ),
+        (
+            "Python service execution method",
+            find_python_effect_exports,
+            "async def handle_one_video(self, url): pass",
+        ),
+        (
+            "Python task DB write",
+            find_forbidden_db_refs,
+            'db.execute("INSERT INTO download_tasks ...")',
+        ),
+        (
+            "Python lifecycle event",
+            find_forbidden_event_calls,
+            'emit("task-update", payload)',
+        ),
+    ]
+
+    failed = []
+    for name, matcher, source in tests:
+        if matcher(source):
+            print(f"    [自测通过] {name}")
+        else:
+            failed.append(name)
+            print(f"    [自测失败] {name}")
+
+    safe_music = "pub async fn py_download_music() {}\ndef download_music(url): pass"
+    if find_python_execution_commands(safe_music) or find_python_effect_exports(safe_music):
+        failed.append("音乐 allowlist")
+        print("    [自测失败] 音乐 allowlist")
+    else:
+        print("    [自测通过] 音乐 allowlist")
+
+    if failed:
+        print(f"✗ [内部自测失败] 未正确匹配: {', '.join(failed)}")
+        return False
+
+    print(f"✓ [内部自测] {len(tests)} 个违规与音乐例外均通过真实 matcher")
+    return True
+
+
+# ============================================================
+# 主入口
+# ============================================================
+
 def main():
-    """运行所有架构边界检查"""
     print("=" * 60)
-    print("架构边界检查")
+    print("架构边界检查 (Issue 10 强化版)")
     print("=" * 60)
 
     checks = [
-        ("任务生命周期桩函数", check_task_lifecycle_stubs),
-        ("静默 DB 错误", check_silent_db_errors),
-        ("批量下载回退", check_batch_download_fallback),
-        ("py_download_video 引用", check_py_download_video),
-        ("RED LINE shim 文件", check_redline_shims),
-        ("models 子包拆分", check_models_split),
-        ("前端 py_start_download", check_frontend_py_start_download),
-        ("py_start_download command 注册", check_py_start_download_command_registration),
-        ("py_test_emit 注册", check_py_test_emit_registration),
-        ("Python 直接 DB 写入", check_python_db_writes),
-        ("api-types 重复定义", check_api_types_rust_owned_duplicates),
+        ("Tauri command registry 不含非音乐 Python execution", check_no_legacy_python_execution_in_command_registry),
+        ("Rust handler.rs 不含旧 execution wrapper", check_no_legacy_python_execution_in_handler),
+        ("Rust mod.rs re-export 不含旧 execution", check_no_legacy_execution_in_mod_reexport),
+        ("Python facade/service 不含非音乐 execution", check_no_python_effect_exports),
+        ("Python 业务层不写禁止的 DB 表", check_no_python_db_writes),
+        ("Python 业务层不发非音乐 lifecycle event", check_no_python_non_music_events),
+        ("前端仅调用 Rust-owned commands", check_frontend_uses_rust_commands),
+        ("Music allowlist 完整", check_music_allowlist),
+        ("扫描真实 task_service.rs 路径", check_task_service_path),
+        ("[内部自测] 否定-fixture", check_negation_fixture),
     ]
 
     all_passed = True
@@ -447,15 +610,8 @@ def main():
     else:
         print("✗ 发现架构违规，请修复后重试")
 
-    print("\n" + "=" * 60)
-    print("当前生效的临时例外（完成对应 issue 后删除）")
-    print("-" * 60)
-    for name, desc, issue, note in ALLOWED_EXCEPTIONS:
-        print(f"  [{issue}] {desc}")
-        print(f"          {note}")
-    print("=" * 60)
-
     return 0 if all_passed else 1
+
 
 if __name__ == "__main__":
     sys.exit(main())

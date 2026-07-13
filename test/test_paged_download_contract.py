@@ -96,6 +96,20 @@ def _valid_plan() -> dict:
     }
 
 
+@pytest.mark.parametrize("mode", ["one", "music", "live", "unknown"])
+def test_resolve_page_rejects_non_paged_modes_before_creating_handler(
+    monkeypatch, mode
+):
+    def fail_if_context_is_created():
+        raise AssertionError("non-paged mode must be rejected before creating a handler")
+
+    monkeypatch.setattr(py_bridge, "_get_context", fail_if_context_is_created)
+
+    result = py_bridge.resolve_page(mode, "https://example.test", 0, 20)
+
+    assert result == {"success": False, "error": f"不支持的分页模式: {mode}"}
+
+
 @pytest.mark.parametrize(
     ("has_more", "next_cursor", "items", "message"),
     [
@@ -264,7 +278,7 @@ def _install_paged_resolver(monkeypatch, tmp_path: Path, pages: dict[int, dict])
         ),
         _user=SimpleNamespace(_make_crawler=make_crawler),
     )
-    monkeypatch.setattr(py_bridge, "_get_task_manager", lambda: SimpleNamespace(handler=handler))
+    monkeypatch.setattr(py_bridge, "_get_context", lambda: SimpleNamespace(handler=handler))
     monkeypatch.setattr("core.utils.SecUserIdFetcher.get_sec_user_id", get_sec_user_id)
     monkeypatch.setattr("core.crawler_engine.filter.UserPostFilter", FakePostFilter)
     monkeypatch.setattr("core.crawler_engine.filter.UserProfileFilter", FakeProfileFilter)
@@ -390,7 +404,7 @@ def _install_like_resolver(monkeypatch, tmp_path: Path, pages: dict[int, dict]):
         ),
         _user=SimpleNamespace(_make_crawler=make_crawler),
     )
-    monkeypatch.setattr(py_bridge, "_get_task_manager", lambda: SimpleNamespace(handler=handler))
+    monkeypatch.setattr(py_bridge, "_get_context", lambda: SimpleNamespace(handler=handler))
     monkeypatch.setattr("core.utils.SecUserIdFetcher.get_sec_user_id", get_sec_user_id)
     monkeypatch.setattr("core.crawler_engine.filter.UserPostFilter", FakePostFilter)
     monkeypatch.setattr("core.crawler_engine.filter.UserProfileFilter", FakeProfileFilter)
@@ -432,7 +446,7 @@ def _install_mix_resolver(monkeypatch, tmp_path: Path, pages: dict[int, dict]):
         _user=SimpleNamespace(_make_crawler=make_crawler),
         _mix=SimpleNamespace(_make_crawler=make_crawler),
     )
-    monkeypatch.setattr(py_bridge, "_get_task_manager", lambda: SimpleNamespace(handler=handler))
+    monkeypatch.setattr(py_bridge, "_get_context", lambda: SimpleNamespace(handler=handler))
     monkeypatch.setattr("core.utils.MixIdFetcher.get_mix_id", get_mix_id)
     monkeypatch.setattr("core.crawler_engine.filter.UserPostFilter", FakePostFilter)
     return calls
@@ -470,7 +484,7 @@ def _install_collects_resolver(monkeypatch, tmp_path: Path, pages: dict[int, dic
         _user=SimpleNamespace(_make_crawler=make_crawler),
         _collection=SimpleNamespace(_make_crawler=make_crawler),
     )
-    monkeypatch.setattr(py_bridge, "_get_task_manager", lambda: SimpleNamespace(handler=handler))
+    monkeypatch.setattr(py_bridge, "_get_context", lambda: SimpleNamespace(handler=handler))
     monkeypatch.setattr("core.crawler_engine.filter.UserPostFilter", FakePostFilter)
     return calls
 
@@ -721,7 +735,7 @@ def _install_fast_path(monkeypatch, tmp_path):
         yield FakeCrawler()
 
     handler._video._make_crawler = make_crawler
-    monkeypatch.setattr(py_bridge, "_get_task_manager", lambda: SimpleNamespace(handler=handler))
+    monkeypatch.setattr(py_bridge, "_get_context", lambda: SimpleNamespace(handler=handler))
     return handler
 
 

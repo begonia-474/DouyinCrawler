@@ -46,8 +46,8 @@ from core.models.responses import (
     MixInfoResult, SearchResult,
     TabFeedResult, FollowFeedResult, FriendFeedResult,
     UserLikesResult, PostStatsResult,
-    DownloadResult, BatchDownloadResult, MusicBatchResult,
-    LiveRecordResult, LiveStatusResult, FollowingLiveResult,
+    MusicBatchResult,
+    FollowingLiveResult,
 )
 
 __all__ = [
@@ -81,6 +81,6 @@ __all__ = [
     "MixInfoResult", "SearchResult",
     "TabFeedResult", "FollowFeedResult", "FriendFeedResult",
     "UserLikesResult", "PostStatsResult",
-    "DownloadResult", "BatchDownloadResult", "MusicBatchResult",
-    "LiveRecordResult", "LiveStatusResult", "FollowingLiveResult",
+    "MusicBatchResult",
+    "FollowingLiveResult",
 ]

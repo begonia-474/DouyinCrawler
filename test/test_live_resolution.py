@@ -42,7 +42,7 @@ class _FakeLiveHandler:
 
 def test_resolve_live_returns_f2_recording_contract(monkeypatch, tmp_path):
     manager = SimpleNamespace(handler=_FakeLiveHandler(tmp_path))
-    monkeypatch.setattr(py_bridge, "_get_task_manager", lambda: manager)
+    monkeypatch.setattr(py_bridge, "_get_context", lambda: manager)
 
     result = py_bridge.resolve_live("https://live.douyin.com/123456")
 
@@ -61,7 +61,7 @@ def test_resolve_live_returns_f2_recording_contract(monkeypatch, tmp_path):
 
 def test_live_plan_rejects_unknown_fields_and_invalid_mode(monkeypatch, tmp_path):
     manager = SimpleNamespace(handler=_FakeLiveHandler(tmp_path))
-    monkeypatch.setattr(py_bridge, "_get_task_manager", lambda: manager)
+    monkeypatch.setattr(py_bridge, "_get_context", lambda: manager)
     result = py_bridge.resolve_live("https://live.douyin.com/123456")
 
     with pytest.raises(ValidationError):
@@ -80,7 +80,7 @@ def test_resolve_live_requires_full_hd1(monkeypatch, tmp_path):
 
     handler.handle_user_live = without_full_hd
     monkeypatch.setattr(
-        py_bridge, "_get_task_manager", lambda: SimpleNamespace(handler=handler)
+        py_bridge, "_get_context", lambda: SimpleNamespace(handler=handler)
     )
 
     result = py_bridge.resolve_live("https://live.douyin.com/123456")
@@ -93,7 +93,7 @@ def test_resolve_live_folderize_uses_formatted_live_directory(monkeypatch, tmp_p
     handler = _FakeLiveHandler(tmp_path)
     handler.config.folderize = True
     monkeypatch.setattr(
-        py_bridge, "_get_task_manager", lambda: SimpleNamespace(handler=handler)
+        py_bridge, "_get_context", lambda: SimpleNamespace(handler=handler)
     )
 
     result = py_bridge.resolve_live("https://live.douyin.com/123456")
@@ -105,7 +105,7 @@ def test_resolve_live_folderize_uses_formatted_live_directory(monkeypatch, tmp_p
 
 def test_get_live_info_matches_rust_live_info_contract(monkeypatch, tmp_path):
     manager = SimpleNamespace(handler=_FakeLiveHandler(tmp_path))
-    monkeypatch.setattr(py_bridge, "_get_task_manager", lambda: manager)
+    monkeypatch.setattr(py_bridge, "_get_context", lambda: manager)
 
     result = py_bridge.get_live_info("https://live.douyin.com/123456")
 
@@ -118,13 +118,6 @@ def test_get_live_info_matches_rust_live_info_contract(monkeypatch, tmp_path):
         "https://example.com/hd.m3u8",
         "https://example.com/full-hd.m3u8",
     ]
-
-
-def test_legacy_python_live_execution_entrypoints_are_disabled():
-    assert py_bridge.start_live_record("https://live.douyin.com/1")["success"] is False
-    assert py_bridge.stop_live_record("legacy-task")["success"] is False
-    assert py_bridge.get_live_status()["success"] is False
-    assert py_bridge.start_download("live", "https://live.douyin.com/1")["success"] is False
 
 
 @pytest.mark.asyncio

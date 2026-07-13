@@ -3,7 +3,7 @@
 //! 新的任务命令通过 TaskApplicationService 路由，
 //! Rust 拥有任务生命周期和 DB 写入。
 //!
-//! Phase 3.1: 所有模式走 Rust-owned 路径，通过 resolve_urls + DownloadEngine。
+//! 所有模式走 Rust-owned 路径，通过 typed Python resolver + DownloadEngine。
 
 use serde_json::Value;
 use tauri::State;
@@ -15,7 +15,7 @@ use crate::state::AppState;
 /// 统一下载入口（Rust-owned）
 ///
 /// 所有模式通过 TaskApplicationService 走 Rust 路径，
-/// 使用 resolve_urls 解析下载 URL + DownloadEngine 执行下载。
+/// 使用 typed Python resolver 解析媒体计划 + DownloadEngine 执行下载。
 #[tauri::command(rename_all = "snake_case")]
 pub async fn start_download(
     state: State<'_, AppState>,

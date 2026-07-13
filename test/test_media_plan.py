@@ -227,12 +227,12 @@ def test_one_and_post_adapters_use_identical_typed_media_items(monkeypatch, tmp_
     )
     handler = SimpleNamespace(config=config, _video=FakeVideoService())
     monkeypatch.setattr(
-        py_bridge, "_get_task_manager", lambda: SimpleNamespace(handler=handler)
+        py_bridge, "_get_context", lambda: SimpleNamespace(handler=handler)
     )
     monkeypatch.setattr(AwemeIdFetcher, "get_aweme_id", staticmethod(fake_get_aweme_id))
     monkeypatch.setattr(filter_module, "PostDetailFilter", lambda _data: detail)
 
-    one_plan = py_bridge.resolve_urls("one", "https://example.test/video")
+    one_plan = py_bridge.resolve_single("https://example.test/video")
     post_plan = py_bridge.resolve_page(
         "post",
         "https://example.test/user",

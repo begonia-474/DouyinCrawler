@@ -104,39 +104,25 @@ async def test_to_db_dict():
     return db_dict
 
 
-async def test_handle_one_video():
-    """测试 handle_one_video 返回 to_db_dict()"""
-    from core.handler import DouyinHandler as Handler
+async def test_resolve_single():
+    """测试 resolve_single 返回 SingleDownloadPlanV1"""
+    from core.py_bridge import resolve_single
 
     print("\n" + "=" * 60)
-    print("[测试2] handle_one_video() 返回 to_db_dict()")
+    print("[测试2] resolve_single() 返回 SingleDownloadPlanV1")
     print("=" * 60)
 
-    handler = Handler(
-        cookie=COOKIE,
-        download_path=Path(__file__).resolve().parent.parent / "Download",
-        naming="{create}_{desc}",
-        encryption="ab",
-    )
-
-    result = await handler.handle_one_video(TEST_VIDEO_URL)
+    result = resolve_single(TEST_VIDEO_URL)
 
     if not result.get("success"):
-        print(f"  [FAIL] 下载失败: {result.get('error')}")
+        print(f"  [FAIL] 解析失败: {result.get('error')}")
         return None
 
-    print(f"  [PASS] 下载成功")
-    print(f"  type: {result.get('type')}")
-    print(f"  path: {result.get('path', '')[:80]}")
-
-    detail = result.get("detail", {})
-    print(f"  detail 字段数: {len(detail)}")
-
-    missing = [f for f in EXPECTED_VIDEO_FIELDS if f not in detail]
-    if missing:
-        print(f"  [FAIL] detail 缺少字段: {missing}")
-    else:
-        print(f"  [PASS] detail 包含所有预期字段")
+    print(f"  [PASS] 解析成功")
+    print(f"  contract_version: {result.get('contract_version')}")
+    print(f"  mode: {result.get('mode')}")
+    print(f"  save_dir: {result.get('save_dir')}")
+    print(f"  total: {result.get('total')}")
 
     return result
 
@@ -188,8 +174,8 @@ async def main():
     # 测试1: to_db_dict
     db_dict = await test_to_db_dict()
 
-    # 测试2: handle_one_video
-    result = await test_handle_one_video()
+    # 测试2: resolve_single
+    result = await test_resolve_single()
 
     # 测试3: user profile
     udict = await test_user_profile_to_dict()
@@ -205,11 +191,18 @@ async def main():
     else:
         print(f"  video_info 字段: SKIP (API 失败)")
 
-    if result and result.get("detail"):
-        detail_ok = len(result["detail"]) >= len(EXPECTED_VIDEO_FIELDS)
-        print(f"  handle_one_video detail: {len(result['detail'])}/{len(EXPECTED_VIDEO_FIELDS)} {'PASS' if detail_ok else 'FAIL'}")
+    resolved_metadata = None
+    if result and result.get("items"):
+        resolved_metadata = result["items"][0].get("metadata")
+    if resolved_metadata:
+        detail_ok = len(resolved_metadata) >= len(EXPECTED_VIDEO_FIELDS)
+        print(
+            "  resolve_single metadata: "
+            f"{len(resolved_metadata)}/{len(EXPECTED_VIDEO_FIELDS)} "
+            f"{'PASS' if detail_ok else 'FAIL'}"
+        )
     else:
-        print(f"  handle_one_video detail: SKIP")
+        print("  resolve_single metadata: SKIP")
 
     if udict:
         user_ok = len(udict) >= len(EXPECTED_USER_FIELDS)

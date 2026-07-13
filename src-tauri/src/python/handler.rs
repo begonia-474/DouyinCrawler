@@ -96,31 +96,23 @@ pub fn get_mix_info(url: &str, cursor: i64, count: i64) -> PyResult<MixInfoResul
     call_py_typed("get_mix_info", (url, cursor, count))
 }
 
-/// 统一下载入口（通过 mode 分发）
-/// 保持返回 Value — 由 task_service.rs 反序列化
-pub fn start_download(mode: &str, url: &str) -> PyResult<Value> {
-    call_py_json("start_download", (mode, url))
+/// 解析单视频下载计划（typed, mode=one）
+pub fn resolve_single(url: &str) -> PyResult<Value> {
+    call_py_json("resolve_single", (url,))
 }
 
-/// 解析下载 URL 列表（不执行下载）
-/// 返回下载所需的 URL + headers + 元数据，供 DownloadEngine 使用
-pub fn resolve_urls(mode: &str, url: &str) -> PyResult<Value> {
-    info!("[handler.rs] resolve_urls, mode={}, url={}", mode, &url[..url.len().min(60)]);
-    call_py_json("resolve_urls", (mode, url))
+/// 解析音乐下载 URL 列表（typed, mode=music-only）
+pub fn resolve_music_urls(url: &str) -> PyResult<Value> {
+    call_py_json("resolve_music_urls", (url,))
 }
 
 /// 解析单页下载 URL（分页模式）
 ///
-/// 与 resolve_urls 的区别：只返回一页数据 + 分页元数据 (next_cursor, has_more)，
+/// 与 resolve_single 的区别：只返回一页数据 + 分页元数据 (next_cursor, has_more)，
 /// 由 Rust 驱动分页循环，实现"边解析边下载"。
 pub fn resolve_page(mode: &str, url: &str, cursor: i64, count: i64) -> PyResult<Value> {
     info!("[handler.rs] resolve_page, mode={}, cursor={}, count={}", mode, cursor, count);
     call_py_json("resolve_page", (mode, url, cursor, count))
-}
-
-pub fn resolve_page_filtered(mode: &str, url: &str, cursor: i64, count: i64, aweme_ids: Vec<String>) -> PyResult<Value> {
-    info!("[handler.rs] resolve_page_filtered, mode={}, cursor={}, count={}, aweme_ids={:?}", mode, cursor, count, aweme_ids);
-    call_py_json("resolve_page", (mode, url, cursor, count, aweme_ids))
 }
 
 // ============================================================

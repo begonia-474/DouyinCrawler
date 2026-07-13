@@ -216,10 +216,6 @@ pub fn run() {
             // 初始化事件模块，供 Rust 侧 task_service 使用
             services::download::events::init(app.handle());
 
-            // 注册 Python 事件桥接
-            python::register_app_handle(app.handle());
-            info!("AppHandle 已注册到 Python 模块");
-
             // 注册数据库桥接方法，供 Python 直接写入数据库
             python::register_db_bridge(app.handle());
             info!("数据库桥接已注册到 Python 模块");

@@ -28,23 +28,9 @@ def handler(cookie, download_dir):
 
 
 @pytest.mark.asyncio
-async def test_one_video(handler):
-    """单视频下载"""
-    result = await handler.handle_one_video(VIDEO_URL)
-    assert result.get("success"), f"失败: {result.get('error')}"
-
-
-@pytest.mark.asyncio
 async def test_user_profile(handler):
     """用户资料"""
     result = await handler.handle_user_profile(USER_URL)
-    assert result.get("success"), f"失败: {result.get('error')}"
-
-
-@pytest.mark.asyncio
-async def test_user_post(handler):
-    """用户主页视频"""
-    result = await handler.handle_user_post(USER_URL)
     assert result.get("success"), f"失败: {result.get('error')}"
 
 

@@ -1,5 +1,4 @@
-"""任务管理 — TaskManager + LiveRecordManager"""
-from core.task.task_manager import TaskManager, task_manager
-from core.task.live_manager import LiveRecordManager
+"""任务管理 — 旧 TaskManager/LiveRecordManager 已删除
 
-__all__ = ["TaskManager", "task_manager", "LiveRecordManager"]
+所有非音乐下载和直播执行已由 Rust 拥有。
+此目录保留以备未来扩展。"""

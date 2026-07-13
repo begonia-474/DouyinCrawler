@@ -36,7 +36,7 @@ from core.crawler_engine.signature.fingerprint import BrowserFingerprintGenerato
 from core.crawler_engine.tokens.token_manager import TokenManager
 
 # ── 服务层 (crawler_engine/services/) ──
-from core.crawler_engine.services.base import BaseService, run_concurrent
+from core.crawler_engine.services.base import BaseService
 from core.crawler_engine.services.video_service import VideoService
 from core.crawler_engine.services.user_service import UserService
 from core.crawler_engine.services.collection_service import CollectionService
@@ -54,16 +54,15 @@ from core.bridge.handler import DouyinHandler
 from core.bridge.db_bridge import (
     save_video_info,
     save_user_info,
-    save_live_record,
     has_user,
 )
-from core.bridge.events import emit, set_emit_func
 from core.bridge.py_bridge import (
     parse_video,
-    download_video,
     get_live_info,
-    download_batch,
-    start_download,
+    resolve_live,
+    resolve_single,
+    resolve_music_urls,
+    resolve_page,
     get_user_profile,
     get_user_posts,
     search_videos,
@@ -83,9 +82,6 @@ from core.bridge.py_bridge import (
     get_friend_feed,
     get_user_likes,
     get_post_stats,
-    start_live_record,
-    stop_live_record,
-    get_live_status,
 )
 
 # ── 数据模型 (models/) ──
@@ -108,13 +104,9 @@ from core.models import (
     MixInfoResult, SearchResult,
     TabFeedResult, FollowFeedResult, FriendFeedResult,
     UserLikesResult, PostStatsResult,
-    DownloadResult, BatchDownloadResult, MusicBatchResult,
-    LiveRecordResult, LiveStatusResult, FollowingLiveResult,
+    MusicBatchResult,
+    FollowingLiveResult,
 )
-
-# ── 任务管理 (task/) ──
-from core.task.task_manager import TaskManager, task_manager
-from core.task.live_manager import LiveRecordManager
 
 # ── 工具函数 (utils/) ──
 from core.utils import (
@@ -143,7 +135,7 @@ __all__ = [
     "HomePostSearchFilter", "SuggestWordFilter",
     "QueryUserFilter", "PostStatsFilter", "LiveImFetchFilter",
     # 服务层
-    "BaseService", "run_concurrent",
+    "BaseService",
     "VideoService", "UserService", "CollectionService",
     "MixService", "LiveService", "FeedService",
     "ContentService", "MusicService",
@@ -153,12 +145,10 @@ __all__ = [
     "DouyinHandler",
     # 桥接层 — db_bridge（过渡路径，新代码走 Rust 写入）
     "save_video_info", "save_user_info",
-    "save_live_record", "has_user",
-    # 桥接层 — events
-    "emit", "set_emit_func",
+    "has_user",
     # 桥接层 — py_bridge（Rust 可调用函数）
-    "parse_video", "download_video", "get_live_info",
-    "download_batch", "start_download",
+    "parse_video", "get_live_info", "resolve_live",
+    "resolve_single", "resolve_music_urls", "resolve_page",
     "get_user_profile", "get_user_posts", "search_videos",
     "get_mix_info", "get_collects_list", "get_collects_video_list",
     "get_following_list", "get_follower_list",
@@ -166,7 +156,6 @@ __all__ = [
     "get_following_live", "get_comments", "get_comment_replies",
     "get_tab_feed", "get_follow_feed", "get_friend_feed",
     "get_user_likes", "get_post_stats",
-    "start_live_record", "stop_live_record", "get_live_status",
     # 数据模型
     "ServiceConfig", "BaseRequestModel", "BaseLiveModel",
     "UserProfile", "UserPost", "UserFavorite", "UserCollection",
@@ -185,10 +174,8 @@ __all__ = [
     "MixInfoResult", "SearchResult",
     "TabFeedResult", "FollowFeedResult", "FriendFeedResult",
     "UserLikesResult", "PostStatsResult",
-    "DownloadResult", "BatchDownloadResult", "MusicBatchResult",
-    "LiveRecordResult", "LiveStatusResult", "FollowingLiveResult",
-    # 任务管理
-    "TaskManager", "task_manager", "LiveRecordManager",
+    "MusicBatchResult",
+    "FollowingLiveResult",
     # 工具函数
     "extract_valid_urls",
     "AwemeIdFetcher", "SecUserIdFetcher", "MixIdFetcher", "WebCastIdFetcher",

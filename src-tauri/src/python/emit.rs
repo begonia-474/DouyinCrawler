@@ -1,101 +1,20 @@
-//! Tauri 事件发射模块
+//! Tauri 事件格式化模块
 //!
-//! 供 Python 通过 PyO3 调用，将任务状态推送到前端。
-//! 统一事件格式：所有事件使用 task_type: "typed" + TaskEvent 兼容结构。
+//! 提供任务事件 payload 格式化工具函数。
+//! Python 广播已删除；所有事件由 Rust task_service 直接发射。
 
-use log::{info, warn};
-use pyo3::prelude::*;
-use tauri::{AppHandle, Emitter};
+use serde_json::Value;
 
-/// 注册 emit_task_update 到 Python core.tauri_bridge 模块
-pub fn register_app_handle(app_handle: &AppHandle) {
-    let handle = app_handle.clone();
-    Python::with_gil(|py| {
-        let tauri_bridge = match py.import_bound("core.tauri_bridge") {
-            Ok(m) => m,
-            Err(e) => {
-                warn!("[emit] 导入 core.tauri_bridge 失败: {}", e);
-                return;
-            }
-        };
-
-        // 创建一个 Python 可调用的闭包，包装 Rust 的 emit_task_update
-        // 签名: _emit_func(task_id: str, task_type: str, data: dict) -> None
-        let emit_fn = pyo3::types::PyCFunction::new_closure_bound(
-            py,
-            None,
-            None,
-            move |args: &Bound<'_, pyo3::types::PyTuple>, _kwargs: Option<&Bound<'_, pyo3::types::PyDict>>| -> PyResult<()> {
-                let py = args.py();
-                let task_id: String = args.get_item(0)?.extract()?;
-                let task_type: String = args.get_item(1)?.extract()?;
-                let data = args.get_item(2)?;
-
-                if task_type == "live" {
-                    warn!("[emit] 已拒绝 legacy Python live 事件；直播生命周期由 Rust TaskApplicationService 管理");
-                    return Ok(());
-                }
-
-                info!("[emit] Python 调用 emit: task_id={}, task_type={}", task_id, task_type);
-
-                // 将 Python dict 转为 JSON
-                let json_value = super::bridge::py_to_json_value(&data)?;
-
-                // 统一格式：所有事件使用 task_type: "typed"
-                // 将 Python 的 batch/live 事件格式化为 TaskEvent 兼容结构
-                let payload = format_event_payload(&task_id, &task_type, &json_value);
-
-                // 以下操作不需要 GIL：Tauri emit + DB 写入
-                py.allow_threads(|| {
-                    info!("[emit] 发送 Tauri 事件: task-update, payload={}", payload);
-                    handle.emit("task-update", &payload)
-                        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("事件发射失败: {}", e)))?;
-                    info!("[emit] Tauri 事件发送成功");
-
-                    Ok::<(), pyo3::PyErr>(())
-                })?;
-
-                Ok(())
-            },
-        ).expect("创建 emit 闭包失败");
-
-        // 方式1: 通过 setattr 设置模块属性
-        if let Err(e) = tauri_bridge.setattr("_emit_func", emit_fn.clone()) {
-            warn!("[emit] setattr 失败: {}", e);
-        }
-
-        // 方式2: 调用 Python 的 set_emit_func 函数（更可靠）
-        if let Err(e) = tauri_bridge.call_method1("set_emit_func", (emit_fn,)) {
-            warn!("[emit] set_emit_func 调用失败: {}", e);
-        } else {
-            info!("[emit] emit_task_update 已通过 set_emit_func 注入");
-        }
-
-        // 验证注入结果
-        match tauri_bridge.getattr("_emit_func") {
-            Ok(func) => {
-                let is_none: bool = func.is_none();
-                info!("[emit] 验证: _emit_func is_none={}", is_none);
-            }
-            Err(e) => {
-                warn!("[emit] 验证失败: {}", e);
-            }
-        }
-    });
-}
-
-/// 将 Python 事件格式化为 TaskEvent 兼容的 JSON payload
+/// 将任务状态事件格式化为 TaskEvent 兼容的 JSON payload
 ///
 /// 统一规则：
 /// - task_type 始终为 "typed"
 /// - data 包含 TaskEvent 的所有字段（event_type, task_id, mode, url, patch.*）
-/// - Python 特有字段（title, nickname 等）放在 data 顶层，前端 UnifiedTask 会处理
 fn format_event_payload(
     task_id: &str,
     _python_task_type: &str,
-    data: &serde_json::Value,
-) -> serde_json::Value {
-    // 从 Python data 中提取字段
+    data: &Value,
+) -> Value {
     let event_type_str = data
         .get("event_type")
         .and_then(|v| v.as_str())
@@ -120,18 +39,16 @@ fn format_event_payload(
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
-    // 构建 patch 字段（TaskPatch 兼容）
     let mut patch = serde_json::Map::new();
     patch.insert(
         "task_id".to_string(),
-        serde_json::Value::String(task_id.to_string()),
+        Value::String(task_id.to_string()),
     );
     patch.insert(
         "status".to_string(),
-        serde_json::Value::String(status_str.to_string()),
+        Value::String(status_str.to_string()),
     );
 
-    // 复制可选字段
     for field in &["total", "completed", "failed", "skipped"] {
         if let Some(val) = data.get(*field) {
             patch.insert(field.to_string(), val.clone());
@@ -143,7 +60,6 @@ fn format_event_payload(
         }
     }
 
-    // Python 特有字段（live 事件等）也复制到 patch 中
     for field in &[
         "title",
         "nickname",
@@ -162,30 +78,27 @@ fn format_event_payload(
         }
     }
 
-    // 构建完整的 TaskEvent 兼容 payload
     let mut event_data = serde_json::Map::new();
     event_data.insert(
         "event_type".to_string(),
-        serde_json::Value::String(event_type.to_string()),
+        Value::String(event_type.to_string()),
     );
     event_data.insert(
         "task_id".to_string(),
-        serde_json::Value::String(task_id.to_string()),
+        Value::String(task_id.to_string()),
     );
 
     if let Some(mode) = &mode_str {
-        event_data.insert("mode".to_string(), serde_json::Value::String(mode.clone()));
+        event_data.insert("mode".to_string(), Value::String(mode.clone()));
     }
     if let Some(url) = &url {
-        event_data.insert("url".to_string(), serde_json::Value::String(url.clone()));
+        event_data.insert("url".to_string(), Value::String(url.clone()));
     }
 
-    // 展开 patch 字段到 data 顶层（与 Rust TaskEvent 的 serde(flatten) 一致）
     for (k, v) in patch {
         event_data.insert(k, v);
     }
 
-    // 统一使用 task_type: "typed"
     serde_json::json!({
         "task_id": task_id,
         "task_type": "typed",

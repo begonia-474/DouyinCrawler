@@ -1,11 +1,9 @@
 """业务处理器 — 门面类，委托给各业务服务模块
 
-此文件保持原有接口不变，py_bridge.py 调用方式无需修改。
-实际业务逻辑已拆分到 core/services/ 下的独立服务模块中。
-
 能力分级：
-- 未标注的方法均为 [active]（被 py_bridge 或 task_manager 调用）
-- [reserved] 标注的方法由 task_manager 批量下载流程调用，暂无独立 py_bridge 入口
+- [active] 纯查询/解析方法（由 py_bridge 调用）
+- 旧 execution 方法（handle_one_video, handle_user_post, handle_live_record 等）已删除；
+  所有非音乐下载和直播执行已由 Rust TaskApplicationService 拥有。
 """
 
 import logging
@@ -31,7 +29,6 @@ class DouyinHandler:
                  music: bool = False, cover: bool = False, desc: bool = False,
                  interval: str = None, max_connections: int = 5,
                  max_retries: int = 5, max_tasks: int = 10):
-        # 统一配置对象（消除 16 个独立参数散落）
         if isinstance(download_path, str):
             download_path = Path(download_path)
         self.config = ServiceConfig(
@@ -54,7 +51,6 @@ class DouyinHandler:
             max_tasks=max_tasks,
         )
 
-        # 初始化各业务服务
         self._video = VideoService(self.config)
         self._user = UserService(self.config)
         self._collection = CollectionService(self.config)
@@ -64,25 +60,16 @@ class DouyinHandler:
         self._content = ContentService(self.config)
         self._music = MusicService(self.config)
 
-    # === 视频 ===
+    # === 视频（仅查询） ===
     async def handle_parse_video(self, url: str) -> dict:
         return await self._video.handle_parse_video(url)
-
-    async def handle_one_video(self, url: str, progress_callback=None) -> dict:
-        return await self._video.handle_one_video(url, progress_callback)
 
     # === 用户 ===
     async def handle_user_post_list(self, url: str, cursor: int = 0, count: int = 20) -> dict:
         return await self._user.handle_user_post_list(url, cursor, count)
 
-    async def handle_user_post(self, url: str, progress_callback=None) -> dict:
-        return await self._user.handle_user_post(url, progress_callback)
-
     async def handle_user_like_list(self, url: str, cursor: int = 0, count: int = 20) -> dict:
         return await self._user.handle_user_like_list(url, cursor, count)
-
-    async def handle_user_like(self, url: str, progress_callback=None) -> dict:
-        return await self._user.handle_user_like(url, progress_callback)
 
     async def handle_user_profile(self, url: str) -> dict:
         return await self._user.handle_user_profile(url)
@@ -94,31 +81,19 @@ class DouyinHandler:
         return await self._user.handle_user_follower(url, offset, count)
 
     # === 收藏 ===
-    async def handle_user_collection(self, progress_callback=None) -> dict:  # [reserved] 无 py_bridge/batch 调用
-        return await self._collection.handle_user_collection(progress_callback)
-
     async def handle_user_collects(self, progress_callback=None) -> dict:
         return await self._collection.handle_user_collects(progress_callback)
 
     async def handle_collects_video_list(self, collects_id: str, cursor: int = 0, count: int = 20) -> dict:
         return await self._collection.handle_collects_video_list(collects_id, cursor, count)
 
-    async def handle_collects_video(self, collects_id: str, progress_callback=None) -> dict:
-        return await self._collection.handle_collects_video(collects_id, progress_callback)
-
     # === 合集 ===
     async def handle_user_mix_list(self, url: str, cursor: int = 0, count: int = 20) -> dict:
         return await self._mix.handle_user_mix_list(url, cursor, count)
 
-    async def handle_user_mix(self, url: str, progress_callback=None) -> dict:
-        return await self._mix.handle_user_mix(url, progress_callback)
-
-    # === 直播 ===
+    # === 直播（仅查询/解析） ===
     async def handle_user_live(self, url: str, progress_callback=None) -> dict:
         return await self._live.handle_user_live(url, progress_callback)
-
-    async def handle_live_record(self, url: str, task_id: str, progress_callback=None, stop_event=None) -> dict:
-        return await self._live.handle_live_record(url, task_id, progress_callback, stop_event)
 
     async def handle_following_live(self) -> dict:
         return await self._live.handle_following_live()
@@ -136,7 +111,7 @@ class DouyinHandler:
     async def handle_post_stats(self, url: str) -> dict:
         return await self._content.handle_post_stats(url)
 
-    async def handle_locate_post(self, url: str, max_cursor: str, locate_item_cursor: str) -> dict:  # [reserved] 无 py_bridge 调用
+    async def handle_locate_post(self, url: str, max_cursor: str, locate_item_cursor: str) -> dict:
         return await self._content.handle_locate_post(url, max_cursor, locate_item_cursor)
 
     # === Feed ===
@@ -152,7 +127,7 @@ class DouyinHandler:
     async def handle_search(self, keyword: str, offset: int = 0, count: int = 10) -> dict:
         return await self._feed.handle_search(keyword, offset, count)
 
-    # === 音乐 ===
+    # === 音乐（唯一允许的 Python 下载路径） ===
     async def handle_user_music_collection(self, cursor: int = 0, count: int = 18) -> dict:
         return await self._music.handle_user_music_collection(cursor, count)
 

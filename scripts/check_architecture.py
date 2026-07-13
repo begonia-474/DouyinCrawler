@@ -39,7 +39,6 @@ RED_LINE_FILES = [
 # ============================================================
 
 FORBIDDEN_IMPORTS = {
-    # backend/ 已删除，禁止任何引用（排除本脚本自身）
     "from backend.": "backend/ 目录已删除，使用 core.task 替代",
     "import backend.": "backend/ 目录已删除，使用 core.task 替代",
 }
@@ -88,7 +87,6 @@ def check_forbidden_imports() -> list[str]:
             continue
         rel = py_file.relative_to(PROJECT_ROOT)
 
-        # 跳过本脚本自身
         if rel.parts[0] == "scripts":
             continue
 
@@ -113,7 +111,7 @@ def check_init_files() -> list[str]:
             errors.append(f"[INIT] 缺少: {rel_path}")
             continue
         size = full_path.stat().st_size
-        if size < 10:  # 不能只是空文件
+        if size < 10:
             errors.append(f"[INIT] 内容过少: {rel_path} ({size} bytes)")
     return errors
 
@@ -131,13 +129,32 @@ def check_relative_imports() -> list[str]:
             rel = py_file.relative_to(PROJECT_ROOT)
             with open(py_file) as f:
                 content = f.read()
-            # 检测跨子包的绝对 import（应使用相对 import）
             for line in content.split("\n"):
                 stripped = line.strip()
                 if stripped.startswith(f"from {rel_dir.replace('/', '.')}") and "import" in stripped:
                     errors.append(
                         f"[IMPORT] {rel}: 同包子包应使用相对 import，而非: {stripped}"
                     )
+    return errors
+
+
+def check_no_backend_imports() -> list[str]:
+    """额外检查: 确保没有任何 backend 引用"""
+    errors = []
+    for py_file in PROJECT_ROOT.rglob("*.py"):
+        if "__pycache__" in str(py_file) or ".venv" in str(py_file):
+            continue
+        rel = py_file.relative_to(PROJECT_ROOT)
+        if rel.parts[0] == "scripts":
+            continue
+        try:
+            with open(py_file) as f:
+                content = f.read()
+        except Exception:
+            continue
+        for i, line in enumerate(content.split("\n"), 1):
+            if "backend." in line and "check_architecture" not in line:
+                errors.append(f"[BACKEND] {rel}:{i} 仍引用 backend: {line.strip()[:60]}")
     return errors
 
 
@@ -149,6 +166,7 @@ def main():
     all_errors.extend(check_forbidden_imports())
     all_errors.extend(check_init_files())
     all_errors.extend(check_relative_imports())
+    all_errors.extend(check_no_backend_imports())
 
     if all_errors:
         print(f"[ARCH CHECK] {len(all_errors)} 个架构违规:")
