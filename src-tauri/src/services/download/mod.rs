@@ -9,6 +9,7 @@ pub mod events;
 pub mod task_service;
 pub mod engine;
 pub mod live;
+pub mod contract;
 
 use serde::{Deserialize, Serialize};
 

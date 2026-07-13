@@ -632,78 +632,124 @@ def resolve_urls(mode: str, url: str) -> dict:
         # 确定保存目录
         user_dir = download_path / app_name / "one" / (detail.author_nickname or "unknown")
         save_dir = user_dir / format_filename(naming, detail.to_dict()) if folderize else user_dir
+
+        from core.models.single_download import (
+            SingleAccessory,
+            SingleAccessoryKind,
+            SingleDownloadItem,
+            SingleDownloadPlanV1,
+            SingleMediaKind,
+            SingleOutputSpec,
+            SingleVideoMetadata,
+        )
+
+        base_name = format_filename(naming, detail.to_dict())
+        metadata = SingleVideoMetadata.model_validate(detail.to_db_dict())
+
+        def single_accessories(*, include_description: bool) -> list[SingleAccessory]:
+            accessories: list[SingleAccessory] = []
+            if music_enabled and detail.music_url:
+                accessories.append(SingleAccessory(
+                    kind=SingleAccessoryKind.MUSIC,
+                    url=detail.music_url,
+                    output=SingleOutputSpec(
+                        filename=f"{base_name}_music",
+                        suffix=".mp3",
+                        folder_name=None,
+                    ),
+                ))
+            if cover_enabled and detail.cover_url:
+                accessories.append(SingleAccessory(
+                    kind=SingleAccessoryKind.COVER,
+                    url=detail.cover_url,
+                    output=SingleOutputSpec(
+                        filename=f"{base_name}_cover",
+                        suffix=_cover_suffix(detail.cover_url),
+                        folder_name=None,
+                    ),
+                ))
+            if include_description and desc_enabled and detail.desc:
+                accessories.append(SingleAccessory(
+                    kind=SingleAccessoryKind.DESCRIPTION,
+                    content=detail.desc,
+                    output=SingleOutputSpec(
+                        filename=f"{base_name}_desc",
+                        suffix=".txt",
+                        folder_name=None,
+                    ),
+                ))
+            return accessories
+
+        def output(filename: str, suffix: str) -> SingleOutputSpec:
+            # ``save_dir`` already includes the folderized post directory for mode=one.
+            return SingleOutputSpec(
+                filename=filename,
+                suffix=suffix,
+                folder_name=None,
+            )
         
         # 构建下载项
         if detail.is_image_post and (detail.images or detail.images_video):
             # 图片帖子：先实况视频，再静态图（对齐 f2）
-            items = []
-            base_name = format_filename(naming, detail.to_dict())
+            items: list[SingleDownloadItem] = []
 
             # 实况视频（对齐 f2: _live_{i+1}.mp4）
             if detail.images_video:
                 for i, live_url in enumerate(detail.images_video):
                     if live_url:
-                        items.append({
-                            "aweme_id": detail.aweme_id,
-                            "download_url": live_url,
-                            "filename": f"{base_name}_live_{i + 1}",
-                            "suffix": ".mp4",
-                            "headers": base_headers.copy(),
-                            "content_type": "live_photo",
-                            "detail": detail.to_db_dict(),
-                            "accessories": [],
-                        })
+                        items.append(SingleDownloadItem(
+                            aweme_id=detail.aweme_id,
+                            urls=[live_url],
+                            kind=SingleMediaKind.LIVE_PHOTO,
+                            output=output(f"{base_name}_live_{i + 1}", ".mp4"),
+                            headers=base_headers.copy(),
+                            metadata=metadata,
+                        ))
 
             # 静态图（对齐 f2: _image_{i+1}.webp）
             for i, img_url in enumerate(detail.images):
                 if img_url:
-                    items.append({
-                        "aweme_id": detail.aweme_id,
-                        "download_url": img_url,
-                        "filename": f"{base_name}_image_{i + 1}",
-                        "suffix": ".webp",
-                        "headers": base_headers.copy(),
-                        "content_type": "image",
-                        "detail": detail.to_db_dict(),
-                        "accessories": [],
-                    })
+                    items.append(SingleDownloadItem(
+                        aweme_id=detail.aweme_id,
+                        urls=[img_url],
+                        kind=SingleMediaKind.IMAGE,
+                        output=output(f"{base_name}_image_{i + 1}", ".webp"),
+                        headers=base_headers.copy(),
+                        metadata=metadata,
+                    ))
 
             # 添加附属文件
             if items:
-                first_item = items[0]
-                if music_enabled and detail.music_url:
-                    first_item["accessories"].append({
-                        "url": detail.music_url,
-                        "filename": f"{format_filename(naming, detail.to_dict())}_music",
-                        "suffix": ".mp3",
-                        "content_type": "music",
-                    })
-                if cover_enabled and detail.cover_url:
-                    first_item["accessories"].append({
-                        "url": detail.cover_url,
-                        "filename": f"{format_filename(naming, detail.to_dict())}_cover",
-                        "suffix": _cover_suffix(detail.cover_url),
-                        "content_type": "cover",
-                    })
-            
-            return {
-                "success": True,
-                "items": items,
-                "save_dir": str(save_dir),
-                "total": len(items),
-            }
+                items[0].accessories.extend(
+                    single_accessories(include_description=False)
+                )
+
+            return SingleDownloadPlanV1(
+                save_dir=str(save_dir),
+                items=items,
+                total=len(items),
+            ).model_dump(mode="json")
         else:
             # 视频帖子
-            item = build_download_url(detail, "video")
-            if not item:
+            urls = detail.video_urls or ([detail.video_url] if detail.video_url else [])
+            urls = [download_url for download_url in urls if download_url]
+            if not urls:
                 return {"success": False, "error": "无法获取视频下载链接"}
-            
-            return {
-                "success": True,
-                "items": [item],
-                "save_dir": str(save_dir),
-                "total": 1,
-            }
+
+            item = SingleDownloadItem(
+                aweme_id=detail.aweme_id,
+                urls=urls,
+                kind=SingleMediaKind.VIDEO,
+                output=output(f"{base_name}_video", ".mp4"),
+                headers=base_headers.copy(),
+                metadata=metadata,
+                accessories=single_accessories(include_description=True),
+            )
+            return SingleDownloadPlanV1(
+                save_dir=str(save_dir),
+                items=[item],
+                total=1,
+            ).model_dump(mode="json")
     
     elif mode in ("post", "like", "mix", "collects"):
         # 批量解析 — 直接使用 crawler + PostDetailFilter 获取 to_db_dict() 格式

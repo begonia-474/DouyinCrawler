@@ -22,6 +22,16 @@ from core.models.requests import (
 )
 from core.models.config import ServiceConfig
 from core.models.download import DownloadMode
+from core.models.single_download import (
+    SINGLE_DOWNLOAD_CONTRACT_VERSION,
+    SingleAccessory,
+    SingleAccessoryKind,
+    SingleDownloadItem,
+    SingleDownloadPlanV1,
+    SingleMediaKind,
+    SingleOutputSpec,
+    SingleVideoMetadata,
+)
 from core.models.responses import (
     ErrorCode, BridgeResponse,
     VideoParseResult, UserProfileResult, UserPostsResult,
@@ -50,6 +60,10 @@ __all__ = [
     "ServiceConfig",
     # 下载模式
     "DownloadMode",
+    "SINGLE_DOWNLOAD_CONTRACT_VERSION",
+    "SingleAccessory", "SingleAccessoryKind", "SingleDownloadItem",
+    "SingleDownloadPlanV1", "SingleMediaKind", "SingleOutputSpec",
+    "SingleVideoMetadata",
     # 错误码
     "ErrorCode",
     # 桥接响应
