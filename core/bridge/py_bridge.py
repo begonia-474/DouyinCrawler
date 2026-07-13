@@ -896,88 +896,6 @@ def resolve_page(mode: str, url: str, cursor: int = 0, count: int = 20, aweme_id
     from core.models.paged_download import PagedDownloadPlanV1, PagedUserProfileV1
     from core.services.media_plan import build_media_items_v1
 
-    def _build_items_from_details(details, mode_for_dir):
-        """从 PostDetailFilter 列表构建 items（不过滤附属文件）"""
-        items = []
-        for detail in details:
-            if not hasattr(detail, 'aweme_id'):
-                continue
-            filename = format_filename(naming, detail.to_dict())
-            folder = filename if folderize else None
-
-            if detail.is_image_post and (detail.images or detail.images_video):
-                # 实况视频（对齐 f2: _live_{i+1}.mp4）
-                if detail.images_video:
-                    for i, live_url in enumerate(detail.images_video):
-                        if live_url:
-                            items.append({
-                                "aweme_id": detail.aweme_id,
-                                "download_url": live_url,
-                                "filename": f"{filename}_live_{i + 1}",
-                                "suffix": ".mp4",
-                                "headers": base_headers.copy(),
-                                "content_type": "live_photo",
-                                "detail": detail.to_db_dict(),
-                                "accessories": _build_accessories(detail, filename),
-                                "folder_name": folder,
-                            })
-
-                # 静态图（对齐 f2: _image_{i+1}.webp）
-                for i, img_url in enumerate(detail.images):
-                    if img_url:
-                        items.append({
-                            "aweme_id": detail.aweme_id,
-                            "download_url": img_url,
-                            "filename": f"{filename}_image_{i + 1}",
-                            "suffix": ".webp",
-                            "headers": base_headers.copy(),
-                            "content_type": "image",
-                            "detail": detail.to_db_dict(),
-                            "accessories": _build_accessories(detail, filename),
-                            "folder_name": folder,
-                        })
-            elif detail.video_urls or detail.video_url:
-                video_url = detail.video_urls if detail.video_urls else detail.video_url
-                items.append({
-                    "aweme_id": detail.aweme_id,
-                    "download_url": video_url,
-                    "filename": f"{filename}_video",
-                    "suffix": ".mp4",
-                    "headers": base_headers.copy(),
-                    "content_type": "video",
-                    "detail": detail.to_db_dict(),
-                    "accessories": _build_accessories(detail, filename),
-                    "folder_name": folder,
-                })
-        return items
-
-    def _build_accessories(detail, filename):
-        """构建附属文件列表（不过滤，返回所有可用的）"""
-        accessories = []
-        if detail.music_url:
-            accessories.append({
-                "url": detail.music_url,
-                "filename": f"{filename}_music",
-                "suffix": ".mp3",
-                "content_type": "music",
-            })
-        if detail.cover_url:
-            accessories.append({
-                "url": detail.cover_url,
-                "filename": f"{filename}_cover",
-                "suffix": _cover_suffix(detail.cover_url),
-                "content_type": "cover",
-            })
-        if detail.desc:
-            accessories.append({
-                "url": None,
-                "filename": f"{filename}_desc",
-                "suffix": ".txt",
-                "content_type": "desc",
-                "content": detail.desc,
-            })
-        return accessories
-
     if mode == "one":
         # 单视频：无分页，委托给 resolve_urls
         result = resolve_urls(mode, url)
@@ -1010,35 +928,26 @@ def resolve_page(mode: str, url: str, cursor: int = 0, count: int = 20, aweme_id
                 [detail], naming=naming, folderize=folderize, headers=base_headers
             )
 
-            if mode == "post":
-                return PagedDownloadPlanV1(
-                    save_dir=str(save_dir),
-                    items=typed_items,
-                    next_cursor=None,
-                    has_more=False,
-                    page_aweme_ids=[target_id],
-                ).model_dump(mode="json")
-            else:
-                items = _build_items_from_details([detail], mode)
-                return {
-                    "success": True,
-                    "items": items,
-                    "save_dir": str(save_dir),
-                    "total": len(items),
-                    "next_cursor": None,
-                    "has_more": False,
-                }
+            return PagedDownloadPlanV1(
+                mode=mode,
+                save_dir=str(save_dir),
+                items=typed_items,
+                next_cursor=None,
+                has_more=False,
+                page_aweme_ids=[target_id],
+            ).model_dump(mode="json")
 
         from core.crawler_engine.filter import UserPostFilter, UserProfileFilter
-        from core.utils import SecUserIdFetcher, MixIdFetcher
+        from core.utils import SecUserIdFetcher, MixIdFetcher, sanitize_filename
 
         user_profile = None
+        directory_nickname = None
         all_details = []
         next_cursor = None
         has_more = False
 
         async def _fetch_single_page():
-            nonlocal user_profile, all_details, next_cursor, has_more
+            nonlocal user_profile, directory_nickname, all_details, next_cursor, has_more
             async with handler._user._make_crawler() as crawler:
                 if mode in ("post", "like"):
                     sec_user_id = await SecUserIdFetcher.get_sec_user_id(url)
@@ -1050,8 +959,19 @@ def resolve_page(mode: str, url: str, cursor: int = 0, count: int = 20, aweme_id
                             profile_data = await crawler.fetch_user_profile(sec_user_id)
                             profile = UserProfileFilter(profile_data)
                             user_profile = profile.to_dict()
+                            directory_nickname = user_profile.get("nickname") or "unknown"
                         data = await crawler.fetch_user_post(sec_user_id, cursor, count)
                     else:
+                        # f2 stores liked works under the target user's directory, not
+                        # under whichever video author happens to appear first on a page.
+                        # Resolve the profile on every stateless page request so save_dir
+                        # remains stable; only page one exposes it for persistence.
+                        profile_data = await crawler.fetch_user_profile(sec_user_id)
+                        profile = UserProfileFilter(profile_data)
+                        resolved_profile = profile.to_dict()
+                        directory_nickname = resolved_profile.get("nickname") or "unknown"
+                        if cursor == 0:
+                            user_profile = resolved_profile
                         data = await crawler.fetch_user_favorite(sec_user_id, cursor, count)
                 elif mode == "mix":
                     mix_id = await MixIdFetcher.get_mix_id(url)
@@ -1060,6 +980,10 @@ def resolve_page(mode: str, url: str, cursor: int = 0, count: int = 20, aweme_id
                     data = await crawler.fetch_mix_aweme(mix_id, cursor, count)
                 elif mode == "collects":
                     collects_id = url
+                    # The collection contains works from unrelated authors. Use the
+                    # collection identity as the stable directory component instead
+                    # of the first author on each page.
+                    directory_nickname = sanitize_filename(str(collects_id)) or "unknown"
                     data = await crawler.fetch_user_collects_video(collects_id, cursor, count)
                 else:
                     data = None
@@ -1081,55 +1005,43 @@ def resolve_page(mode: str, url: str, cursor: int = 0, count: int = 20, aweme_id
             return {"success": False, "error": error}
 
         # 对齐 f2：download_path / app_name / mode / nickname
-        nickname = "unknown"
-        if user_profile:
-            nickname = user_profile.get("nickname") or "unknown"
-        elif all_details:
-            first = all_details[0]
-            nickname = getattr(first, "author_nickname", None) or "unknown"
+        nickname = directory_nickname or "unknown"
+        if nickname == "unknown":
+            if user_profile:
+                nickname = user_profile.get("nickname") or "unknown"
+            elif all_details:
+                first = all_details[0]
+                nickname = getattr(first, "author_nickname", None) or "unknown"
         save_dir = download_path / app_name / mode / nickname
 
-        if mode == "post":
-            typed_items = build_media_items_v1(
-                all_details, naming=naming, folderize=folderize, headers=base_headers
+        typed_items = build_media_items_v1(
+            all_details, naming=naming, folderize=folderize, headers=base_headers
+        )
+        page_aweme_ids = []
+        seen_ids = set()
+        for d in all_details:
+            aid = str(getattr(d, "aweme_id", "") or "").strip()
+            if aid and aid not in seen_ids:
+                seen_ids.add(aid)
+                page_aweme_ids.append(aid)
+        typed_profile = None
+        if user_profile:
+            typed_profile = PagedUserProfileV1.model_validate(
+                {
+                    field: user_profile.get(field)
+                    for field in PagedUserProfileV1.model_fields
+                    if field in user_profile
+                }
             )
-            page_aweme_ids = []
-            seen_ids = set()
-            for d in all_details:
-                aid = str(getattr(d, "aweme_id", "") or "").strip()
-                if aid and aid not in seen_ids:
-                    seen_ids.add(aid)
-                    page_aweme_ids.append(aid)
-            typed_profile = None
-            if user_profile:
-                typed_profile = PagedUserProfileV1.model_validate(
-                    {
-                        field: user_profile.get(field)
-                        for field in PagedUserProfileV1.model_fields
-                        if field in user_profile
-                    }
-                )
-            return PagedDownloadPlanV1(
-                save_dir=str(save_dir),
-                items=typed_items,
-                next_cursor=next_cursor,
-                has_more=has_more,
-                page_aweme_ids=page_aweme_ids,
-                user_profile=typed_profile,
-            ).model_dump(mode="json")
-        else:
-            items = _build_items_from_details(all_details, mode)
-            result = {
-                "success": True,
-                "items": items,
-                "save_dir": str(save_dir),
-                "total": len(items),
-                "next_cursor": next_cursor,
-                "has_more": has_more,
-            }
-            if user_profile:
-                result["user_profile"] = user_profile
-            return result
+        return PagedDownloadPlanV1(
+            mode=mode,
+            save_dir=str(save_dir),
+            items=typed_items,
+            next_cursor=next_cursor,
+            has_more=has_more,
+            page_aweme_ids=page_aweme_ids,
+            user_profile=typed_profile,
+        ).model_dump(mode="json")
 
     elif mode == "music":
         # 音乐：单次拉取，无分页

@@ -53,7 +53,7 @@ class PagedDownloadPlanV1(BaseModel):
 
     success: Literal[True] = True
     contract_version: Literal[PAGED_DOWNLOAD_CONTRACT_VERSION] = PAGED_DOWNLOAD_CONTRACT_VERSION
-    mode: Literal["post"] = "post"
+    mode: Literal["post", "like", "mix", "collects"] = "post"
     save_dir: str = Field(min_length=1)
     items: list[MediaDownloadItemV1] = Field(default_factory=list)
     next_cursor: Optional[int] = None

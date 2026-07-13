@@ -1,4 +1,4 @@
-"""Offline contract tests for the Python -> Rust paged post plan."""
+"""Offline contract tests for Python -> Rust paged download plans."""
 
 from contextlib import asynccontextmanager
 from copy import deepcopy
@@ -118,7 +118,7 @@ def test_paged_model_enforces_cursor_protocol(has_more, next_cursor, items, mess
     ("field", "value"),
     [
         ("contract_version", 2),
-        ("mode", "like"),
+        ("mode", "unknown"),
         ("success", False),
     ],
 )
@@ -338,3 +338,444 @@ def test_resolve_post_returns_two_exact_typed_pages(monkeypatch, tmp_path):
     assert second["user_profile"] is None
     assert second["save_dir"] == first["save_dir"]
     assert [item["media_key"] for item in second["items"]] == ["300:video:0"]
+
+
+# ============================================================
+# Mode-specific adapter tests: like, mix, collects
+# ============================================================
+
+
+def _install_like_resolver(monkeypatch, tmp_path: Path, pages: dict[int, dict]):
+    calls = []
+
+    class FakeCrawler:
+        async def fetch_user_profile(self, sec_user_id):
+            assert sec_user_id == "sec-user-like"
+            return {"profile": True}
+
+        async def fetch_user_favorite(self, sec_user_id, cursor, count):
+            calls.append(("favorite", sec_user_id, cursor, count))
+            return pages[cursor]
+
+    @asynccontextmanager
+    async def make_crawler():
+        yield FakeCrawler()
+
+    class FakePostFilter:
+        def __init__(self, data):
+            self._data = data
+            self.has_more = data["has_more"]
+            self.max_cursor = data["next_cursor"]
+
+        def get_video_list(self):
+            return self._data["details"]
+
+    class FakeProfileFilter:
+        def __init__(self, _data):
+            pass
+
+        def to_dict(self):
+            return {"sec_user_id": "sec-user-like", "nickname": "liked-owner"}
+
+    async def get_sec_user_id(_url):
+        return "sec-user-like"
+
+    handler = SimpleNamespace(
+        config=SimpleNamespace(
+            cookie="sessionid=test",
+            naming="{aweme_id}",
+            download_path=tmp_path,
+            app_name="douyin",
+            folderize=False,
+        ),
+        _user=SimpleNamespace(_make_crawler=make_crawler),
+    )
+    monkeypatch.setattr(py_bridge, "_get_task_manager", lambda: SimpleNamespace(handler=handler))
+    monkeypatch.setattr("core.utils.SecUserIdFetcher.get_sec_user_id", get_sec_user_id)
+    monkeypatch.setattr("core.crawler_engine.filter.UserPostFilter", FakePostFilter)
+    monkeypatch.setattr("core.crawler_engine.filter.UserProfileFilter", FakeProfileFilter)
+    return calls
+
+
+def _install_mix_resolver(monkeypatch, tmp_path: Path, pages: dict[int, dict]):
+    calls = []
+
+    class FakeCrawler:
+        async def fetch_mix_aweme(self, mix_id, cursor, count):
+            calls.append(("mix", mix_id, cursor, count))
+            return pages[cursor]
+
+    @asynccontextmanager
+    async def make_crawler():
+        yield FakeCrawler()
+
+    class FakePostFilter:
+        def __init__(self, data):
+            self._data = data
+            self.has_more = data["has_more"]
+            self.max_cursor = data["next_cursor"]
+
+        def get_video_list(self):
+            return self._data["details"]
+
+    async def get_mix_id(_url):
+        return "mix-123"
+
+    handler = SimpleNamespace(
+        config=SimpleNamespace(
+            cookie="sessionid=test",
+            naming="{aweme_id}",
+            download_path=tmp_path,
+            app_name="douyin",
+            folderize=False,
+        ),
+        _user=SimpleNamespace(_make_crawler=make_crawler),
+        _mix=SimpleNamespace(_make_crawler=make_crawler),
+    )
+    monkeypatch.setattr(py_bridge, "_get_task_manager", lambda: SimpleNamespace(handler=handler))
+    monkeypatch.setattr("core.utils.MixIdFetcher.get_mix_id", get_mix_id)
+    monkeypatch.setattr("core.crawler_engine.filter.UserPostFilter", FakePostFilter)
+    return calls
+
+
+def _install_collects_resolver(monkeypatch, tmp_path: Path, pages: dict[int, dict]):
+    calls = []
+
+    class FakeCrawler:
+        async def fetch_user_collects_video(self, collects_id, cursor, count):
+            calls.append(("collects", collects_id, cursor, count))
+            return pages[cursor]
+
+    @asynccontextmanager
+    async def make_crawler():
+        yield FakeCrawler()
+
+    class FakePostFilter:
+        def __init__(self, data):
+            self._data = data
+            self.has_more = data["has_more"]
+            self.max_cursor = data["next_cursor"]
+
+        def get_video_list(self):
+            return self._data["details"]
+
+    handler = SimpleNamespace(
+        config=SimpleNamespace(
+            cookie="sessionid=test",
+            naming="{aweme_id}",
+            download_path=tmp_path,
+            app_name="douyin",
+            folderize=False,
+        ),
+        _user=SimpleNamespace(_make_crawler=make_crawler),
+        _collection=SimpleNamespace(_make_crawler=make_crawler),
+    )
+    monkeypatch.setattr(py_bridge, "_get_task_manager", lambda: SimpleNamespace(handler=handler))
+    monkeypatch.setattr("core.crawler_engine.filter.UserPostFilter", FakePostFilter)
+    return calls
+
+
+def test_resolve_like_returns_typed_plan(monkeypatch, tmp_path):
+    pages = {
+        0: {
+            "details": [FakeDetail("like-1"), FakeDetail("like-2")],
+            "has_more": True,
+            "next_cursor": 99,
+        },
+        99: {
+            "details": [FakeDetail("like-3")],
+            "has_more": False,
+            "next_cursor": 0,
+        },
+    }
+    calls = _install_like_resolver(monkeypatch, tmp_path, pages)
+
+    first = py_bridge.resolve_page("like", "https://douyin.com/user/sec-like", 0, 2)
+    second = py_bridge.resolve_page("like", "https://douyin.com/user/sec-like", 99, 2)
+
+    assert calls == [("favorite", "sec-user-like", 0, 2), ("favorite", "sec-user-like", 99, 2)]
+    assert first["success"] is True
+    assert first["contract_version"] == 1
+    assert first["mode"] == "like"
+    assert first["next_cursor"] == 99
+    assert first["has_more"] is True
+    assert first["page_aweme_ids"] == ["like-1", "like-2"]
+    assert first["save_dir"] == str(tmp_path / "douyin" / "like" / "liked-owner")
+    assert first["user_profile"]["nickname"] == "liked-owner"
+
+    assert second["next_cursor"] is None
+    assert second["has_more"] is False
+    assert second["page_aweme_ids"] == ["like-3"]
+    assert second["user_profile"] is None
+    assert [item["media_key"] for item in second["items"]] == ["like-3:video:0"]
+
+
+def test_resolve_like_uses_target_profile_for_stable_cross_page_directory(
+    monkeypatch, tmp_path
+):
+    pages = {
+        0: {
+            "details": [FakeDetail("like-a", author_nickname="video-author-a")],
+            "has_more": True,
+            "next_cursor": 99,
+        },
+        99: {
+            "details": [FakeDetail("like-b", author_nickname="video-author-b")],
+            "has_more": False,
+            "next_cursor": 0,
+        },
+    }
+    _install_like_resolver(monkeypatch, tmp_path, pages)
+
+    first = py_bridge.resolve_page("like", "https://douyin.com/user/sec-like", 0, 1)
+    second = py_bridge.resolve_page("like", "https://douyin.com/user/sec-like", 99, 1)
+
+    expected = str(tmp_path / "douyin" / "like" / "liked-owner")
+    assert first["save_dir"] == expected
+    assert second["save_dir"] == expected
+    assert first["user_profile"]["nickname"] == "liked-owner"
+    assert second["user_profile"] is None
+
+
+def test_resolve_mix_returns_typed_plan(monkeypatch, tmp_path):
+    pages = {
+        0: {
+            "details": [FakeDetail("mix-1")],
+            "has_more": False,
+            "next_cursor": 0,
+        },
+    }
+    calls = _install_mix_resolver(monkeypatch, tmp_path, pages)
+
+    result = py_bridge.resolve_page("mix", "https://douyin.com/mix/abc", 0, 2)
+
+    assert calls == [("mix", "mix-123", 0, 2)]
+    assert result["success"] is True
+    assert result["contract_version"] == 1
+    assert result["mode"] == "mix"
+    assert result["next_cursor"] is None
+    assert result["has_more"] is False
+    assert result["page_aweme_ids"] == ["mix-1"]
+    assert result["user_profile"] is None
+    assert result["save_dir"] == str(tmp_path / "douyin" / "mix" / "tester")
+    assert [item["media_key"] for item in result["items"]] == ["mix-1:video:0"]
+
+
+def test_resolve_collects_returns_typed_plan(monkeypatch, tmp_path):
+    pages = {
+        0: {
+            "details": [FakeDetail("col-1"), FakeDetail("col-2", image_post=True)],
+            "has_more": False,
+            "next_cursor": 0,
+        },
+    }
+    calls = _install_collects_resolver(monkeypatch, tmp_path, pages)
+
+    result = py_bridge.resolve_page("collects", "collects-abc-123", 0, 2)
+
+    assert calls == [("collects", "collects-abc-123", 0, 2)]
+    assert result["success"] is True
+    assert result["contract_version"] == 1
+    assert result["mode"] == "collects"
+    assert result["next_cursor"] is None
+    assert result["has_more"] is False
+    assert result["page_aweme_ids"] == ["col-1", "col-2"]
+    assert result["user_profile"] is None
+    assert result["save_dir"] == str(
+        tmp_path / "douyin" / "collects" / "collects-abc-123"
+    )
+    media_keys = [item["media_key"] for item in result["items"]]
+    assert media_keys == ["col-1:video:0", "col-2:live_photo:1", "col-2:image:1", "col-2:image:2"]
+
+
+def test_resolve_collects_uses_collection_id_for_stable_cross_page_directory(
+    monkeypatch, tmp_path
+):
+    pages = {
+        0: {
+            "details": [FakeDetail("col-a", author_nickname="video-author-a")],
+            "has_more": True,
+            "next_cursor": 20,
+        },
+        20: {
+            "details": [FakeDetail("col-b", author_nickname="video-author-b")],
+            "has_more": False,
+            "next_cursor": 0,
+        },
+    }
+    _install_collects_resolver(monkeypatch, tmp_path, pages)
+
+    first = py_bridge.resolve_page("collects", "collects-abc-123", 0, 1)
+    second = py_bridge.resolve_page("collects", "collects-abc-123", 20, 1)
+
+    expected = str(tmp_path / "douyin" / "collects" / "collects-abc-123")
+    assert first["save_dir"] == expected
+    assert second["save_dir"] == expected
+
+
+def test_resolve_like_mix_collects_have_no_items_built_from_details(monkeypatch, tmp_path):
+    """Verify that like/mix/collects do not use _build_items_from_details (already removed)."""
+    pages = {
+        0: {
+            "details": [FakeDetail("vid-1"), FakeDetail("vid-2")],
+            "has_more": False,
+            "next_cursor": 0,
+        },
+    }
+    _install_like_resolver(monkeypatch, tmp_path, pages)
+    result = py_bridge.resolve_page("like", "https://douyin.com/user/sec-like", 0, 2)
+    assert result["contract_version"] == 1
+    assert all(item["media_key"] for item in result["items"])
+    assert all(item["kind"] in ("video", "image", "live_photo") for item in result["items"])
+
+
+def test_resolve_like_page_aweme_ids_includes_all_source_ids(monkeypatch, tmp_path):
+    prohibited = FakeDetail("bad", prohibited=True)
+    normal = FakeDetail("good")
+    pages = {
+        0: {
+            "details": [prohibited, normal],
+            "has_more": False,
+            "next_cursor": 0,
+        },
+    }
+    _install_like_resolver(monkeypatch, tmp_path, pages)
+    result = py_bridge.resolve_page("like", "https://douyin.com/user/sec-like", 0, 2)
+    assert result["page_aweme_ids"] == ["bad", "good"]
+    item_ids = [item["aweme_id"] for item in result["items"]]
+    assert "bad" not in item_ids
+    assert "good" in item_ids
+
+
+def test_resolve_mix_has_more_next_cursor_contract(monkeypatch, tmp_path):
+    """mix mode: has_more=True requires next_cursor; has_more=False requires next_cursor=None."""
+    pages = {
+        0: {
+            "details": [FakeDetail("mix-page1")],
+            "has_more": True,
+            "next_cursor": 42,
+        },
+    }
+    _install_mix_resolver(monkeypatch, tmp_path, pages)
+    first = py_bridge.resolve_page("mix", "https://douyin.com/mix/abc", 0, 2)
+    assert first["has_more"] is True
+    assert first["next_cursor"] == 42
+
+    pages2 = {
+        42: {
+            "details": [FakeDetail("mix-last")],
+            "has_more": False,
+            "next_cursor": 0,
+        },
+    }
+    _install_mix_resolver(monkeypatch, tmp_path, pages2)
+    last = py_bridge.resolve_page("mix", "https://douyin.com/mix/abc", 42, 2)
+    assert last["has_more"] is False
+    assert last["next_cursor"] is None
+
+
+def _install_fast_path(monkeypatch, tmp_path):
+    """Install handler with _video._make_crawler for single-aweme fast path tests."""
+
+    def _make_detail_data(aweme_id):
+        return {
+            "aweme_detail": {
+                "aweme_id": aweme_id,
+                "desc": f"desc-{aweme_id}",
+                "create_time": 1700000000,
+                "aweme_type": 0,
+                "author": {
+                    "nickname": "tester",
+                    "sec_uid": "MS4w.secret",
+                    "uid": "12345",
+                },
+                "video": {
+                    "bit_rate": [{
+                        "play_addr": {
+                            "url_list": [f"https://cdn/{aweme_id}.mp4"]
+                        }
+                    }],
+                    "origin_cover": {"url_list": []},
+                },
+                "images": None,
+            }
+        }
+
+    handler = SimpleNamespace(
+        config=SimpleNamespace(
+            cookie="sessionid=test",
+            naming="{aweme_id}",
+            download_path=tmp_path,
+            app_name="douyin",
+            folderize=False,
+        ),
+        _video=SimpleNamespace(),
+    )
+
+    class FakeCrawler:
+        async def fetch_post_detail(self, aweme_id):
+            return _make_detail_data(aweme_id)
+
+    @asynccontextmanager
+    async def make_crawler():
+        yield FakeCrawler()
+
+    handler._video._make_crawler = make_crawler
+    monkeypatch.setattr(py_bridge, "_get_task_manager", lambda: SimpleNamespace(handler=handler))
+    return handler
+
+
+def test_resolve_like_single_aweme_fast_path_typed(monkeypatch, tmp_path):
+    """Single aweme_id fast path returns typed plan for like mode."""
+    _install_fast_path(monkeypatch, tmp_path)
+    result = py_bridge.resolve_page("like", "https://douyin.com/user/sec-like", 0, 2, aweme_ids=["fast-like"])
+    assert result["success"] is True
+    assert result["contract_version"] == 1
+    assert result["mode"] == "like"
+    assert result["has_more"] is False
+    assert result["page_aweme_ids"] == ["fast-like"]
+    items = result["items"]
+    assert len(items) == 1
+    assert items[0]["media_key"] == "fast-like:video:0"
+
+
+def test_resolve_post_single_aweme_fast_path_typed(monkeypatch, tmp_path):
+    """Single aweme_id fast path returns typed plan for post mode."""
+    _install_fast_path(monkeypatch, tmp_path)
+    result = py_bridge.resolve_page("post", "https://douyin.com/user/sec-user", 0, 2, aweme_ids=["fast-post"])
+    assert result["success"] is True
+    assert result["contract_version"] == 1
+    assert result["mode"] == "post"
+    assert result["has_more"] is False
+    assert result["page_aweme_ids"] == ["fast-post"]
+    items = result["items"]
+    assert len(items) == 1
+    assert items[0]["media_key"] == "fast-post:video:0"
+
+
+def test_resolve_mix_single_aweme_fast_path_typed(monkeypatch, tmp_path):
+    """Single aweme_id fast path returns typed plan for mix mode."""
+    _install_fast_path(monkeypatch, tmp_path)
+    result = py_bridge.resolve_page("mix", "https://douyin.com/mix/abc", 0, 2, aweme_ids=["fast-mix"])
+    assert result["success"] is True
+    assert result["contract_version"] == 1
+    assert result["mode"] == "mix"
+    assert result["has_more"] is False
+    assert result["page_aweme_ids"] == ["fast-mix"]
+    items = result["items"]
+    assert len(items) == 1
+    assert items[0]["media_key"] == "fast-mix:video:0"
+
+
+def test_resolve_collects_single_aweme_fast_path_typed(monkeypatch, tmp_path):
+    """Single aweme_id fast path returns typed plan for collects mode."""
+    _install_fast_path(monkeypatch, tmp_path)
+    result = py_bridge.resolve_page("collects", "collects-id", 0, 2, aweme_ids=["fast-col"])
+    assert result["success"] is True
+    assert result["contract_version"] == 1
+    assert result["mode"] == "collects"
+    assert result["has_more"] is False
+    assert result["page_aweme_ids"] == ["fast-col"]
+    items = result["items"]
+    assert len(items) == 1
+    assert items[0]["media_key"] == "fast-col:video:0"

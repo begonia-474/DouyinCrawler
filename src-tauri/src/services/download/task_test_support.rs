@@ -345,6 +345,10 @@ impl TaskHarness {
     }
 
     pub(crate) fn paged_plan(&self, url: &str, aweme_ids: &[&str], has_more: bool, next_cursor: Option<i64>) -> PagedDownloadPlanV1 {
+        self.paged_plan_for_mode("post", url, aweme_ids, has_more, next_cursor)
+    }
+
+    pub(crate) fn paged_plan_for_mode(&self, mode: &str, url: &str, aweme_ids: &[&str], has_more: bool, next_cursor: Option<i64>) -> PagedDownloadPlanV1 {
         let items: Vec<SingleDownloadItem> = aweme_ids.iter().map(|aweme_id| {
             SingleDownloadItem {
                 media_key: format!("{aweme_id}:video:0"),
@@ -364,7 +368,7 @@ impl TaskHarness {
         PagedDownloadPlanV1 {
             success: true,
             contract_version: 1,
-            mode: "post".to_string(),
+            mode: mode.to_string(),
             save_dir: self.root.to_string_lossy().to_string(),
             items,
             next_cursor,
@@ -405,29 +409,22 @@ impl TaskHarness {
     }
 
     pub(crate) async fn start_paged(&self, resolver: FixedPagedResolver) -> String {
-        TaskApplicationService::with_paged_test_adapters(
-            &self.state,
-            Arc::new(resolver),
-            self.events.clone(),
-        )
-        .start_batch_download_mode(
-            DownloadMode::Post,
-            "https://fixture.invalid/user",
-            &[],
-        )
-        .await
-        .unwrap()
+        self.start_paged_for_mode(DownloadMode::Post, "https://fixture.invalid/user", resolver, &[]).await
     }
 
     pub(crate) async fn start_paged_selection(&self, resolver: FixedPagedResolver, aweme_ids: &[&str]) -> String {
+        self.start_paged_for_mode(DownloadMode::Post, "https://fixture.invalid/user", resolver, aweme_ids).await
+    }
+
+    pub(crate) async fn start_paged_for_mode(&self, mode: DownloadMode, url: &str, resolver: FixedPagedResolver, aweme_ids: &[&str]) -> String {
         TaskApplicationService::with_paged_test_adapters(
             &self.state,
             Arc::new(resolver),
             self.events.clone(),
         )
         .start_batch_download_mode(
-            DownloadMode::Post,
-            "https://fixture.invalid/user",
+            mode,
+            url,
             &aweme_ids.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
         )
         .await
@@ -1771,4 +1768,261 @@ async fn public_gallery_all_failure_is_error() {
         .as_deref()
         .unwrap_or("")
         .contains("所有下载均失败"));
+}
+
+// ============================================================
+// Cross-mode paged task tests (issue 08: like/mix/collects)
+// ============================================================
+
+/// Helper to run a two-page success test for a given mode.
+async fn assert_two_page_mode_success(
+    mode: DownloadMode,
+    url: &str,
+) {
+    let server = LocalHttpServer::start(HttpBehavior::Success(b"page-data")).await;
+    let harness = TaskHarness::new();
+    let plan1 = harness.paged_plan_for_mode(mode.as_str(), server.url(), &["item-1"], true, Some(100));
+    let plan2 = harness.paged_plan_for_mode(mode.as_str(), server.url(), &["item-2"], false, None);
+    let resolver = FixedPagedResolver::multi(vec![
+        PagedResolverResult::Plan(plan1),
+        PagedResolverResult::Plan(plan2),
+    ]);
+    let task_id = harness
+        .start_paged_for_mode(mode, url, resolver.clone(), &[])
+        .await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "completed");
+    assert_eq!(task.mode, mode.as_str());
+    assert_eq!(task.completed, 2);
+    assert_eq!(
+        resolver.calls().iter().map(|call| call.cursor).collect::<Vec<_>>(),
+        [0, 100]
+    );
+    assert!(resolver.calls().iter().all(|call| call.mode == mode.as_str()));
+    let detail = harness.state.db.get_task_detail(&task_id).unwrap().unwrap();
+    assert_eq!(detail.items.len(), 2);
+    assert_started_event(&harness, &task_id, mode, url);
+    assert_terminal_event(&harness, &task_id, TaskStatus::Completed);
+    let finished_count = harness
+        .events
+        .snapshot()
+        .iter()
+        .filter(|event| {
+            event.task_id == task_id && event.event_type == TaskEventType::Finished
+        })
+        .count();
+    assert_eq!(finished_count, 1);
+}
+
+#[tokio::test]
+async fn public_paged_like_two_pages_success() {
+    assert_two_page_mode_success(
+        DownloadMode::Like,
+        "https://fixture.invalid/like-user",
+    ).await;
+}
+
+#[tokio::test]
+async fn public_paged_mix_two_pages_success() {
+    assert_two_page_mode_success(
+        DownloadMode::Mix,
+        "https://fixture.invalid/mix",
+    ).await;
+}
+
+#[tokio::test]
+async fn public_paged_collects_two_pages_success() {
+    assert_two_page_mode_success(
+        DownloadMode::Collects,
+        "https://fixture.invalid/collects",
+    ).await;
+}
+
+/// Cross-mode table-driven tests: selected work on later page
+#[tokio::test]
+async fn public_paged_cross_mode_selection_on_later_page() {
+    let modes = [
+        (DownloadMode::Like, "https://fixture.invalid/like"),
+        (DownloadMode::Mix, "https://fixture.invalid/mix"),
+        (DownloadMode::Collects, "https://fixture.invalid/collects"),
+    ];
+    for (mode, url) in &modes {
+        let server = LocalHttpServer::start(HttpBehavior::Success(b"late-data")).await;
+        let harness = TaskHarness::new();
+        let plan1 = harness.paged_plan_for_mode(mode.as_str(), "http://127.0.0.1:1/unused", &["other"], true, Some(50));
+        let mut plan2 = harness.paged_plan_for_mode(mode.as_str(), server.url(), &["target"], false, None);
+        plan2.items[0].media_key = "target:image:1".to_string();
+        plan2.items[0].kind = SingleMediaKind::Image;
+        plan2.items[0].output.filename = "target_image_1".to_string();
+        plan2.items[0].output.suffix = ".webp".to_string();
+        let mut second_image = plan2.items[0].clone();
+        second_image.media_key = "target:image:2".to_string();
+        second_image.output.filename = "target_image_2".to_string();
+        plan2.items.push(second_image);
+        let resolver = FixedPagedResolver::multi(vec![
+            PagedResolverResult::Plan(plan1),
+            PagedResolverResult::Plan(plan2),
+        ]);
+        let task_id = harness
+            .start_paged_for_mode(*mode, url, resolver, &["target"])
+            .await;
+
+        let task = harness.wait_for_terminal(&task_id).await;
+        assert_eq!(task.status, "completed", "mode={}", mode.as_str());
+        assert_eq!(task.completed, 2, "mode={}", mode.as_str());
+        assert!(harness.root.join("target_image_1.webp").exists(), "mode={}", mode.as_str());
+        assert!(harness.root.join("target_image_2.webp").exists(), "mode={}", mode.as_str());
+    }
+}
+
+/// Cross-mode test: returned mode drift is rejected
+#[tokio::test]
+async fn public_paged_cross_mode_rejects_mode_drift() {
+    let harness = TaskHarness::new();
+    let mode = DownloadMode::Like;
+    let mut plan = harness.paged_plan_for_mode(mode.as_str(), "http://127.0.0.1:1/unused", &["item"], false, None);
+    plan.mode = "mix".to_string();
+    let task_id = harness
+        .start_paged_for_mode(mode, "https://fixture.invalid/like", FixedPagedResolver::single(plan), &[])
+        .await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "error");
+    assert!(task.error_msg.as_deref().unwrap_or("").contains("mode 漂移"), "mode drift must be detected");
+}
+
+/// Cross-mode test: max_counts counts works not media files
+#[tokio::test]
+async fn public_paged_cross_mode_max_counts_works_not_media() {
+    let server = LocalHttpServer::start(HttpBehavior::Success(b"max-data")).await;
+    let harness = TaskHarness::with_max_counts(1);
+    let mode = DownloadMode::Collects;
+    let mut plan = harness.paged_plan_for_mode(mode.as_str(), server.url(), &["work-a", "work-b"], true, Some(100));
+    plan.items[0].media_key = "work-a:image:1".to_string();
+    plan.items[0].kind = SingleMediaKind::Image;
+    plan.items[0].output.filename = "work-a_image_1".to_string();
+    plan.items[0].output.suffix = ".webp".to_string();
+    let mut extra_item = plan.items[0].clone();
+    extra_item.media_key = "work-a:image:2".to_string();
+    extra_item.output.filename = "work-a_image_2".to_string();
+    plan.items.push(extra_item);
+    let resolver = FixedPagedResolver::single(plan);
+    let task_id = harness
+        .start_paged_for_mode(mode, "https://fixture.invalid/collects", resolver.clone(), &[])
+        .await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "completed");
+    assert_eq!(task.total, 2, "must keep complete media group");
+    let items = harness.state.db.get_task_items(&task_id, None).unwrap();
+    assert!(items.iter().all(|item| item.aweme_id.as_deref() == Some("work-a")));
+    assert_eq!(resolver.calls()[0].count, 1);
+}
+
+/// Cross-mode test: existing files are skipped
+#[tokio::test]
+async fn public_paged_cross_mode_existing_file_skipped() {
+    let harness = TaskHarness::new();
+    std::fs::write(harness.media_path("skip-me"), b"existing").unwrap();
+    let plan = harness.paged_plan_for_mode("like", "http://127.0.0.1:1/unused", &["skip-me"], false, None);
+    let task_id = harness
+        .start_paged_for_mode(DownloadMode::Like, "https://fixture.invalid/like", FixedPagedResolver::single(plan), &[])
+        .await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "completed");
+    assert_eq!(task.skipped, 1);
+}
+
+/// Cross-mode test: media-free source page with has_more=true continues
+#[tokio::test]
+async fn public_paged_cross_mode_media_free_page_continues() {
+    let server = LocalHttpServer::start(HttpBehavior::Success(b"after-free")).await;
+    let harness = TaskHarness::new();
+    let mut first = harness.paged_plan_for_mode("mix", "http://127.0.0.1:1/unused", &[], true, Some(50));
+    first.page_aweme_ids = vec!["no-media".to_string()];
+    let second = harness.paged_plan_for_mode("mix", server.url(), &["downloadable"], false, None);
+    let resolver = FixedPagedResolver::multi(vec![
+        PagedResolverResult::Plan(first),
+        PagedResolverResult::Plan(second),
+    ]);
+    let task_id = harness
+        .start_paged_for_mode(DownloadMode::Mix, "https://fixture.invalid/mix", resolver.clone(), &[])
+        .await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "completed");
+    assert_eq!(task.total, 1);
+    assert_eq!(task.completed, 1);
+    assert_eq!(resolver.calls().len(), 2);
+}
+
+/// Cross-mode test: empty source page with has_more=true is protocol error
+#[tokio::test]
+async fn public_paged_cross_mode_empty_page_with_has_more_is_protocol_error() {
+    let harness = TaskHarness::new();
+    let plan = harness.paged_plan_for_mode("collects", "http://127.0.0.1:1/unused", &[], true, Some(10));
+    let task_id = harness
+        .start_paged_for_mode(DownloadMode::Collects, "https://fixture.invalid/collects", FixedPagedResolver::single(plan), &[])
+        .await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "error");
+    assert!(task.error_msg.as_deref().unwrap_or("").contains("page_aweme_ids 为空"));
+}
+
+/// Cross-mode test: later-page resolver error retains earlier files
+#[tokio::test]
+async fn public_paged_cross_mode_later_page_error_retains_earlier() {
+    let server = LocalHttpServer::start(HttpBehavior::Success(b"page-one")).await;
+    let harness = TaskHarness::new();
+    let first = harness.paged_plan_for_mode("like", server.url(), &["first"], true, Some(100));
+    let resolver = FixedPagedResolver::multi(vec![
+        PagedResolverResult::Plan(first),
+        PagedResolverResult::Error("later page failure".to_string()),
+    ]);
+    let task_id = harness
+        .start_paged_for_mode(
+            DownloadMode::Like,
+            "https://fixture.invalid/like",
+            resolver,
+            &[],
+        )
+        .await;
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "error");
+    assert_eq!(task.completed, 1);
+    assert!(harness.media_path("first").exists());
+    assert_terminal_event(&harness, &task_id, TaskStatus::Error);
+}
+
+/// Cross-mode test: cancellation does not report false missing/unavailable
+#[tokio::test]
+async fn public_paged_cross_mode_cancelled_no_false_missing() {
+    let harness = TaskHarness::new();
+    let plan = harness.paged_plan_for_mode("like", "http://127.0.0.1:1/unused", &["will-cancel"], false, None);
+    let resolver = FixedPagedResolver::multi(vec![PagedResolverResult::DelayedPlan(
+        plan,
+        Duration::from_millis(150),
+    )]);
+    let task_id = harness
+        .start_paged_for_mode(
+            DownloadMode::Like,
+            "https://fixture.invalid/like",
+            resolver,
+            &["will-cancel", "not-seen"],
+        )
+        .await;
+
+    wait_until(|| harness.state.get_cancel_signal(&task_id).is_some()).await;
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert!(harness.state.cancel_task(&task_id));
+
+    let task = harness.wait_for_terminal(&task_id).await;
+    assert_eq!(task.status, "cancelled");
+    assert!(task.error_msg.as_deref().is_none_or(|error| {
+        !error.contains("missing_aweme_ids") && !error.contains("unavailable_aweme_ids")
+    }));
 }
