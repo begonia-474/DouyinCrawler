@@ -78,7 +78,7 @@ export function useMergedTasks(
   ).length;
 
   const hasCompletedTasks = mergedTasks.some(
-    (t) => t.status === "completed" || t.status === "error",
+    (t) => t.status === "completed" || t.status === "error" || t.status === "interrupted",
   );
 
   return { mergedTasks, runningCount, hasCompletedTasks };

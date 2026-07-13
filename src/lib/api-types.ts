@@ -227,7 +227,7 @@ export interface DownloadTask {
   url: string;
   title: string | null;
   author_nickname: string | null;
-  status: "running" | "starting" | "completed" | "error" | "cancelled" | "recording" | "stopping";
+  status: "running" | "starting" | "completed" | "error" | "cancelled" | "interrupted" | "recording" | "stopping";
   total: number;
   completed: number;
   skipped: number;
@@ -246,7 +246,7 @@ export interface TaskItem {
   cover_url: string | null;
   file_path: string | null;
   file_size: number;
-  status: "pending" | "downloading" | "completed" | "skipped" | "failed";
+  status: "pending" | "downloading" | "completed" | "skipped" | "failed" | "interrupted";
   error_msg: string | null;
   created_at: number;
 }
@@ -276,7 +276,7 @@ export interface DownloadResult {
 // ============================================================
 
 /** 任务子项状态（对齐 Rust TaskItemStatus 枚举） */
-export type TaskItemStatus = "pending" | "downloading" | "completed" | "skipped" | "failed";
+export type TaskItemStatus = "pending" | "downloading" | "completed" | "skipped" | "failed" | "interrupted";
 
 /** 任务补丁（对齐 Rust TaskPatch）None 字段不覆盖现有值 */
 export interface TaskPatch {

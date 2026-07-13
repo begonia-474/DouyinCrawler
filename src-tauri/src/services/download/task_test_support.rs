@@ -247,8 +247,13 @@ impl TaskHarness {
         let deadline = Instant::now() + Duration::from_secs(8);
         loop {
             if let Some(task) = self.state.db.get_task_by_id(task_id).unwrap() {
-                if matches!(task.status.as_str(), "completed" | "error" | "cancelled")
-                    && self.events.terminal(task_id).is_some()
+                let is_terminal = matches!(
+                    task.status.as_str(),
+                    "completed" | "error" | "cancelled" | "interrupted"
+                );
+                // Startup recovery intentionally emits no historical terminal event.
+                if is_terminal
+                    && (task.status == "interrupted" || self.events.terminal(task_id).is_some())
                 {
                     return task;
                 }
@@ -472,4 +477,61 @@ async fn public_task_resolver_error_never_contacts_http_or_creates_items() {
         .unwrap()
         .contains("fixture resolver failure"));
     assert_terminal_event(&harness, &task_id, TaskStatus::Error);
+}
+
+/// Verify recovery works across a simulated process restart
+/// by seeding a running task + downloading item in a temporary DB,
+/// then opening a fresh handle on the same path.
+#[tokio::test]
+async fn recover_simulates_process_restart() {
+    let root = std::env::temp_dir().join(format!("recovery-restart-test-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let db_path = root.join("tasks.sqlite");
+
+    // Phase 1: seed a running task and downloading item
+    {
+        let db = Database::open(&db_path).unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        // Direct SQL insert to simulate what a running task looks like in DB
+        {
+            let conn = db.conn.lock();
+            conn.execute_batch(&format!(
+                "INSERT INTO download_tasks (id, mode, url, status, total, completed, skipped, failed, created_at, updated_at) \
+                 VALUES ('crash-task', 'one', 'https://example.com/video', 'running', 1, 0, 0, 0, {}, {}); \
+                 INSERT INTO download_task_items (task_id, aweme_id, status, file_path, file_size, created_at) \
+                 VALUES ('crash-task', 'vid-1', 'downloading', '/tmp/vid.mp4', 512, {}); \
+                 INSERT INTO download_tasks (id, mode, url, status, total, completed, skipped, failed, created_at, updated_at) \
+                 VALUES ('done-task', 'one', 'https://example.com/done', 'completed', 0, 0, 0, 0, {}, {});",
+                now, now, now, now, now
+            )).unwrap();
+        }
+    }
+
+    // Phase 2: a fresh handle executes the same recovery step used by app setup.
+    {
+        let db = Database::open(&db_path).unwrap();
+        let recovered = db.recover_interrupted_tasks().unwrap();
+        assert_eq!(recovered.len(), 1, "should recover the crashed task");
+        assert_eq!(recovered[0].task_id, "crash-task");
+
+        let task = db.get_task_by_id("crash-task").unwrap().unwrap();
+        assert_eq!(task.status, "interrupted");
+        assert_eq!(task.total, 1);
+
+        let items = db.get_task_items("crash-task", None).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].status, "interrupted");
+        assert_eq!(items[0].file_path.as_deref(), Some("/tmp/vid.mp4"));
+        assert_eq!(items[0].file_size, 512);
+
+        // Completed task should be untouched
+        let done = db.get_task_by_id("done-task").unwrap().unwrap();
+        assert_eq!(done.status, "completed");
+    }
+
+    let _ = std::fs::remove_dir_all(&root);
 }

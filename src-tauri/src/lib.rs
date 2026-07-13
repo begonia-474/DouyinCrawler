@@ -165,6 +165,24 @@ pub fn run() {
             let database = db::Database::open(&db_path)
                 .expect("Failed to open database");
 
+            // 恢复上次进程遗留的中断任务
+            match database.recover_interrupted_tasks() {
+                Ok(recovered) => {
+                    if recovered.is_empty() {
+                        info!("中断恢复: 无遗留活动任务");
+                    } else {
+                        info!("中断恢复: {} 个任务已标记为 interrupted", recovered.len());
+                        for task in &recovered {
+                            info!("  任务 {} (mode={})", task.task_id, task.mode);
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("中断恢复失败: {}", e);
+                    panic!("中断恢复失败: {}", e);
+                }
+            }
+
             // 存储数据库路径
             let _ = DB_PATH.set(db_path.clone());
 

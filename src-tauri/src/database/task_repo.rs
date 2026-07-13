@@ -4,6 +4,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::database::models::*;
 use crate::lock_conn;
 
+/// 中断恢复的单条结果
+#[derive(Debug)]
+pub struct RecoveredTask {
+    pub task_id: String,
+    pub mode: String,
+}
+
 impl super::connection::Database {
     pub fn create_task(&self, task: &NewDownloadTask) -> Result<()> {
         let conn = lock_conn!(self);
@@ -49,6 +56,81 @@ impl super::connection::Database {
             rusqlite::params![title, author_nickname, now, task_id],
         )?;
         Ok(())
+    }
+
+    /// 将上次进程遗留的活动任务和 downloading 子项收敛为 interrupted。
+    ///
+    /// 活动状态包括：starting、running、recording、stopping。
+    /// downloading 子项改为 interrupted；pending 保持 pending。
+    /// 已有 error_msg 保留并追加中断说明；空则写入统一说明。
+    /// 保留 completed/skipped/failed 计数。
+    ///
+    /// 幂等：第二次调用返回空 Vec。
+    pub fn recover_interrupted_tasks(&self) -> Result<Vec<RecoveredTask>> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let interruption_msg = "任务因进程中断而终止";
+
+        self.with_transaction(|tx| {
+            // 1. 查出活动任务
+            let mut stmt = tx.prepare(
+                "SELECT id, mode, error_msg FROM download_tasks \
+                 WHERE status IN ('starting', 'running', 'recording', 'stopping')"
+            )?;
+            let active_tasks: Vec<(String, String, Option<String>)> = stmt
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                })?
+                .collect::<Result<Vec<_>>>()?;
+
+            if active_tasks.is_empty() {
+                return Ok(Vec::new());
+            }
+
+            // 2. 将 downloading 子项改为 interrupted
+            tx.execute(
+                "UPDATE download_task_items SET status = 'interrupted' \
+                 WHERE status = 'downloading' \
+                   AND EXISTS ( \
+                       SELECT 1 FROM download_tasks \
+                       WHERE download_tasks.id = download_task_items.task_id \
+                         AND download_tasks.status IN ('starting', 'running', 'recording', 'stopping') \
+                   )",
+                [],
+            )?;
+
+            // 3. 将活动任务改为 interrupted，保留 error_msg
+            for (task_id, _mode, existing_error) in &active_tasks {
+                let new_error = match existing_error {
+                    Some(err) if !err.trim().is_empty() => {
+                        // 避免重复追加
+                        if err.contains(interruption_msg) {
+                            existing_error.clone()
+                        } else {
+                            Some(format!("{}; {}", err, interruption_msg))
+                        }
+                    }
+                    _ => Some(interruption_msg.to_string()),
+                };
+
+                tx.execute(
+                    "UPDATE download_tasks SET status = 'interrupted', error_msg = ?1, updated_at = ?2 \
+                     WHERE id = ?3",
+                    rusqlite::params![new_error, now, task_id],
+                )?;
+            }
+
+            Ok(active_tasks
+                .into_iter()
+                .map(|(task_id, mode, _)| RecoveredTask { task_id, mode })
+                .collect())
+        })
     }
 
     pub fn update_task_counts(&self, task_id: &str) -> Result<()> {
@@ -419,5 +501,235 @@ impl super::connection::Database {
             }
             None => Ok(None),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::database::connection::Database;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn make_db() -> Database {
+        let dir = std::env::temp_dir().join(format!("task-repo-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("test.db");
+        Database::open(&path).unwrap()
+    }
+
+    fn seed_task(db: &Database, id: &str, status: &str, error_msg: Option<&str>) {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let conn = lock_conn!(db);
+        conn.execute(
+            "INSERT OR IGNORE INTO download_tasks (id, mode, url, status, total, completed, skipped, failed, error_msg, created_at, updated_at) \
+             VALUES (?1, 'one', 'https://example.com/video', ?2, 3, 1, 0, 1, ?3, ?4, ?4)",
+            rusqlite::params![id, status, error_msg, now],
+        ).unwrap();
+    }
+
+    fn seed_item(db: &Database, task_id: &str, aweme_id: &str, status: &str) {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let conn = lock_conn!(db);
+        conn.execute(
+            "INSERT OR IGNORE INTO download_task_items (task_id, aweme_id, status, file_path, file_size, created_at) \
+             VALUES (?1, ?2, ?3, '/tmp/test.mp4', 1024, ?4)",
+            rusqlite::params![task_id, aweme_id, status, now],
+        ).unwrap();
+    }
+
+    fn assert_status(db: &Database, task_id: &str, expected: &str) {
+        let task = db.get_task_by_id(task_id).unwrap().unwrap();
+        assert_eq!(task.status, expected, "task {} status mismatch", task_id);
+    }
+
+    fn assert_item_status(db: &Database, task_id: &str, aweme_id: &str, expected: &str) {
+        let items = db.get_task_items(task_id, None).unwrap();
+        let item = items
+            .iter()
+            .find(|i| i.aweme_id.as_deref() == Some(aweme_id))
+            .unwrap_or_else(|| panic!("item {} not found in task {}", aweme_id, task_id));
+        assert_eq!(item.status, expected, "item {} status mismatch", aweme_id);
+    }
+
+    #[test]
+    fn recover_converts_active_tasks_to_interrupted() {
+        let db = make_db();
+        for (i, status) in ["starting", "running", "recording", "stopping"]
+            .iter()
+            .enumerate()
+        {
+            let task_id = format!("active-{}", status);
+            seed_task(&db, &task_id, status, Some("原始错误"));
+            seed_item(&db, &task_id, &format!("item-{}", i), "downloading");
+        }
+
+        let recovered = db.recover_interrupted_tasks().unwrap();
+        assert_eq!(recovered.len(), 4, "should recover 4 active tasks");
+
+        for (i, status) in ["starting", "running", "recording", "stopping"]
+            .iter()
+            .enumerate()
+        {
+            let task_id = format!("active-{}", status);
+            assert_status(&db, &task_id, "interrupted");
+            assert_item_status(&db, &task_id, &format!("item-{}", i), "interrupted");
+
+            let task = db.get_task_by_id(&task_id).unwrap().unwrap();
+            assert!(
+                task.error_msg.as_deref().unwrap_or("").contains("原始错误"),
+                "original error should be preserved"
+            );
+            assert!(
+                task.error_msg
+                    .as_deref()
+                    .unwrap_or("")
+                    .contains("任务因进程中断而终止"),
+                "interruption note should be appended"
+            );
+            // counts preserved
+            assert_eq!(task.total, 3, "total should be preserved");
+            assert_eq!(task.completed, 1, "completed should be preserved");
+            assert_eq!(task.failed, 1, "failed should be preserved");
+        }
+    }
+
+    #[test]
+    fn recover_preserves_terminal_tasks() {
+        let db = make_db();
+        for status in ["completed", "error", "cancelled"] {
+            seed_task(&db, status, status, None);
+        }
+        seed_task(&db, "running-still", "running", None);
+
+        // Also seed terminal items
+        seed_item(&db, "completed", "completed-item", "completed");
+        seed_item(&db, "error", "error-item", "failed");
+
+        let recovered = db.recover_interrupted_tasks().unwrap();
+        assert_eq!(recovered.len(), 1, "only running should be recovered");
+        assert_eq!(recovered[0].task_id, "running-still");
+
+        // Terminal tasks unchanged
+        assert_status(&db, "completed", "completed");
+        assert_status(&db, "error", "error");
+        assert_status(&db, "cancelled", "cancelled");
+
+        // Terminal items unchanged
+        assert_item_status(&db, "completed", "completed-item", "completed");
+        assert_item_status(&db, "error", "error-item", "failed");
+    }
+
+    #[test]
+    fn recover_only_interrupts_downloading_items_of_active_tasks() {
+        let db = make_db();
+        seed_task(&db, "active", "running", None);
+        seed_item(&db, "active", "active-downloading", "downloading");
+        seed_item(&db, "active", "active-pending", "pending");
+        seed_item(&db, "active", "active-completed", "completed");
+        seed_item(&db, "active", "active-failed", "failed");
+
+        for status in ["completed", "error", "cancelled"] {
+            let task_id = format!("terminal-{status}");
+            seed_task(&db, &task_id, status, None);
+            seed_item(
+                &db,
+                &task_id,
+                &format!("{status}-downloading"),
+                "downloading",
+            );
+        }
+
+        let recovered = db.recover_interrupted_tasks().unwrap();
+
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0].task_id, "active");
+        assert_item_status(&db, "active", "active-downloading", "interrupted");
+        assert_item_status(&db, "active", "active-pending", "pending");
+        assert_item_status(&db, "active", "active-completed", "completed");
+        assert_item_status(&db, "active", "active-failed", "failed");
+        for status in ["completed", "error", "cancelled"] {
+            assert_item_status(
+                &db,
+                &format!("terminal-{status}"),
+                &format!("{status}-downloading"),
+                "downloading",
+            );
+        }
+    }
+
+    #[test]
+    fn recover_is_idempotent() {
+        let db = make_db();
+        seed_task(&db, "running-task", "running", None);
+        seed_item(&db, "running-task", "item-1", "downloading");
+
+        // First call
+        let recovered = db.recover_interrupted_tasks().unwrap();
+        assert_eq!(recovered.len(), 1);
+        assert_status(&db, "running-task", "interrupted");
+        assert_item_status(&db, "running-task", "item-1", "interrupted");
+
+        {
+            let conn = lock_conn!(db);
+            conn.execute(
+                "UPDATE download_tasks SET updated_at = 42 WHERE id = 'running-task'",
+                [],
+            )
+            .unwrap();
+        }
+        let first_task = db.get_task_by_id("running-task").unwrap().unwrap();
+        let first_error = first_task.error_msg;
+        let first_updated_at = first_task.updated_at;
+
+        // Second call — should be idempotent
+        let recovered2 = db.recover_interrupted_tasks().unwrap();
+        assert!(recovered2.is_empty(), "second recovery should return empty");
+
+        // error_msg should not be modified
+        let task = db.get_task_by_id("running-task").unwrap().unwrap();
+        assert_eq!(
+            task.error_msg, first_error,
+            "error_msg should not change on second recovery"
+        );
+        assert_eq!(
+            task.updated_at, first_updated_at,
+            "updated_at should not change on second recovery"
+        );
+        assert_status(&db, "running-task", "interrupted");
+    }
+
+    #[test]
+    fn recover_empty_error_gets_default_message() {
+        let db = make_db();
+        seed_task(&db, "no-error", "starting", None);
+        let recovered = db.recover_interrupted_tasks().unwrap();
+        assert_eq!(recovered.len(), 1);
+        let task = db.get_task_by_id("no-error").unwrap().unwrap();
+        assert_eq!(
+            task.error_msg.as_deref(),
+            Some("任务因进程中断而终止"),
+            "empty error should get default message"
+        );
+    }
+
+    #[test]
+    fn recover_pending_items_are_not_affected() {
+        let db = make_db();
+        seed_task(&db, "pending-items", "running", None);
+        seed_item(&db, "pending-items", "pending-item", "pending");
+        seed_item(&db, "pending-items", "downloading-item", "downloading");
+
+        db.recover_interrupted_tasks().unwrap();
+
+        // downloading items should be interrupted
+        assert_item_status(&db, "pending-items", "downloading-item", "interrupted");
+        // pending items should stay pending
+        assert_item_status(&db, "pending-items", "pending-item", "pending");
     }
 }

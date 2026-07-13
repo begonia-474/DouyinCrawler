@@ -83,6 +83,7 @@ pub enum TaskStatus {
     Completed,
     Error,
     Cancelled,
+    Interrupted,
 }
 
 #[allow(dead_code)]
@@ -97,6 +98,7 @@ impl TaskStatus {
             "completed" => Some(Self::Completed),
             "error" => Some(Self::Error),
             "cancelled" => Some(Self::Cancelled),
+            "interrupted" => Some(Self::Interrupted),
             _ => None,
         }
     }
@@ -111,12 +113,13 @@ impl TaskStatus {
             Self::Completed => "completed",
             Self::Error => "error",
             Self::Cancelled => "cancelled",
+            Self::Interrupted => "interrupted",
         }
     }
 
     /// 是否为终态（不再变化）
     pub fn is_terminal(&self) -> bool {
-        matches!(self, Self::Completed | Self::Error | Self::Cancelled)
+        matches!(self, Self::Completed | Self::Error | Self::Cancelled | Self::Interrupted)
     }
 }
 
@@ -432,6 +435,22 @@ impl TaskEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn task_status_interrupted_is_terminal() {
+        assert!(TaskStatus::Interrupted.is_terminal());
+        assert_eq!(TaskStatus::Interrupted.as_str(), "interrupted");
+        assert_eq!(TaskStatus::from_str("interrupted"), Some(TaskStatus::Interrupted));
+    }
+
+    #[test]
+    fn task_status_interrupted_serialization() {
+        let status = TaskStatus::Interrupted;
+        let json = serde_json::to_string(&status).unwrap();
+        assert_eq!(json, "\"interrupted\"");
+        let deserialized: TaskStatus = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, TaskStatus::Interrupted);
+    }
 
     #[test]
     fn live_task_patch_serializes_recording_metadata() {

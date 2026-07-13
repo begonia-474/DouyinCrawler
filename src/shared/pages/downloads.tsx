@@ -97,8 +97,8 @@ export default function DownloadsPage() {
     deleteTask.mutate(taskId);
   };
 
-  // 已完成的任务（用于"已完成" tab）
-  const completedTasks = dbTasks.filter((t) => t.status === "completed" || t.status === "error");
+  // 已完成/已中断的任务（用于"已完成" tab）
+  const completedTasks = dbTasks.filter((t) => t.status === "completed" || t.status === "error" || t.status === "interrupted");
 
   const { mergedTasks, runningCount, hasCompletedTasks } = useMergedTasks(dbTasks, liveTasks);
 
@@ -178,7 +178,7 @@ export default function DownloadsPage() {
                   task={task}
                   liveState={liveTasks[task.id]}
                   onRemove={
-                    task.status === "completed" || task.status === "error"
+                    task.status === "completed" || task.status === "error" || task.status === "interrupted"
                       ? () => handleRemoveTask(task.id)
                       : undefined
                   }

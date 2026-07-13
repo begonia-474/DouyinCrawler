@@ -21,7 +21,7 @@ export function DownloadStatusCard() {
     (t) => t.status === "running" || t.status === "starting" || t.status === "recording" || t.status === "stopping"
   );
   const recentCompletedTask = Object.values(tasks)
-    .filter((t) => t.status === "completed" || t.status === "error")
+    .filter((t) => t.status === "completed" || t.status === "error" || t.status === "interrupted")
     .sort((a, b) => {
       return b.task_id.localeCompare(a.task_id);
     })[0];
@@ -63,6 +63,8 @@ export function DownloadStatusCard() {
               <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
             ) : task.status === "completed" ? (
               <CheckCircle2 className="h-4 w-4 text-success shrink-0" />
+            ) : task.status === "interrupted" ? (
+              <AlertTriangle className="h-4 w-4 text-muted-foreground shrink-0" />
             ) : (
               <XCircle className="h-4 w-4 text-destructive shrink-0" />
             )}
@@ -72,10 +74,12 @@ export function DownloadStatusCard() {
                 ? task.status === "recording" ? "录制中" : task.status === "stopping" ? "停止中" : "下载中"
                 : task.status === "completed"
                 ? "任务完成"
+                : task.status === "interrupted"
+                ? "任务中断"
                 : "任务失败"}
             </span>
 
-            {(task.status === "completed" || task.status === "error") && (
+            {(task.status === "completed" || task.status === "error" || task.status === "interrupted") && (
               <Button
                 size="sm"
                 variant="capsule"

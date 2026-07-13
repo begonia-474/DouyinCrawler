@@ -242,7 +242,7 @@ export interface MusicCollection {
 
 export type DownloadMode = "one" | "post" | "like" | "mix" | "collects" | "live" | "music";
 
-export type TaskStatus = "pending" | "starting" | "running" | "recording" | "stopping" | "completed" | "error" | "cancelled";
+export type TaskStatus = "pending" | "starting" | "running" | "recording" | "stopping" | "completed" | "error" | "cancelled" | "interrupted";
 
 export type TaskEventType = "started" | "progress" | "finished";
 

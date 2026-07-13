@@ -95,10 +95,14 @@ export default function LivePage() {
     checkExistingTask();
   }, [connectLive]);
 
-  // 监听任务完成/出错，显示错误并延迟清理（DB 保存由后端完成）
+  // 监听终态任务，显示错误并延迟清理（DB 保存由后端完成）
   useEffect(() => {
     const doneTasks = Object.values(liveTasks).filter(
-      (t) => t.status === "completed" || t.status === "error" || t.status === "cancelled"
+      (t) =>
+        t.status === "completed" ||
+        t.status === "error" ||
+        t.status === "cancelled" ||
+        t.status === "interrupted"
     );
     for (const task of doneTasks) {
       if (notifiedTaskIds.current.has(task.task_id)) continue;
@@ -107,7 +111,7 @@ export default function LivePage() {
       if (task.status === "error") {
         setError(task.error_msg || task.error || "录制出错");
       }
-      // 延迟清理已完成/出错的任务
+      // 延迟清理终态任务；只有真正的 error 保留更长展示时间
       setTimeout(() => removeTask(task.task_id), task.status === "error" ? 5000 : 3000);
     }
   }, [liveTasks, removeTask]);

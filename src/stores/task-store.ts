@@ -10,7 +10,7 @@ export interface UnifiedTask {
   event_type?: "started" | "progress" | "finished";
   mode?: string;       // download mode: one / post / like / mix / collects / live / music
   url?: string;
-  status: string;      // starting | running | completed | error | cancelled | recording | stopping
+  status: string;      // starting | running | completed | error | cancelled | interrupted | recording | stopping
   total?: number;
   completed?: number;
   failed?: number;
@@ -49,7 +49,7 @@ interface TaskState {
 let unlisten: (() => void) | null = null;
 
 /** 终态状态集合（DB 不会再变化，需要收敛到 DB 真相） */
-const TERMINAL_STATUSES = new Set<string>(["completed", "error", "cancelled"]);
+const TERMINAL_STATUSES = new Set<string>(["completed", "error", "cancelled", "interrupted"]);
 
 /** 记录待失效的 mode 类型，debounce 期间合并 */
 let pendingModes = new Set<string>();

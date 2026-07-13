@@ -16,6 +16,7 @@ import {
   Loader2,
   ChevronDown,
   Trash2,
+  AlertTriangle,
 } from "lucide-react";
 import type { DownloadTask } from "@/lib/api-types";
 import type { UnifiedTask } from "@/stores/task-store";
@@ -50,6 +51,7 @@ const statusLabels: Record<string, string> = {
   completed: "已完成",
   error: "失败",
   cancelled: "已取消",
+  interrupted: "已中断",
 };
 
 /** 状态 → Badge variant */
@@ -62,6 +64,7 @@ const statusVariants: Record<string, "default" | "destructive" | "secondary"> = 
   completed: "default",
   error: "destructive",
   cancelled: "secondary",
+  interrupted: "secondary",
 };
 
 interface TaskCardProps {
@@ -127,6 +130,8 @@ export function TaskCard({ task, liveState, onRemove }: TaskCardProps) {
                   ? "bg-success/10 ring-success/20"
                   : status === "error"
                   ? "bg-destructive/10 ring-destructive/20"
+                  : status === "interrupted"
+                  ? "bg-muted ring-border"
                   : "bg-foreground/[0.04] ring-foreground/[0.06]"
               )}>
                 {isRunning ? (
@@ -135,6 +140,8 @@ export function TaskCard({ task, liveState, onRemove }: TaskCardProps) {
                   <CheckCircle2 className="h-4 w-4 text-success" />
                 ) : status === "error" ? (
                   <XCircle className="h-4 w-4 text-destructive" />
+                ) : status === "interrupted" ? (
+                  <AlertTriangle className="h-4 w-4 text-muted-foreground" />
                 ) : (
                   <Icon className="h-4 w-4 text-muted-foreground" />
                 )}
@@ -205,8 +212,13 @@ export function TaskCard({ task, liveState, onRemove }: TaskCardProps) {
             )}
 
             {/* 错误信息 */}
-            {status === "error" && errorMsg && (
-              <p className="text-xs text-destructive mt-2">{errorMsg}</p>
+            {(status === "error" || status === "interrupted") && errorMsg && (
+              <p className={cn(
+                "text-xs mt-2",
+                status === "error" ? "text-destructive" : "text-muted-foreground"
+              )}>
+                {errorMsg}
+              </p>
             )}
           </div>
         </CollapsiblePrimitive.Trigger>

@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   SkipForward,
   XCircle,
+  AlertTriangle,
   Circle,
   Loader2,
 } from "lucide-react";
@@ -13,6 +14,7 @@ const statusConfig: Record<string, { icon: typeof CheckCircle2; color: string; l
   completed: { icon: CheckCircle2, color: "text-success", label: "完成" },
   skipped: { icon: SkipForward, color: "text-muted-foreground", label: "跳过" },
   failed: { icon: XCircle, color: "text-destructive", label: "失败" },
+  interrupted: { icon: AlertTriangle, color: "text-muted-foreground", label: "已中断" },
   downloading: { icon: Loader2, color: "text-primary", label: "下载中" },
   pending: { icon: Circle, color: "text-muted-foreground/50", label: "等待" },
 };
