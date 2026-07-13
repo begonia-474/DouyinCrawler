@@ -2,8 +2,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 
 from core.bridge import py_bridge
+from core.models.live_record import LivePlanV1
 from core.utils import WebCastIdFetcher
 
 
@@ -14,6 +16,7 @@ class _FakeLiveHandler:
             app_name="douyin",
             naming="{create}_{desc}",
             cookie="session=live-test",
+            folderize=False,
         )
 
     async def handle_user_live(self, url: str) -> dict:
@@ -44,14 +47,60 @@ def test_resolve_live_returns_f2_recording_contract(monkeypatch, tmp_path):
     result = py_bridge.resolve_live("https://live.douyin.com/123456")
 
     assert result["success"] is True
+    assert result["contract_version"] == 1
+    assert result["mode"] == "live"
     assert result["m3u8_url"] == "https://example.com/full-hd.m3u8"
-    assert result["filename"].endswith("_live")
-    assert "测试直播" in result["filename"]
-    assert result["suffix"] == ".flv"
-    assert Path(result["save_dir"]) == tmp_path / "douyin" / "live" / "测试主播"
+    assert result["output"]["filename"].endswith("_live")
+    assert "测试直播" in result["output"]["filename"]
+    assert result["output"]["suffix"] == ".flv"
+    assert Path(result["output"]["save_dir"]) == tmp_path / "douyin" / "live" / "测试主播"
     assert result["headers"]["Cookie"] == "session=live-test"
     assert result["room_id"] == "987654321"
     assert result["sec_user_id"] == "sec-live-user"
+
+
+def test_live_plan_rejects_unknown_fields_and_invalid_mode(monkeypatch, tmp_path):
+    manager = SimpleNamespace(handler=_FakeLiveHandler(tmp_path))
+    monkeypatch.setattr(py_bridge, "_get_task_manager", lambda: manager)
+    result = py_bridge.resolve_live("https://live.douyin.com/123456")
+
+    with pytest.raises(ValidationError):
+        LivePlanV1.model_validate({**result, "unexpected": True})
+    with pytest.raises(ValidationError):
+        LivePlanV1.model_validate({**result, "mode": "post"})
+
+
+def test_resolve_live_requires_full_hd1(monkeypatch, tmp_path):
+    handler = _FakeLiveHandler(tmp_path)
+
+    async def without_full_hd(_url: str) -> dict:
+        result = await _FakeLiveHandler.handle_user_live(handler, _url)
+        result["m3u8_pull_url"] = {"HD1": "https://example.com/hd.m3u8"}
+        return result
+
+    handler.handle_user_live = without_full_hd
+    monkeypatch.setattr(
+        py_bridge, "_get_task_manager", lambda: SimpleNamespace(handler=handler)
+    )
+
+    result = py_bridge.resolve_live("https://live.douyin.com/123456")
+
+    assert result["success"] is False
+    assert "FULL_HD1" in result["error"]
+
+
+def test_resolve_live_folderize_uses_formatted_live_directory(monkeypatch, tmp_path):
+    handler = _FakeLiveHandler(tmp_path)
+    handler.config.folderize = True
+    monkeypatch.setattr(
+        py_bridge, "_get_task_manager", lambda: SimpleNamespace(handler=handler)
+    )
+
+    result = py_bridge.resolve_live("https://live.douyin.com/123456")
+
+    output = result["output"]
+    assert Path(output["save_dir"]).parent == tmp_path / "douyin" / "live" / "测试主播"
+    assert Path(output["save_dir"]).name == output["filename"].removesuffix("_live")
 
 
 def test_get_live_info_matches_rust_live_info_contract(monkeypatch, tmp_path):
@@ -69,6 +118,13 @@ def test_get_live_info_matches_rust_live_info_contract(monkeypatch, tmp_path):
         "https://example.com/hd.m3u8",
         "https://example.com/full-hd.m3u8",
     ]
+
+
+def test_legacy_python_live_execution_entrypoints_are_disabled():
+    assert py_bridge.start_live_record("https://live.douyin.com/1")["success"] is False
+    assert py_bridge.stop_live_record("legacy-task")["success"] is False
+    assert py_bridge.get_live_status()["success"] is False
+    assert py_bridge.start_download("live", "https://live.douyin.com/1")["success"] is False
 
 
 @pytest.mark.asyncio

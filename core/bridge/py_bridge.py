@@ -150,6 +150,7 @@ def resolve_live(url: str) -> dict:
     from pathlib import Path
 
     from core.download.downloader import format_filename
+    from core.models.live_record import LiveOutputV1, LivePlanV1
     from core.utils import sanitize_filename
 
     handler = _get_task_manager().handler
@@ -183,21 +184,25 @@ def resolve_live(url: str) -> dict:
     save_dir = base_dir / formatted_name if getattr(config, "folderize", False) else base_dir
     filename = formatted_name + "_live"
 
-    return {
-        "success": True,
-        "web_rid": result.get("web_rid", ""),
-        "room_id": result.get("room_id", ""),
-        "title": result.get("title", ""),
-        "nickname": result.get("nickname", ""),
-        "sec_user_id": result.get("sec_user_id", ""),
-        "user_id": result.get("user_id", ""),
-        "cover_url": result.get("cover_url", ""),
-        "user_count": result.get("user_count", 0),
-        "m3u8_url": m3u8_url,
-        "save_dir": str(save_dir),
-        "filename": filename,
-        "suffix": ".flv",
-        "headers": {
+    try:
+        user_count = int(result.get("user_count") or 0)
+    except (TypeError, ValueError):
+        user_count = 0
+
+    return LivePlanV1(
+        web_rid=str(result.get("web_rid") or ""),
+        room_id=str(result.get("room_id") or ""),
+        title=str(result.get("title") or ""),
+        nickname=str(result.get("nickname") or ""),
+        sec_user_id=str(result.get("sec_user_id") or ""),
+        user_id=str(result["user_id"]) if result.get("user_id") else None,
+        cover_url=str(result.get("cover_url") or ""),
+        user_count=user_count,
+        m3u8_url=str(m3u8_url),
+        output=LiveOutputV1(
+            save_dir=str(save_dir), filename=filename, suffix=".flv"
+        ),
+        headers={
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -206,7 +211,7 @@ def resolve_live(url: str) -> dict:
             "Referer": "https://www.douyin.com/",
             "Cookie": config.cookie,
         },
-    }
+    ).model_dump(mode="json")
 
 
 @_safe_call
@@ -244,6 +249,11 @@ def download_batch(mode: str, url: str) -> dict:
 @_safe_call
 def start_download(mode: str, url: str) -> dict:
     """统一下载入口（通过 mode 分发）"""
+    if mode == "live":
+        return {
+            "success": False,
+            "error": "legacy Python 直播执行已停用，请使用 Rust start_live_record command",
+        }
     logger.info("[py_bridge] start_download 调用, mode=%s, url=%s", mode, url[:80])
     task_id = _get_task_manager().start_download(mode, url)
     logger.info("[py_bridge] 下载任务已启动, task_id=%s", task_id)
@@ -449,25 +459,26 @@ def get_post_stats(url: str) -> dict:
 
 @_safe_call
 def start_live_record(url: str) -> dict:
-    """开始直播录制"""
-    task_id = _get_task_manager().start_live_record(url)
-    return {"success": True, "task_id": task_id, "message": "直播录制已启动"}
+    """[legacy disabled] 生产直播录制由 Rust TaskApplicationService 独占。"""
+    return {
+        "success": False,
+        "error": "legacy Python 直播执行已停用，请使用 Rust start_live_record command",
+    }
 
 
 @_safe_call
 def stop_live_record(task_id: str) -> dict:
-    """停止直播录制"""
-    result = _get_task_manager().stop_live_record(task_id)
-    if not result:
-        return {"success": False, "error": "录制任务不存在"}
-    return {"success": True, "task_id": task_id}
+    """[legacy disabled] 停止请求由 Rust TaskApplicationService 处理。"""
+    return {
+        "success": False,
+        "error": "legacy Python 直播停止入口已停用，请使用 Rust stop_live_record command",
+    }
 
 
 @_safe_call
 def get_live_status() -> dict:
-    """获取直播录制状态"""
-    status = _get_task_manager().get_live_status()
-    return {"success": True, "data": status}
+    """[legacy disabled] 直播状态来自 Rust SQLite task 查询。"""
+    return {"success": False, "error": "legacy Python 直播状态入口已停用"}
 
 
 @_safe_call

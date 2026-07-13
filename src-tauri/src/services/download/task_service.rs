@@ -17,35 +17,38 @@
 //! - 使用 emit_progress 发射进度事件
 //! - 任务完成后清理取消信号
 
+use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use parking_lot::Mutex;
 
 use log::{error, info, warn};
 use serde_json::Value;
 use uuid::Uuid;
 
 use crate::db::{
-    Database, MediaItemOutcome, MediaItemResult, NewLiveRecord, NewTaskItem, UserInfo, VideoInfo,
+    Database, LiveTerminalCommit, LiveTerminalStatus, MediaItemOutcome, MediaItemResult,
+    NewTaskItem, RecordingLiveRecord, UserInfo, VideoInfo,
 };
 use crate::state::AppState;
 
-use super::{
-    DownloadMode, DownloadRequest, ResolvedAccessory, ResolvedItem, ResolvedUrls,
-    TaskEvent, TaskEventType, TaskPatch, TaskStatus,
-};
 use super::contract::{
-    SingleAccessory, SingleAccessoryKind, SingleDownloadItem, SingleDownloadPlanV1,
-    SingleMediaKind, PagedDownloadPlanV1,
+    PagedDownloadPlanV1, SingleAccessory, SingleAccessoryKind, SingleDownloadItem,
+    SingleDownloadPlanV1, SingleMediaKind,
 };
 use super::engine::{DownloadEngine, DownloadItem, DownloadUrl, EngineConfig};
 use super::events;
-use super::live::{LiveRecorder, ResolvedLive};
+use super::live::{
+    LiveFailureKind, LiveOutputFacts, LivePlanV1, LiveRecorder, LiveRecorderOutcome,
+};
 use super::selection::SelectionTracker;
+use super::{
+    DownloadMode, DownloadRequest, ResolvedAccessory, ResolvedItem, ResolvedUrls, TaskEvent,
+    TaskEventType, TaskPatch, TaskStatus,
+};
 
 // ============================================================
 // 辅助函数
@@ -58,19 +61,17 @@ fn json_str(value: Option<&Value>, key: &str) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-fn nonempty_string(value: &str) -> Option<String> {
-    let value = value.trim();
-    if value.is_empty() {
-        None
-    } else {
-        Some(value.to_string())
-    }
-}
-
 fn cleaned_json(value: &Value) -> Value {
     let mut value = value.clone();
     crate::python::db_bridge::bool_to_int(&mut value);
     value
+}
+
+fn unix_timestamp() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
 }
 
 fn parse_user_info(value: &Value) -> Option<UserInfo> {
@@ -153,7 +154,7 @@ fn build_single_download_item(
 /// 从 AppConfig 构建 EngineConfig
 fn build_engine_config(config: &crate::config::AppConfig) -> EngineConfig {
     EngineConfig {
-        max_concurrent: config.max_tasks as usize,   // 并发下载任务数 = max_tasks
+        max_concurrent: config.max_tasks as usize, // 并发下载任务数 = max_tasks
         max_retries: config.max_retries,
         timeout: config.timeout as u64,
         max_connections: config.max_connections as usize, // 单 URL 并发连接数
@@ -199,6 +200,25 @@ pub(super) trait PagedDownloadResolver: Send + Sync {
     fn resolve_page(&self, mode: String, url: String, cursor: i64, count: i64) -> PagedPlanFuture;
 }
 
+pub(super) type LivePlanFuture = Pin<Box<dyn Future<Output = Result<LivePlanV1, String>> + Send>>;
+
+pub(super) trait LiveResolver: Send + Sync {
+    fn resolve(&self, url: String) -> LivePlanFuture;
+}
+
+pub(super) type LiveRecorderFuture = Pin<Box<dyn Future<Output = LiveRecorderOutcome> + Send>>;
+pub(super) type LiveProgressCallback = Arc<dyn Fn(u64) + Send + Sync>;
+
+pub(super) trait LiveRecorderRunner: Send + Sync {
+    fn record(
+        &self,
+        config: crate::config::AppConfig,
+        cancel_signal: Arc<AtomicBool>,
+        plan: LivePlanV1,
+        progress: LiveProgressCallback,
+    ) -> LiveRecorderFuture;
+}
+
 pub(super) trait TaskEventSink: Send + Sync {
     fn emit(&self, event: TaskEvent);
 }
@@ -221,6 +241,45 @@ impl PagedDownloadResolver for PythonPagedDownloadResolver {
     }
 }
 
+struct PythonLiveResolver;
+
+impl LiveResolver for PythonLiveResolver {
+    fn resolve(&self, url: String) -> LivePlanFuture {
+        Box::pin(async move { TaskApplicationService::resolve_live(&url).await })
+    }
+}
+
+struct RustLiveRecorderRunner;
+
+impl LiveRecorderRunner for RustLiveRecorderRunner {
+    fn record(
+        &self,
+        config: crate::config::AppConfig,
+        cancel_signal: Arc<AtomicBool>,
+        plan: LivePlanV1,
+        progress: LiveProgressCallback,
+    ) -> LiveRecorderFuture {
+        Box::pin(async move {
+            match LiveRecorder::new(&config, cancel_signal) {
+                Ok(recorder) => recorder.record(&plan, move |bytes| progress(bytes)).await,
+                Err(error) => {
+                    let now = unix_timestamp();
+                    LiveRecorderOutcome::Failed {
+                        kind: LiveFailureKind::InvalidPlan,
+                        error,
+                        output: LiveOutputFacts {
+                            path: plan.full_path(),
+                            file_size: 0,
+                            started_at: now,
+                            ended_at: now,
+                        },
+                    }
+                }
+            }
+        })
+    }
+}
+
 struct TauriTaskEventSink;
 
 impl TaskEventSink for TauriTaskEventSink {
@@ -233,6 +292,8 @@ impl TaskEventSink for TauriTaskEventSink {
 struct TaskRuntimeAdapters {
     single_resolver: Arc<dyn SingleDownloadResolver>,
     paged_resolver: Arc<dyn PagedDownloadResolver>,
+    live_resolver: Arc<dyn LiveResolver>,
+    live_recorder: Arc<dyn LiveRecorderRunner>,
     event_sink: Arc<dyn TaskEventSink>,
 }
 
@@ -267,8 +328,7 @@ impl ProgressTracker {
         if downloaded >= total || now_ms.saturating_sub(last) >= self.interval_ms {
             self.last_emit_ms.store(now_ms, Ordering::Relaxed);
             self.event_sink.emit(TaskEvent::progress(
-                TaskPatch::new(&self.task_id)
-                    .with_counts(total as i64, downloaded as i64, 0, 0),
+                TaskPatch::new(&self.task_id).with_counts(total as i64, downloaded as i64, 0, 0),
             ));
         }
     }
@@ -294,6 +354,8 @@ impl<'a> TaskApplicationService<'a> {
             adapters: TaskRuntimeAdapters {
                 single_resolver: Arc::new(PythonSingleDownloadResolver),
                 paged_resolver: Arc::new(PythonPagedDownloadResolver),
+                live_resolver: Arc::new(PythonLiveResolver),
+                live_recorder: Arc::new(RustLiveRecorderRunner),
                 event_sink: Arc::new(TauriTaskEventSink),
             },
         }
@@ -310,6 +372,8 @@ impl<'a> TaskApplicationService<'a> {
             adapters: TaskRuntimeAdapters {
                 single_resolver,
                 paged_resolver: Arc::new(PythonPagedDownloadResolver),
+                live_resolver: Arc::new(PythonLiveResolver),
+                live_recorder: Arc::new(RustLiveRecorderRunner),
                 event_sink,
             },
         }
@@ -326,6 +390,27 @@ impl<'a> TaskApplicationService<'a> {
             adapters: TaskRuntimeAdapters {
                 single_resolver: Arc::new(PythonSingleDownloadResolver),
                 paged_resolver,
+                live_resolver: Arc::new(PythonLiveResolver),
+                live_recorder: Arc::new(RustLiveRecorderRunner),
+                event_sink,
+            },
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_live_test_adapters(
+        state: &'a AppState,
+        live_resolver: Arc<dyn LiveResolver>,
+        live_recorder: Arc<dyn LiveRecorderRunner>,
+        event_sink: Arc<dyn TaskEventSink>,
+    ) -> Self {
+        Self {
+            state,
+            adapters: TaskRuntimeAdapters {
+                single_resolver: Arc::new(PythonSingleDownloadResolver),
+                paged_resolver: Arc::new(PythonPagedDownloadResolver),
+                live_resolver,
+                live_recorder,
                 event_sink,
             },
         }
@@ -381,7 +466,12 @@ impl<'a> TaskApplicationService<'a> {
     ///
     /// Used by the typed paged runner for post mode; like/mix/collects
     /// still use the legacy `resolve_download_page` until issue 08.
-    async fn resolve_paged_download_plan(mode: &str, url: &str, cursor: i64, count: i64) -> Result<PagedDownloadPlanV1, String> {
+    async fn resolve_paged_download_plan(
+        mode: &str,
+        url: &str,
+        cursor: i64,
+        count: i64,
+    ) -> Result<PagedDownloadPlanV1, String> {
         let expected_mode = mode.to_string();
         let resolver_mode = expected_mode.clone();
         let url = url.to_string();
@@ -404,7 +494,7 @@ impl<'a> TaskApplicationService<'a> {
     }
 
     /// 通过 Python 解析直播元数据和 f2 FULL_HD1 录制地址。
-    async fn resolve_live(url: &str) -> Result<ResolvedLive, String> {
+    async fn resolve_live(url: &str) -> Result<LivePlanV1, String> {
         let url = url.to_string();
         let json_value = tokio::task::spawn_blocking(move || {
             crate::python::handler::resolve_live(&url)
@@ -413,19 +503,21 @@ impl<'a> TaskApplicationService<'a> {
         .await
         .map_err(|e| format!("spawn_blocking 失败: {}", e))??;
 
-        let resolved = serde_json::from_value::<ResolvedLive>(json_value)
-            .map_err(|e| format!("resolve_live 返回值解析失败: {}", e))?;
-        if !resolved.success {
-            return Err(resolved.error.clone().unwrap_or_else(|| "直播解析失败".to_string()));
+        if json_value.get("success").and_then(Value::as_bool) == Some(false) {
+            return Err(json_value
+                .get("error")
+                .and_then(Value::as_str)
+                .unwrap_or("直播解析失败")
+                .to_string());
         }
-        if resolved.m3u8_url.trim().is_empty() {
-            return Err("未获取到 FULL_HD1 直播流".to_string());
-        }
-        Ok(resolved)
+        LivePlanV1::from_value(json_value)
     }
 
     /// 创建下载引擎并绑定取消信号
-    fn create_engine(app_config: &crate::config::AppConfig, cancel_signal: Arc<AtomicBool>) -> DownloadEngine {
+    fn create_engine(
+        app_config: &crate::config::AppConfig,
+        cancel_signal: Arc<AtomicBool>,
+    ) -> DownloadEngine {
         let config = build_engine_config(app_config);
         DownloadEngine::new(config).with_cancel_signal(cancel_signal)
     }
@@ -470,10 +562,7 @@ impl<'a> TaskApplicationService<'a> {
                     if let Some(content) = &acc.content {
                         match tokio::fs::write(&acc_path, content).await {
                             Ok(()) => {
-                                info!(
-                                    "[TaskService] 文案已保存: {}",
-                                    acc_path.display()
-                                );
+                                info!("[TaskService] 文案已保存: {}", acc_path.display());
                                 downloaded_paths.push(acc_path.to_string_lossy().to_string());
                             }
                             Err(e) => {
@@ -517,17 +606,13 @@ impl<'a> TaskApplicationService<'a> {
                         Err(e) => {
                             warn!(
                                 "[TaskService] 附属文件下载失败: {}, error={}",
-                                acc.filename,
-                                e
+                                acc.filename, e
                             );
                         }
                     }
                 }
                 _ => {
-                    warn!(
-                        "[TaskService] 未知附属文件类型: {}",
-                        acc.content_type
-                    );
+                    warn!("[TaskService] 未知附属文件类型: {}", acc.content_type);
                 }
             }
         }
@@ -612,8 +697,7 @@ impl<'a> TaskApplicationService<'a> {
                         }
                         Err(error) => warn!(
                             "[TaskService] 附属文件下载失败: {}, error={}",
-                            accessory.output.filename,
-                            error
+                            accessory.output.filename, error
                         ),
                     }
                 }
@@ -627,10 +711,7 @@ impl<'a> TaskApplicationService<'a> {
     ///
     /// 保存 video_info。不创建 task_item，仅写入元数据表。
     /// 用于跳过和正常下载两种场景。
-    fn save_download_metadata(
-        db: &Database,
-        item: &ResolvedItem,
-    ) -> Result<(), String> {
+    fn save_download_metadata(db: &Database, item: &ResolvedItem) -> Result<(), String> {
         let detail = item.detail.as_ref();
 
         // 收集 video_info（user_info 由 execute_download 的 user_profile 路径独立保存，
@@ -638,9 +719,7 @@ impl<'a> TaskApplicationService<'a> {
         let mut videos = Vec::new();
         if let Some(d) = detail {
             if d.get("aweme_id").and_then(|v| v.as_str()).is_some() {
-                if let Ok(video_info) =
-                    serde_json::from_value::<VideoInfo>(cleaned_json(d))
-                {
+                if let Ok(video_info) = serde_json::from_value::<VideoInfo>(cleaned_json(d)) {
                     videos.push(video_info);
                 }
             }
@@ -649,7 +728,10 @@ impl<'a> TaskApplicationService<'a> {
         // 保存到数据库（只写 video_info，不写 user_info）
         if !videos.is_empty() {
             if let Err(e) = db.save_batch_results(&videos, &[]) {
-                error!("[TaskService] 保存视频信息失败: aweme_id={}, error={}", item.aweme_id, e);
+                error!(
+                    "[TaskService] 保存视频信息失败: aweme_id={}, error={}",
+                    item.aweme_id, e
+                );
                 return Err(format!("保存视频信息失败: {}", e));
             }
         }
@@ -658,7 +740,10 @@ impl<'a> TaskApplicationService<'a> {
     }
 
     /// 清理取消信号
-    fn cleanup_cancel_signal(cancel_signals: &Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>, task_id: &str) {
+    fn cleanup_cancel_signal(
+        cancel_signals: &Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
+        task_id: &str,
+    ) {
         let mut signals = cancel_signals.lock();
         signals.remove(task_id);
     }
@@ -685,7 +770,7 @@ impl<'a> TaskApplicationService<'a> {
             .update_task_status(&task_id, "starting", None)
             .map_err(|e| format!("更新直播任务状态失败: {}", e))?;
 
-        events::emit_task_event(&TaskEvent {
+        self.adapters.event_sink.emit(TaskEvent {
             event_type: TaskEventType::Started,
             task_id: task_id.clone(),
             mode: Some(DownloadMode::Live),
@@ -697,125 +782,225 @@ impl<'a> TaskApplicationService<'a> {
         let db = self.state.db.clone();
         let cancel_signals = self.state.cancel_signals.clone();
         let app_config = self.state.config.lock().get_douyin_config();
+        let live_resolver = self.adapters.live_resolver.clone();
+        let live_recorder = self.adapters.live_recorder.clone();
+        let event_sink = self.adapters.event_sink.clone();
         let task_id_clone = task_id.clone();
         let url = url.to_string();
 
         tokio::spawn(async move {
-            let resolved = match Self::resolve_live(&url).await {
-                Ok(resolved) => resolved,
+            let plan = match live_resolver.resolve(url.clone()).await {
+                Ok(plan) => plan,
                 Err(error) => {
-                    let _ = db.update_task_status(&task_id_clone, "error", Some(&error));
-                    events::emit_live_error(&task_id_clone, &error);
+                    match db.update_task_status(&task_id_clone, "error", Some(&error)) {
+                        Ok(()) => event_sink.emit(TaskEvent {
+                            event_type: TaskEventType::Finished,
+                            task_id: task_id_clone.clone(),
+                            mode: Some(DownloadMode::Live),
+                            url: Some(url.clone()),
+                            patch: TaskPatch::new(&task_id_clone).with_error(error),
+                        }),
+                        Err(db_error) => error!(
+                            "[TaskService] 直播解析失败后状态持久化失败: task_id={}, error={}",
+                            task_id_clone, db_error
+                        ),
+                    }
                     Self::cleanup_cancel_signal(&cancel_signals, &task_id_clone);
                     return;
                 }
             };
 
-            if cancel_signal.load(Ordering::Relaxed) {
-                let _ = db.update_task_status(&task_id_clone, "cancelled", None);
-                events::emit_live_cancelled(&task_id_clone);
+            let recording_started_at = unix_timestamp();
+            let target_path = plan.full_path().to_string_lossy().to_string();
+            let recording = RecordingLiveRecord {
+                task_id: task_id_clone.clone(),
+                room_id: plan.room_id.clone(),
+                web_rid: plan.web_rid.clone(),
+                title: plan.title.clone(),
+                nickname: plan.nickname.clone(),
+                sec_user_id: plan.sec_user_id.clone(),
+                cover_url: plan.cover_url.clone(),
+                file_path: target_path,
+                started_at: recording_started_at,
+            };
+            if let Err(db_error) = db.create_recording_live_record(&recording) {
+                let message = format!("创建直播 recording 状态失败: {db_error}");
+                if db
+                    .update_task_status(&task_id_clone, "error", Some(&message))
+                    .is_ok()
+                {
+                    event_sink.emit(TaskEvent {
+                        event_type: TaskEventType::Finished,
+                        task_id: task_id_clone.clone(),
+                        mode: Some(DownloadMode::Live),
+                        url: Some(url.clone()),
+                        patch: TaskPatch::new(&task_id_clone).with_error(message),
+                    });
+                } else {
+                    error!(
+                        "[TaskService] 创建直播状态失败且无法记录 task error: task_id={}",
+                        task_id_clone
+                    );
+                }
                 Self::cleanup_cancel_signal(&cancel_signals, &task_id_clone);
                 return;
             }
 
-            let _ = db.update_task_metadata(
-                &task_id_clone,
-                Some(&resolved.title),
-                Some(&resolved.nickname),
-            );
-            let _ = db.update_task_status(&task_id_clone, "recording", None);
-            events::emit_task_event(&TaskEvent::progress(
-                TaskPatch::new(&task_id_clone)
-                    .with_status(TaskStatus::Recording)
+            let active_status = if cancel_signal.load(Ordering::Relaxed) {
+                TaskStatus::Stopping
+            } else {
+                TaskStatus::Recording
+            };
+            event_sink.emit(TaskEvent {
+                event_type: TaskEventType::Progress,
+                task_id: task_id_clone.clone(),
+                mode: Some(DownloadMode::Live),
+                url: Some(url.clone()),
+                patch: TaskPatch::new(&task_id_clone)
+                    .with_status(active_status)
                     .with_live_metadata(
-                        &resolved.title,
-                        &resolved.nickname,
-                        &resolved.room_id,
-                        &resolved.web_rid,
-                        &resolved.cover_url,
+                        &plan.title,
+                        &plan.nickname,
+                        &plan.room_id,
+                        &plan.web_rid,
+                        &plan.cover_url,
                     ),
-            ));
+            });
 
-            let recorder = match LiveRecorder::new(&app_config, cancel_signal.clone()) {
-                Ok(recorder) => recorder,
-                Err(error) => {
-                    let _ = db.update_task_status(&task_id_clone, "error", Some(&error));
-                    events::emit_live_error(&task_id_clone, &error);
-                    Self::cleanup_cancel_signal(&cancel_signals, &task_id_clone);
-                    return;
+            let progress_task_id = task_id_clone.clone();
+            let progress_sink = event_sink.clone();
+            let progress: LiveProgressCallback = Arc::new(move |downloaded| {
+                let mut patch =
+                    TaskPatch::new(&progress_task_id).with_status(TaskStatus::Recording);
+                patch.file_size = Some(downloaded as i64);
+                progress_sink.emit(TaskEvent {
+                    event_type: TaskEventType::Progress,
+                    task_id: progress_task_id.clone(),
+                    mode: Some(DownloadMode::Live),
+                    url: None,
+                    patch,
+                });
+            });
+            let outcome = live_recorder
+                .record(app_config, cancel_signal, plan.clone(), progress)
+                .await;
+            let output = outcome.output().clone();
+            let (terminal_status, outcome_error) = match &outcome {
+                LiveRecorderOutcome::Completed { reason, .. } => {
+                    info!(
+                        "[TaskService] live recorder completed: task_id={}, reason={:?}",
+                        task_id_clone, reason
+                    );
+                    (LiveTerminalStatus::Completed, None)
+                }
+                LiveRecorderOutcome::Failed { kind, error, .. } => {
+                    warn!(
+                        "[TaskService] live recorder failed: task_id={}, kind={:?}, error={}",
+                        task_id_clone, kind, error
+                    );
+                    (LiveTerminalStatus::Error, Some(error.clone()))
+                }
+            };
+            let terminal = LiveTerminalCommit {
+                task_id: task_id_clone.clone(),
+                status: terminal_status,
+                file_path: output.path.to_string_lossy().to_string(),
+                file_size: output.file_size as i64,
+                duration_sec: output.duration_sec(),
+                started_at: output.started_at,
+                ended_at: output.ended_at,
+                error_msg: outcome_error.clone(),
+            };
+
+            let committed = match db.commit_live_terminal(&terminal) {
+                Ok(()) => Some(outcome_error),
+                Err(commit_error) => {
+                    let original = outcome_error
+                        .as_deref()
+                        .unwrap_or("recorder completed successfully");
+                    let persistence_error = format!(
+                        "直播终态持久化失败: {commit_error}; 原始 recorder outcome: {original}"
+                    );
+                    let error_terminal = LiveTerminalCommit {
+                        task_id: task_id_clone.clone(),
+                        status: LiveTerminalStatus::Error,
+                        file_path: output.path.to_string_lossy().to_string(),
+                        file_size: output.file_size as i64,
+                        duration_sec: output.duration_sec(),
+                        started_at: output.started_at,
+                        ended_at: output.ended_at,
+                        error_msg: Some(persistence_error.clone()),
+                    };
+                    match db.commit_live_terminal(&error_terminal) {
+                        Ok(()) => Some(Some(persistence_error)),
+                        Err(fallback_error) => {
+                            error!(
+                                "[TaskService] 直播终态及 fallback 均无法持久化: task_id={}, terminal_error={}, fallback_error={}, recorder={}",
+                                task_id_clone, commit_error, fallback_error, original
+                            );
+                            None
+                        }
+                    }
                 }
             };
 
-            let progress_task_id = task_id_clone.clone();
-            match recorder
-                .record(&resolved, move |downloaded| {
-                    events::emit_progress(&progress_task_id, downloaded, 0);
-                })
-                .await
-            {
-                Ok(output) => {
-                    let file_path = output.path.to_string_lossy().to_string();
-                    let record = NewLiveRecord {
-                        room_id: nonempty_string(&resolved.room_id),
-                        web_rid: nonempty_string(&resolved.web_rid),
-                        title: nonempty_string(&resolved.title),
-                        nickname: nonempty_string(&resolved.nickname),
-                        sec_user_id: nonempty_string(&resolved.sec_user_id),
-                        file_path: nonempty_string(&file_path),
-                        file_size: output.file_size as i64,
-                        duration_sec: output.duration_sec(),
-                        status: "completed".to_string(),
-                        started_at: Some(output.started_at),
-                        ended_at: Some(output.ended_at),
-                        cover_url: nonempty_string(&resolved.cover_url),
-                    };
-
-                    if let Err(error) = db.save_live_record(&record) {
-                        let message = format!("保存直播记录失败: {}", error);
-                        let _ = db.update_task_status(&task_id_clone, "error", Some(&message));
-                        events::emit_live_error(&task_id_clone, &message);
+            if let Some(error_state) = committed {
+                let mut patch = TaskPatch::new(&task_id_clone)
+                    .with_status(if error_state.is_some() {
+                        TaskStatus::Error
                     } else {
-                        let _ = db.update_task_status(&task_id_clone, "completed", None);
-                        events::emit_live_finished(
-                            TaskPatch::new(&task_id_clone)
-                                .with_status(TaskStatus::Completed)
-                                .with_live_metadata(
-                                    &resolved.title,
-                                    &resolved.nickname,
-                                    &resolved.room_id,
-                                    &resolved.web_rid,
-                                    &resolved.cover_url,
-                                )
-                                .with_live_result(
-                                    file_path,
-                                    output.file_size as i64,
-                                    output.duration_sec(),
-                                    output.started_at,
-                                    output.ended_at,
-                                ),
-                        );
-                        info!(
-                            "[TaskService] 直播录制完成: task_id={}, stopped={}, skipped={}",
-                            task_id_clone, output.stopped, output.skipped
-                        );
-                    }
+                        TaskStatus::Completed
+                    })
+                    .with_live_metadata(
+                        &plan.title,
+                        &plan.nickname,
+                        &plan.room_id,
+                        &plan.web_rid,
+                        &plan.cover_url,
+                    )
+                    .with_live_result(
+                        output.path.to_string_lossy().to_string(),
+                        output.file_size as i64,
+                        output.duration_sec(),
+                        output.started_at,
+                        output.ended_at,
+                    );
+                if let Some(message) = error_state {
+                    patch = patch.with_error(message);
                 }
-                Err(error) => {
-                    if cancel_signal.load(Ordering::Relaxed) {
-                        let _ = db.update_task_status(&task_id_clone, "cancelled", None);
-                        events::emit_live_cancelled(&task_id_clone);
-                    } else {
-                        let message = error.to_string();
-                        let _ = db.update_task_status(&task_id_clone, "error", Some(&message));
-                        events::emit_live_error(&task_id_clone, &message);
-                    }
-                }
+                event_sink.emit(TaskEvent {
+                    event_type: TaskEventType::Finished,
+                    task_id: task_id_clone.clone(),
+                    mode: Some(DownloadMode::Live),
+                    url: Some(url),
+                    patch,
+                });
             }
 
             Self::cleanup_cancel_signal(&cancel_signals, &task_id_clone);
         });
 
         Ok(task_id)
+    }
+
+    /// 请求停止直播。只写 stopping 和设置 token；后台录制器是唯一终态 owner。
+    pub fn stop_live_record(&self, task_id: &str) -> Result<(), String> {
+        let signal = self
+            .state
+            .get_cancel_signal(task_id)
+            .ok_or_else(|| "录制任务不存在或已完成".to_string())?;
+        self.db()
+            .request_live_stop(task_id)
+            .map_err(|error| format!("请求停止直播失败: {error}"))?;
+        signal.store(true, Ordering::Relaxed);
+        self.adapters.event_sink.emit(TaskEvent {
+            event_type: TaskEventType::Progress,
+            task_id: task_id.to_string(),
+            mode: Some(DownloadMode::Live),
+            url: None,
+            patch: TaskPatch::new(task_id).with_status(TaskStatus::Stopping),
+        });
+        Ok(())
     }
 
     // ============================================================
@@ -848,13 +1033,26 @@ impl<'a> TaskApplicationService<'a> {
             cover_url: json_str(detail, "cover_url"),
         };
         if let Err(e) = db.create_task_item(&new_item) {
-            error!("[TaskService] 创建任务子项失败: task_id={}, error={}", task_id, e);
+            error!(
+                "[TaskService] 创建任务子项失败: task_id={}, error={}",
+                task_id, e
+            );
             return Err(format!("创建任务子项失败: {}", e));
         }
 
         // 更新 task_item 状态
-        if let Err(e) = db.update_task_item_status(task_id, aweme_id, "completed", Some(file_path), file_size, None) {
-            error!("[TaskService] 更新任务子项状态失败: task_id={}, error={}", task_id, e);
+        if let Err(e) = db.update_task_item_status(
+            task_id,
+            aweme_id,
+            "completed",
+            Some(file_path),
+            file_size,
+            None,
+        ) {
+            error!(
+                "[TaskService] 更新任务子项状态失败: task_id={}, error={}",
+                task_id, e
+            );
             return Err(format!("更新任务子项状态失败: {}", e));
         }
 
@@ -870,11 +1068,14 @@ impl<'a> TaskApplicationService<'a> {
             task_id: task_id.to_string(),
             aweme_id: Some(item.aweme_id.clone()),
             media_key: Some(item.media_key.clone()),
-            media_kind: Some(match item.kind {
-                SingleMediaKind::Video => "video",
-                SingleMediaKind::Image => "image",
-                SingleMediaKind::LivePhoto => "live_photo",
-            }.to_string()),
+            media_kind: Some(
+                match item.kind {
+                    SingleMediaKind::Video => "video",
+                    SingleMediaKind::Image => "image",
+                    SingleMediaKind::LivePhoto => "live_photo",
+                }
+                .to_string(),
+            ),
             media_index: Some(item.media_index()?),
             title: item.metadata.desc.clone(),
             author_nickname: item.metadata.author_nickname.clone(),
@@ -980,9 +1181,8 @@ impl<'a> TaskApplicationService<'a> {
                             "[TaskService] 任务完成状态失败后的 error 标记也失败: task_id={}, error={}",
                             task_id, error_status_error
                         );
-                        message.push_str(&format!(
-                            "; 任务 error 状态写入失败: {error_status_error}"
-                        ));
+                        message
+                            .push_str(&format!("; 任务 error 状态写入失败: {error_status_error}"));
                     }
                     TaskTerminal::Error(message)
                 }
@@ -1009,14 +1209,14 @@ impl<'a> TaskApplicationService<'a> {
         event_sink: &Arc<dyn TaskEventSink>,
     ) {
         match db.get_task_item_counts(task_id) {
-            Ok(counts) => event_sink.emit(TaskEvent::progress(
-                TaskPatch::new(task_id).with_counts(
+            Ok(counts) => {
+                event_sink.emit(TaskEvent::progress(TaskPatch::new(task_id).with_counts(
                     counts.total,
                     counts.completed,
                     counts.skipped,
                     counts.failed,
-                ),
-            )),
+                )))
+            }
             Err(error) => warn!(
                 "[TaskService] 读取已提交任务计数失败，跳过进度事件: task_id={}, error={}",
                 task_id, error
@@ -1046,7 +1246,9 @@ impl<'a> TaskApplicationService<'a> {
             if cancel_signal.load(Ordering::Relaxed) {
                 info!(
                     "[TaskService] 下载被取消: task_id={}, 已完成 {}/{}",
-                    task_id, completed + failed, total
+                    task_id,
+                    completed + failed,
+                    total
                 );
                 return Err("下载已取消".to_string());
             }
@@ -1136,17 +1338,29 @@ impl<'a> TaskApplicationService<'a> {
             .map_err(|error| format!("创建保存目录失败: {error}"))?;
 
         let (completed, failed) = Self::execute_media_items(
-            db, task_id, &plan.items, &save_dir,
-            cancel_signal, app_config, &event_sink,
-        ).await?;
+            db,
+            task_id,
+            &plan.items,
+            &save_dir,
+            cancel_signal,
+            app_config,
+            &event_sink,
+        )
+        .await?;
 
         if failed > 0 && completed == 0 {
-            return Err(format!("所有下载均失败: {failed}/{} failed", plan.items.len()));
+            return Err(format!(
+                "所有下载均失败: {failed}/{} failed",
+                plan.items.len()
+            ));
         }
 
         info!(
             "[TaskService] 单视频下载完成: task_id={}, total={}, completed={}, failed={}",
-            task_id, plan.items.len(), completed, failed
+            task_id,
+            plan.items.len(),
+            completed,
+            failed
         );
         Ok(())
     }
@@ -1248,20 +1462,17 @@ impl<'a> TaskApplicationService<'a> {
                 }
             } else {
                 if plan.save_dir != *save_dir.as_ref().expect("first page sets save_dir") {
-                    return Err(tracker.contextualize(format!(
-                        "第 {page_index} 页 save_dir 漂移"
-                    )));
+                    return Err(tracker.contextualize(format!("第 {page_index} 页 save_dir 漂移")));
                 }
                 if plan.user_profile.is_some() {
-                    return Err(tracker.contextualize(format!(
-                        "第 {page_index} 页不得重复返回 user_profile"
-                    )));
+                    return Err(tracker
+                        .contextualize(format!("第 {page_index} 页不得重复返回 user_profile")));
                 }
             }
 
-            let current_save_dir = save_dir.as_ref().ok_or_else(|| {
-                "分页解析未返回 save_dir".to_string()
-            })?;
+            let current_save_dir = save_dir
+                .as_ref()
+                .ok_or_else(|| "分页解析未返回 save_dir".to_string())?;
 
             if plan.has_more && plan.next_cursor.is_none() {
                 return Err(tracker.contextualize(format!(
@@ -1288,7 +1499,8 @@ impl<'a> TaskApplicationService<'a> {
                         item.media_key
                     )));
                 }
-                item.media_index().map_err(|error| tracker.contextualize(error))?;
+                item.media_index()
+                    .map_err(|error| tracker.contextualize(error))?;
                 if !page_media_keys.insert(item.media_key.as_str()) {
                     return Err(tracker.contextualize(format!(
                         "第 {page_index} 页重复 media_key: {}",
@@ -1316,15 +1528,13 @@ impl<'a> TaskApplicationService<'a> {
                     seen_aweme_ids.insert(aweme_id.clone());
                     allowed_work_ids.insert(aweme_id.as_str());
                 }
-                let filtered: Vec<_> = plan.items
+                let filtered: Vec<_> = plan
+                    .items
                     .iter()
                     .filter(|item| allowed_work_ids.contains(item.aweme_id.as_str()))
                     .cloned()
                     .collect();
-                if filtered.is_empty()
-                    && max_counts != 0
-                    && seen_aweme_ids.len() >= max_counts
-                {
+                if filtered.is_empty() && max_counts != 0 && seen_aweme_ids.len() >= max_counts {
                     break;
                 }
                 filtered
@@ -1346,7 +1556,11 @@ impl<'a> TaskApplicationService<'a> {
 
             info!(
                 "[TaskService] 第 {} 页下载完成: completed={}, failed={}, 累计: {}/{}",
-                page_index, completed, failed, total_completed, total_completed + total_failed
+                page_index,
+                completed,
+                failed,
+                total_completed,
+                total_completed + total_failed
             );
 
             // Post-download max_counts early stop (non-selection).
@@ -1364,7 +1578,10 @@ impl<'a> TaskApplicationService<'a> {
             }
 
             if !plan.has_more {
-                info!("[TaskService] has_more=false，停止分页 (共 {} 页)", page_index);
+                info!(
+                    "[TaskService] has_more=false，停止分页 (共 {} 页)",
+                    page_index
+                );
                 break;
             }
 
@@ -1374,9 +1591,9 @@ impl<'a> TaskApplicationService<'a> {
                 ))
             })?;
             if !seen_cursors.insert(next) {
-                return Err(tracker.contextualize(format!(
-                    "第 {page_index} 页 next_cursor 重复: {next}"
-                )));
+                return Err(
+                    tracker.contextualize(format!("第 {page_index} 页 next_cursor 重复: {next}"))
+                );
             }
             cursor = next;
         }
@@ -1446,11 +1663,9 @@ impl<'a> TaskApplicationService<'a> {
         }
 
         // 2. 发射任务启动事件
-        self.adapters.event_sink.emit(TaskEvent::started(
-            &task_id,
-            request.mode,
-            &request.url,
-        ));
+        self.adapters
+            .event_sink
+            .emit(TaskEvent::started(&task_id, request.mode, &request.url));
 
         // 3. 注册取消信号
         let cancel_signal = self.state.register_cancel_signal(&task_id);
@@ -1550,9 +1765,9 @@ impl<'a> TaskApplicationService<'a> {
         }
 
         let items = resolved.items;
-        let save_dir = resolved.save_dir.unwrap_or_else(|| {
-            format!("./Download/{}", mode.as_str())
-        });
+        let save_dir = resolved
+            .save_dir
+            .unwrap_or_else(|| format!("./Download/{}", mode.as_str()));
 
         if items.is_empty() {
             return Err("没有可下载的内容".to_string());
@@ -1591,7 +1806,10 @@ impl<'a> TaskApplicationService<'a> {
         for (index, item) in items.iter().enumerate() {
             // 检查取消信号
             if cancel_signal.load(Ordering::Relaxed) {
-                info!("[TaskService] 下载被取消: task_id={}, 已完成 {}/{}", task_id, index, total);
+                info!(
+                    "[TaskService] 下载被取消: task_id={}, 已完成 {}/{}",
+                    task_id, index, total
+                );
                 return Err("下载已取消".to_string());
             }
 
@@ -1611,9 +1829,15 @@ impl<'a> TaskApplicationService<'a> {
                     let file_size = download_result.file_size as i64;
 
                     // 下载附属文件
-                    let _accessory_paths =
-                        Self::download_accessories(&engine, &item.accessories, &save_dir, &item.folder_name, task_id, app_config)
-                            .await;
+                    let _accessory_paths = Self::download_accessories(
+                        &engine,
+                        &item.accessories,
+                        &save_dir,
+                        &item.folder_name,
+                        task_id,
+                        app_config,
+                    )
+                    .await;
 
                     // 保存到数据库
                     if download_result.skipped {
@@ -1647,13 +1871,9 @@ impl<'a> TaskApplicationService<'a> {
                             download_result.path.display()
                         );
                     } else {
-                        if let Err(e) = Self::save_single_result(
-                            db,
-                            task_id,
-                            item,
-                            &file_path,
-                            file_size,
-                        ) {
+                        if let Err(e) =
+                            Self::save_single_result(db, task_id, item, &file_path, file_size)
+                        {
                             warn!("[TaskService] 保存结果失败: {}", e);
                             failed += 1;
                             continue;
@@ -1662,10 +1882,7 @@ impl<'a> TaskApplicationService<'a> {
 
                     completed += 1;
                     // 发射最终进度
-                    progress.update(
-                        (completed + failed) as u64,
-                        total as u64,
-                    );
+                    progress.update((completed + failed) as u64, total as u64);
                 }
                 Err(e) => {
                     warn!(
@@ -1755,11 +1972,9 @@ impl<'a> TaskApplicationService<'a> {
         }
 
         // 2. 发射启动事件
-        self.adapters.event_sink.emit(TaskEvent::started(
-            &task_id,
-            mode,
-            url,
-        ));
+        self.adapters
+            .event_sink
+            .emit(TaskEvent::started(&task_id, mode, url));
 
         // 3. 注册取消信号
         let cancel_signal = self.state.register_cancel_signal(&task_id);
@@ -1801,10 +2016,7 @@ impl<'a> TaskApplicationService<'a> {
                     adapters.event_sink.emit(TaskEvent::finished(
                         TaskPatch::new(&task_id_clone).with_status(TaskStatus::Completed),
                     ));
-                    info!(
-                        "[TaskService] 批量下载完成: task_id={}",
-                        task_id_clone
-                    );
+                    info!("[TaskService] 批量下载完成: task_id={}", task_id_clone);
                 }
                 TaskTerminal::Cancelled => {
                     adapters.event_sink.emit(TaskEvent::finished(
@@ -1884,9 +2096,7 @@ impl<'a> TaskApplicationService<'a> {
 
             match result {
                 Ok(()) => {
-                    if let Err(e) =
-                        db.update_task_status(&task_id_clone, "completed", None)
-                    {
+                    if let Err(e) = db.update_task_status(&task_id_clone, "completed", None) {
                         error!(
                             "[TaskService] 更新音乐任务完成状态失败: task_id={}, error={}",
                             task_id_clone, e
@@ -1895,10 +2105,7 @@ impl<'a> TaskApplicationService<'a> {
                     events::emit_finished(
                         TaskPatch::new(&task_id_clone).with_status(TaskStatus::Completed),
                     );
-                    info!(
-                        "[TaskService] 音乐下载完成: task_id={}",
-                        task_id_clone
-                    );
+                    info!("[TaskService] 音乐下载完成: task_id={}", task_id_clone);
                 }
                 Err(e) => {
                     if cancel_signal.load(Ordering::Relaxed) {
@@ -1911,10 +2118,7 @@ impl<'a> TaskApplicationService<'a> {
                             );
                         }
                         events::emit_cancelled(&task_id_clone);
-                        info!(
-                            "[TaskService] 音乐下载已取消: task_id={}",
-                            task_id_clone
-                        );
+                        info!("[TaskService] 音乐下载已取消: task_id={}", task_id_clone);
                     } else {
                         error!(
                             "[TaskService] 音乐下载失败: task_id={}, error={}",
@@ -1960,7 +2164,9 @@ impl<'a> TaskApplicationService<'a> {
         }
 
         let items = resolved.items;
-        let save_dir = resolved.save_dir.unwrap_or_else(|| "./Download/music".to_string());
+        let save_dir = resolved
+            .save_dir
+            .unwrap_or_else(|| "./Download/music".to_string());
 
         if items.is_empty() {
             return Err("没有可下载的音乐".to_string());
@@ -2072,10 +2278,7 @@ impl<'a> TaskApplicationService<'a> {
                     }
 
                     completed += 1;
-                    progress.update(
-                        (completed + failed) as u64,
-                        total as u64,
-                    );
+                    progress.update((completed + failed) as u64, total as u64);
                 }
                 Err(e) => {
                     warn!(
@@ -2352,12 +2555,8 @@ mod single_media_outcome_tests {
         .expect_err("metadata failure must fail the result transaction");
         assert!(execution_error.contains("forced metadata failure"));
 
-        let terminal = TaskApplicationService::finalize_task(
-            &db,
-            task_id,
-            Err(execution_error),
-            true,
-        );
+        let terminal =
+            TaskApplicationService::finalize_task(&db, task_id, Err(execution_error), true);
         assert!(matches!(terminal, TaskTerminal::Error(_)));
 
         let detail = db.get_task_detail(task_id).unwrap().unwrap();
@@ -2408,12 +2607,8 @@ mod single_media_outcome_tests {
         assert!(execution_error.contains("forced item failure"));
         assert!(execution_error.contains("错误状态恢复写入失败"));
 
-        let terminal = TaskApplicationService::finalize_task(
-            &db,
-            task_id,
-            Err(execution_error),
-            false,
-        );
+        let terminal =
+            TaskApplicationService::finalize_task(&db, task_id, Err(execution_error), false);
         assert!(matches!(terminal, TaskTerminal::Error(_)));
         let detail = db.get_task_detail(task_id).unwrap().unwrap();
         assert_eq!(detail.task.status, "error");
@@ -2443,8 +2638,7 @@ mod single_media_outcome_tests {
         })
         .expect("failure trigger should be installed");
 
-        let terminal =
-            TaskApplicationService::finalize_task(&db, task_id, Ok(()), false);
+        let terminal = TaskApplicationService::finalize_task(&db, task_id, Ok(()), false);
         let TaskTerminal::Error(message) = terminal else {
             panic!("completed status DB failure must not produce completed semantics");
         };

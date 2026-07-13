@@ -45,8 +45,8 @@ def save_user_info(user_data: dict) -> bool:
 def save_live_record(record: dict) -> bool:
     """[deprecated] 保存直播录制记录（通过 Rust 桥接）
 
-    Deprecated: P2-02 后 live 记录由 Rust emit.rs 持久化。
-    此函数保留仅用于向前兼容，不应在新代码中调用。
+    Deprecated: Issue 09 后 live 记录由 Rust TaskApplicationService 事务化持久化。
+    Rust 不再注入对应 Python DB 闭包；此函数仅保留到 Issue 10 清理。
 
     Args:
         record: 直播记录字典，字段参见 NewLiveRecord:

@@ -22,6 +22,11 @@ from core.models.requests import (
 )
 from core.models.config import ServiceConfig
 from core.models.download import DownloadMode
+from core.models.live_record import (
+    LIVE_PLAN_CONTRACT_VERSION,
+    LiveOutputV1,
+    LivePlanV1,
+)
 from core.models.single_download import (
     SINGLE_DOWNLOAD_CONTRACT_VERSION,
     SingleAccessory,
@@ -60,6 +65,7 @@ __all__ = [
     "ServiceConfig",
     # 下载模式
     "DownloadMode",
+    "LIVE_PLAN_CONTRACT_VERSION", "LiveOutputV1", "LivePlanV1",
     "SINGLE_DOWNLOAD_CONTRACT_VERSION",
     "SingleAccessory", "SingleAccessoryKind", "SingleDownloadItem",
     "SingleDownloadPlanV1", "SingleMediaKind", "SingleOutputSpec",

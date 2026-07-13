@@ -64,6 +64,7 @@ export interface AppError {
 
 export interface LiveRecord {
   id: number;
+  task_id: string | null;
   room_id: string | null;
   web_rid: string | null;
   title: string | null;
@@ -73,9 +74,11 @@ export interface LiveRecord {
   file_size: number;
   duration_sec: number;
   status: string;
+  error_msg: string | null;
   started_at: number | null;
   ended_at: number | null;
   cover_url: string | null;
+  updated_at: number;
 }
 
 export interface DownloadTask {

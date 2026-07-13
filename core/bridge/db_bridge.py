@@ -16,7 +16,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# 由 Rust db_bridge.rs 的 register_db_bridge() 注入
+# 由 Rust db_bridge.rs 的 register_db_bridge() 注入。
+# 直播写入口自 Issue 09 起不再注入；字段仅保留给 Issue 10 做兼容清理。
 _save_video_info = None
 _save_user_info = None
 _save_live_record = None
@@ -50,7 +51,7 @@ def save_user_info(data: dict) -> bool:
 
 
 def save_live_record(data: dict) -> bool:
-    """保存直播录制记录（通过 Rust）"""
+    """[legacy disabled] 直播记录由 Rust TaskApplicationService 独占。"""
     if _save_live_record is None:
         logger.error("[db_bridge] _save_live_record 未注册")
         return False

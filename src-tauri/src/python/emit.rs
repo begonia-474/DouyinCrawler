@@ -3,9 +3,9 @@
 //! 供 Python 通过 PyO3 调用，将任务状态推送到前端。
 //! 统一事件格式：所有事件使用 task_type: "typed" + TaskEvent 兼容结构。
 
-use pyo3::prelude::*;
-use tauri::{AppHandle, Emitter, Manager};
 use log::{info, warn};
+use pyo3::prelude::*;
+use tauri::{AppHandle, Emitter};
 
 /// 注册 emit_task_update 到 Python core.tauri_bridge 模块
 pub fn register_app_handle(app_handle: &AppHandle) {
@@ -31,6 +31,11 @@ pub fn register_app_handle(app_handle: &AppHandle) {
                 let task_type: String = args.get_item(1)?.extract()?;
                 let data = args.get_item(2)?;
 
+                if task_type == "live" {
+                    warn!("[emit] 已拒绝 legacy Python live 事件；直播生命周期由 Rust TaskApplicationService 管理");
+                    return Ok(());
+                }
+
                 info!("[emit] Python 调用 emit: task_id={}, task_type={}", task_id, task_type);
 
                 // 将 Python dict 转为 JSON
@@ -46,34 +51,6 @@ pub fn register_app_handle(app_handle: &AppHandle) {
                     handle.emit("task-update", &payload)
                         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("事件发射失败: {}", e)))?;
                     info!("[emit] Tauri 事件发送成功");
-
-                    // 如果是 live completed 事件，持久化到 DB
-                    if task_type == "live" {
-                        if let Some(status) = json_value.get("status").and_then(|v| v.as_str()) {
-                            if status == "completed" {
-                                let state = handle.state::<crate::state::AppState>();
-                                let record = crate::db::NewLiveRecord {
-                                    room_id: json_value.get("room_id").and_then(|v| v.as_str()).map(String::from),
-                                    web_rid: json_value.get("web_rid").and_then(|v| v.as_str()).map(String::from),
-                                    title: json_value.get("title").and_then(|v| v.as_str()).map(String::from),
-                                    nickname: json_value.get("nickname").and_then(|v| v.as_str()).map(String::from),
-                                    sec_user_id: None,
-                                    file_path: json_value.get("file").and_then(|v| v.as_str()).map(String::from),
-                                    file_size: json_value.get("file_size").and_then(|v| v.as_i64()).unwrap_or(0),
-                                    duration_sec: json_value.get("duration_sec").and_then(|v| v.as_i64()).unwrap_or(0),
-                                    status: "completed".to_string(),
-                                    started_at: json_value.get("started_at").and_then(|v| v.as_i64()),
-                                    ended_at: json_value.get("ended_at").and_then(|v| v.as_i64()),
-                                    cover_url: json_value.get("cover_url").and_then(|v| v.as_str()).map(String::from),
-                                };
-                                if let Err(e) = state.db.save_live_record(&record) {
-                                    warn!("[emit] 保存 live 记录失败: {}", e);
-                                } else {
-                                    info!("[emit] live 记录已保存, task_id={}", task_id);
-                                }
-                            }
-                        }
-                    }
 
                     Ok::<(), pyo3::PyErr>(())
                 })?;
@@ -113,9 +90,16 @@ pub fn register_app_handle(app_handle: &AppHandle) {
 /// - task_type 始终为 "typed"
 /// - data 包含 TaskEvent 的所有字段（event_type, task_id, mode, url, patch.*）
 /// - Python 特有字段（title, nickname 等）放在 data 顶层，前端 UnifiedTask 会处理
-fn format_event_payload(task_id: &str, _python_task_type: &str, data: &serde_json::Value) -> serde_json::Value {
+fn format_event_payload(
+    task_id: &str,
+    _python_task_type: &str,
+    data: &serde_json::Value,
+) -> serde_json::Value {
     // 从 Python data 中提取字段
-    let event_type_str = data.get("event_type").and_then(|v| v.as_str()).unwrap_or("progress");
+    let event_type_str = data
+        .get("event_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("progress");
     let event_type = match event_type_str {
         "started" => "started",
         "finished" => "completed",
@@ -123,14 +107,29 @@ fn format_event_payload(task_id: &str, _python_task_type: &str, data: &serde_jso
         _ => "progress",
     };
 
-    let status_str = data.get("status").and_then(|v| v.as_str()).unwrap_or("running");
-    let mode_str = data.get("mode").and_then(|v| v.as_str()).map(|s| s.to_string());
-    let url = data.get("url").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let status_str = data
+        .get("status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("running");
+    let mode_str = data
+        .get("mode")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let url = data
+        .get("url")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
 
     // 构建 patch 字段（TaskPatch 兼容）
     let mut patch = serde_json::Map::new();
-    patch.insert("task_id".to_string(), serde_json::Value::String(task_id.to_string()));
-    patch.insert("status".to_string(), serde_json::Value::String(status_str.to_string()));
+    patch.insert(
+        "task_id".to_string(),
+        serde_json::Value::String(task_id.to_string()),
+    );
+    patch.insert(
+        "status".to_string(),
+        serde_json::Value::String(status_str.to_string()),
+    );
 
     // 复制可选字段
     for field in &["total", "completed", "failed", "skipped"] {
@@ -145,7 +144,19 @@ fn format_event_payload(task_id: &str, _python_task_type: &str, data: &serde_jso
     }
 
     // Python 特有字段（live 事件等）也复制到 patch 中
-    for field in &["title", "nickname", "room_id", "web_rid", "file", "file_size", "duration_sec", "started_at", "ended_at", "cover_url", "type"] {
+    for field in &[
+        "title",
+        "nickname",
+        "room_id",
+        "web_rid",
+        "file",
+        "file_size",
+        "duration_sec",
+        "started_at",
+        "ended_at",
+        "cover_url",
+        "type",
+    ] {
         if let Some(val) = data.get(*field) {
             patch.insert(field.to_string(), val.clone());
         }
@@ -153,8 +164,14 @@ fn format_event_payload(task_id: &str, _python_task_type: &str, data: &serde_jso
 
     // 构建完整的 TaskEvent 兼容 payload
     let mut event_data = serde_json::Map::new();
-    event_data.insert("event_type".to_string(), serde_json::Value::String(event_type.to_string()));
-    event_data.insert("task_id".to_string(), serde_json::Value::String(task_id.to_string()));
+    event_data.insert(
+        "event_type".to_string(),
+        serde_json::Value::String(event_type.to_string()),
+    );
+    event_data.insert(
+        "task_id".to_string(),
+        serde_json::Value::String(task_id.to_string()),
+    );
 
     if let Some(mode) = &mode_str {
         event_data.insert("mode".to_string(), serde_json::Value::String(mode.clone()));
@@ -284,7 +301,11 @@ mod tests {
         ];
         for data in cases {
             let result = format_event_payload("tid", "any", &data);
-            assert_eq!(result["task_type"], "typed", "task_type 应为 typed 对于输入: {}", data);
+            assert_eq!(
+                result["task_type"], "typed",
+                "task_type 应为 typed 对于输入: {}",
+                data
+            );
         }
     }
 }

@@ -27,7 +27,12 @@ impl super::connection::Database {
         Ok(())
     }
 
-    pub fn update_task_status(&self, task_id: &str, status: &str, error_msg: Option<&str>) -> Result<()> {
+    pub fn update_task_status(
+        &self,
+        task_id: &str,
+        status: &str,
+        error_msg: Option<&str>,
+    ) -> Result<()> {
         let conn = lock_conn!(self);
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -106,7 +111,21 @@ impl super::connection::Database {
             )?;
 
             // 3. 将活动任务改为 interrupted，保留 error_msg
-            for (task_id, _mode, existing_error) in &active_tasks {
+            for (task_id, mode, existing_error) in &active_tasks {
+                if mode == "live" {
+                    tx.execute(
+                        "UPDATE live_records
+                         SET status = 'interrupted',
+                             error_msg = CASE
+                                 WHEN error_msg IS NULL OR trim(error_msg) = '' THEN ?1
+                                 WHEN instr(error_msg, ?1) > 0 THEN error_msg
+                                 ELSE error_msg || '; ' || ?1
+                             END,
+                             updated_at = ?2
+                         WHERE task_id = ?3 AND status IN ('recording', 'stopping')",
+                        rusqlite::params![interruption_msg, now, task_id],
+                    )?;
+                }
                 let new_error = match existing_error {
                     Some(err) if !err.trim().is_empty() => {
                         // 避免重复追加
@@ -188,7 +207,8 @@ impl super::connection::Database {
         params.push(Box::new(limit));
         params.push(Box::new(offset));
 
-        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(param_refs.as_slice(), |row| {
             Ok(DownloadTask {
@@ -246,8 +266,14 @@ impl super::connection::Database {
 
     pub fn delete_task(&self, task_id: &str) -> Result<()> {
         self.with_transaction(|tx| {
-            tx.execute("DELETE FROM download_task_items WHERE task_id = ?1", rusqlite::params![task_id])?;
-            tx.execute("DELETE FROM download_tasks WHERE id = ?1", rusqlite::params![task_id])?;
+            tx.execute(
+                "DELETE FROM download_task_items WHERE task_id = ?1",
+                rusqlite::params![task_id],
+            )?;
+            tx.execute(
+                "DELETE FROM download_tasks WHERE id = ?1",
+                rusqlite::params![task_id],
+            )?;
             Ok(())
         })
     }
@@ -266,8 +292,16 @@ impl super::connection::Database {
               title, author_nickname, author_sec_uid, cover_url, status, created_at) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'pending', ?10)",
             rusqlite::params![
-                item.task_id, item.aweme_id, item.media_key, item.media_kind, item.media_index,
-                item.title, item.author_nickname, item.author_sec_uid, item.cover_url, now,
+                item.task_id,
+                item.aweme_id,
+                item.media_key,
+                item.media_kind,
+                item.media_index,
+                item.title,
+                item.author_nickname,
+                item.author_sec_uid,
+                item.cover_url,
+                now,
             ],
         )?;
         Ok(())
@@ -450,7 +484,8 @@ impl super::connection::Database {
         }
         sql.push_str(" ORDER BY id ASC");
 
-        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(param_refs.as_slice(), |row| {
             Ok(TaskItem {
@@ -490,13 +525,15 @@ impl super::connection::Database {
              COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0) \
              FROM download_task_items WHERE task_id = ?1",
             rusqlite::params![task_id],
-            |row| Ok(TaskItemCounts {
-                total: row.get(0)?,
-                completed: row.get(1)?,
-                skipped: row.get(2)?,
-                failed: row.get(3)?,
-                pending: row.get(4)?,
-            }),
+            |row| {
+                Ok(TaskItemCounts {
+                    total: row.get(0)?,
+                    completed: row.get(1)?,
+                    skipped: row.get(2)?,
+                    failed: row.get(3)?,
+                    pending: row.get(4)?,
+                })
+            },
         )?;
         Ok(counts)
     }
@@ -507,7 +544,8 @@ impl super::connection::Database {
         let mut stmt = conn.prepare(
             "SELECT file_path FROM download_task_items WHERE aweme_id = ?1 AND file_path IS NOT NULL AND file_path != '' LIMIT 1"
         )?;
-        let mut rows = stmt.query_map(rusqlite::params![aweme_id], |row| row.get::<_, String>(0))?;
+        let mut rows =
+            stmt.query_map(rusqlite::params![aweme_id], |row| row.get::<_, String>(0))?;
         match rows.next() {
             Some(row) => row.map(Some),
             None => Ok(None),
@@ -753,5 +791,64 @@ mod tests {
         assert_item_status(&db, "pending-items", "downloading-item", "interrupted");
         // pending items should stay pending
         assert_item_status(&db, "pending-items", "pending-item", "pending");
+    }
+
+    #[test]
+    fn recover_live_task_and_linked_row_together_preserves_partial_facts() {
+        let db = make_db();
+        db.create_task(&NewDownloadTask {
+            id: "live-recovery".to_string(),
+            mode: "live".to_string(),
+            url: "https://example.com/live".to_string(),
+            title: None,
+            author_nickname: None,
+        })
+        .unwrap();
+        db.update_task_status("live-recovery", "starting", None)
+            .unwrap();
+        db.create_recording_live_record(&RecordingLiveRecord {
+            task_id: "live-recovery".to_string(),
+            room_id: "room".to_string(),
+            web_rid: "web".to_string(),
+            title: "title".to_string(),
+            nickname: "anchor".to_string(),
+            sec_user_id: "sec".to_string(),
+            cover_url: "cover".to_string(),
+            file_path: "/tmp/partial.flv".to_string(),
+            started_at: 10,
+        })
+        .unwrap();
+        {
+            let conn = lock_conn!(db);
+            conn.execute(
+                "UPDATE live_records
+                 SET file_size = 512, duration_sec = 7, error_msg = 'prior context'
+                 WHERE task_id = 'live-recovery'",
+                [],
+            )
+            .unwrap();
+        }
+
+        let recovered = db.recover_interrupted_tasks().unwrap();
+        assert_eq!(recovered.len(), 1);
+        let task = db.get_task_by_id("live-recovery").unwrap().unwrap();
+        let live = db
+            .get_live_record_by_task_id("live-recovery")
+            .unwrap()
+            .unwrap();
+        assert_eq!(task.status, "interrupted");
+        assert_eq!(live.status, "interrupted");
+        assert_eq!(live.file_path.as_deref(), Some("/tmp/partial.flv"));
+        assert_eq!(live.file_size, 512);
+        assert_eq!(live.duration_sec, 7);
+        let error = live.error_msg.as_deref().unwrap();
+        assert!(error.contains("prior context"));
+        assert_eq!(error.matches("任务因进程中断而终止").count(), 1);
+        assert!(db.recover_interrupted_tasks().unwrap().is_empty());
+        let unchanged = db
+            .get_live_record_by_task_id("live-recovery")
+            .unwrap()
+            .unwrap();
+        assert_eq!(unchanged.error_msg.as_deref(), Some(error));
     }
 }

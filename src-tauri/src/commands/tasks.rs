@@ -8,10 +8,9 @@
 use serde_json::Value;
 use tauri::State;
 
-use crate::state::AppState;
 use crate::services::download::task_service::TaskApplicationService;
-use crate::services::download::{DownloadMode, DownloadRequest, TaskEvent, TaskPatch, TaskStatus};
-use crate::services::download::events;
+use crate::services::download::{DownloadMode, DownloadRequest};
+use crate::state::AppState;
 
 /// 统一下载入口（Rust-owned）
 ///
@@ -24,8 +23,8 @@ pub async fn start_download(
     url: String,
     aweme_ids: Option<Vec<String>>,
 ) -> Result<Value, String> {
-    let download_mode = DownloadMode::from_str(&mode)
-        .ok_or_else(|| format!("未知的下载模式: {}", mode))?;
+    let download_mode =
+        DownloadMode::from_str(&mode).ok_or_else(|| format!("未知的下载模式: {}", mode))?;
 
     let aweme_ids = aweme_ids.unwrap_or_default();
     let service = TaskApplicationService::new(&state);
@@ -71,10 +70,7 @@ pub async fn start_download(
 
 /// 启动 Rust 原生直播录制。
 #[tauri::command(rename_all = "snake_case")]
-pub async fn start_live_record(
-    state: State<'_, AppState>,
-    url: String,
-) -> Result<Value, String> {
+pub async fn start_live_record(state: State<'_, AppState>, url: String) -> Result<Value, String> {
     let service = TaskApplicationService::new(&state);
     let task_id = service.start_live_record(&url).await?;
     Ok(serde_json::json!({
@@ -85,21 +81,8 @@ pub async fn start_live_record(
 
 /// 停止直播录制。停止信号由 Rust 录制循环消费，已写入的文件会正常入库。
 #[tauri::command(rename_all = "snake_case")]
-pub fn stop_live_record(
-    state: State<'_, AppState>,
-    task_id: String,
-) -> Result<Value, String> {
-    if !state.cancel_task(&task_id) {
-        return Err("录制任务不存在或已完成".to_string());
-    }
-
-    state
-        .db
-        .update_task_status(&task_id, "stopping", None)
-        .map_err(|e| e.to_string())?;
-    events::emit_task_event(&TaskEvent::progress(
-        TaskPatch::new(&task_id).with_status(TaskStatus::Stopping),
-    ));
+pub fn stop_live_record(state: State<'_, AppState>, task_id: String) -> Result<Value, String> {
+    TaskApplicationService::new(&state).stop_live_record(&task_id)?;
 
     Ok(serde_json::json!({
         "success": true,
@@ -147,10 +130,7 @@ pub fn get_live_status(state: State<'_, AppState>) -> Result<Value, String> {
 ///
 /// 设置任务的取消信号，下载引擎会在下一个 chunk 检测到并停止
 #[tauri::command(rename_all = "snake_case")]
-pub async fn cancel_task(
-    state: State<'_, AppState>,
-    task_id: String,
-) -> Result<Value, String> {
+pub async fn cancel_task(state: State<'_, AppState>, task_id: String) -> Result<Value, String> {
     let cancelled = state.cancel_task(&task_id);
 
     if cancelled {

@@ -2,8 +2,8 @@
 //!
 //! Contains all CREATE TABLE SQL, column definitions, and migration logic.
 
-use rusqlite::{Connection, Result};
 use log::info;
+use rusqlite::{Connection, Result};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const CREATE_TABLES_SQL: &str = "
@@ -49,6 +49,7 @@ pub const CREATE_TABLES_SQL: &str = "
     );
     CREATE TABLE IF NOT EXISTS live_records (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id TEXT,
         room_id TEXT,
         web_rid TEXT,
         title TEXT,
@@ -58,8 +59,10 @@ pub const CREATE_TABLES_SQL: &str = "
         file_size INTEGER DEFAULT 0,
         duration_sec INTEGER DEFAULT 0,
         status TEXT NOT NULL DEFAULT 'completed',
+        error_msg TEXT,
         started_at INTEGER,
-        ended_at INTEGER
+        ended_at INTEGER,
+        updated_at INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS music_collection (
         music_id TEXT PRIMARY KEY,
@@ -75,6 +78,7 @@ pub const CREATE_TABLES_SQL: &str = "
         created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_live_started ON live_records(started_at);
+    CREATE INDEX IF NOT EXISTS idx_live_status ON live_records(status);
     CREATE INDEX IF NOT EXISTS idx_music_created ON music_collection(created_at);
 ";
 
@@ -174,13 +178,10 @@ pub const MIGRATE_V3_INDEXES: &[&str] = &[
     "CREATE INDEX IF NOT EXISTS idx_user_nickname ON user_info(nickname)",
 ];
 
-pub const MIGRATE_V4_LIVE_COVER: &[&str] = &[
-    "ALTER TABLE live_records ADD COLUMN cover_url TEXT",
-];
+pub const MIGRATE_V4_LIVE_COVER: &[&str] = &["ALTER TABLE live_records ADD COLUMN cover_url TEXT"];
 
-pub const MIGRATE_V6_LIVE_UNIQUE: &[&str] = &[
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_live_unique ON live_records(room_id, started_at)",
-];
+pub const MIGRATE_V6_LIVE_UNIQUE: &[&str] =
+    &["CREATE UNIQUE INDEX IF NOT EXISTS idx_live_unique ON live_records(room_id, started_at)"];
 
 pub const MIGRATE_V7_TASK_TABLES: &[&str] = &[
     "CREATE TABLE IF NOT EXISTS download_tasks (
@@ -219,17 +220,14 @@ pub const MIGRATE_V7_TASK_TABLES: &[&str] = &[
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_item_unique ON download_task_items(task_id, aweme_id)",
 ];
 
-pub const MIGRATE_V8_TASK_AUTHOR: &[&str] = &[
-    "ALTER TABLE download_tasks ADD COLUMN author_nickname TEXT",
-];
+pub const MIGRATE_V8_TASK_AUTHOR: &[&str] =
+    &["ALTER TABLE download_tasks ADD COLUMN author_nickname TEXT"];
 
-pub const MIGRATE_V9_LIVE_SEC_USER_INDEX: &[&str] = &[
-    "CREATE INDEX IF NOT EXISTS idx_live_sec_user_id ON live_records(sec_user_id)",
-];
+pub const MIGRATE_V9_LIVE_SEC_USER_INDEX: &[&str] =
+    &["CREATE INDEX IF NOT EXISTS idx_live_sec_user_id ON live_records(sec_user_id)"];
 
-pub const MIGRATE_V10_TASK_ITEMS_AUTHOR: &[&str] = &[
-    "ALTER TABLE download_task_items ADD COLUMN author_sec_uid TEXT",
-];
+pub const MIGRATE_V10_TASK_ITEMS_AUTHOR: &[&str] =
+    &["ALTER TABLE download_task_items ADD COLUMN author_sec_uid TEXT"];
 
 pub const MIGRATE_V11_MEDIA_KEY: &[&str] = &[
     "ALTER TABLE download_task_items ADD COLUMN media_key TEXT",
@@ -247,6 +245,14 @@ pub const MIGRATE_V11_MEDIA_KEY: &[&str] = &[
     "DROP INDEX IF EXISTS idx_item_unique",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_item_media_key ON download_task_items(task_id, media_key)",
     "CREATE INDEX IF NOT EXISTS idx_item_aweme ON download_task_items(task_id, aweme_id)",
+];
+
+pub const MIGRATE_V12_LIVE_LIFECYCLE: &[&str] = &[
+    "ALTER TABLE live_records ADD COLUMN task_id TEXT",
+    "ALTER TABLE live_records ADD COLUMN error_msg TEXT",
+    "ALTER TABLE live_records ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_live_task_unique ON live_records(task_id) WHERE task_id IS NOT NULL",
+    "CREATE INDEX IF NOT EXISTS idx_live_status ON live_records(status)",
 ];
 
 pub const MIGRATE_V10_DROP_DOWNLOAD_HISTORY: &[&str] = &[
@@ -330,13 +336,17 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         info!("[DB] 迁移 v11: task_items 添加 media_key/media_kind/media_index，唯一键改为 (task_id, media_key)");
         run_migration_sql(conn, MIGRATE_V11_MEDIA_KEY)?;
     }
+    if version < 12 {
+        info!("[DB] 迁移 v12: live_records 接入 task 生命周期");
+        run_migration_sql(conn, MIGRATE_V12_LIVE_LIFECYCLE)?;
+    }
 
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64;
     conn.execute(
-        "INSERT OR REPLACE INTO _metadata (name, value) VALUES ('schema_version', '11')",
+        "INSERT OR REPLACE INTO _metadata (name, value) VALUES ('schema_version', '12')",
         [],
     )?;
     conn.execute(
@@ -370,7 +380,36 @@ mod tests {
                 created_at INTEGER NOT NULL, author_sec_uid TEXT
              );
              CREATE UNIQUE INDEX idx_item_unique
-                ON download_task_items(task_id, aweme_id);",
+                ON download_task_items(task_id, aweme_id);
+             CREATE TABLE live_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                room_id TEXT, web_rid TEXT, title TEXT, nickname TEXT,
+                sec_user_id TEXT, file_path TEXT, file_size INTEGER DEFAULT 0,
+                duration_sec INTEGER DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'completed',
+                started_at INTEGER, ended_at INTEGER, cover_url TEXT
+             );",
+        )
+        .unwrap();
+        conn
+    }
+
+    fn create_v11_database() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE _metadata (name TEXT PRIMARY KEY, value TEXT);
+             INSERT INTO _metadata (name, value) VALUES ('schema_version', '11');
+             CREATE TABLE live_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                room_id TEXT, web_rid TEXT, title TEXT, nickname TEXT,
+                sec_user_id TEXT, file_path TEXT, file_size INTEGER DEFAULT 0,
+                duration_sec INTEGER DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'completed',
+                started_at INTEGER, ended_at INTEGER, cover_url TEXT
+             );
+             INSERT INTO live_records
+                (room_id, title, file_path, status, started_at)
+             VALUES ('historical-room', 'historical', '/tmp/old.flv', 'completed', 10);",
         )
         .unwrap();
         conn
@@ -387,7 +426,7 @@ mod tests {
     }
 
     #[test]
-    fn fresh_database_migrates_to_v11() {
+    fn fresh_database_migrates_to_v12_with_live_lifecycle_columns() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(CREATE_TABLES_SQL).unwrap();
 
@@ -400,7 +439,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(version, "11");
+        assert_eq!(version, "12");
         assert_eq!(
             index_columns(&conn, "idx_item_media_key"),
             ["task_id", "media_key"]
@@ -409,6 +448,17 @@ mod tests {
             index_columns(&conn, "idx_item_aweme"),
             ["task_id", "aweme_id"]
         );
+        let live_columns: Vec<String> = conn
+            .prepare("PRAGMA table_info('live_records')")
+            .unwrap()
+            .query_map([], |row| row.get(1))
+            .unwrap()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        assert!(live_columns.contains(&"task_id".to_string()));
+        assert!(live_columns.contains(&"error_msg".to_string()));
+        assert!(live_columns.contains(&"updated_at".to_string()));
+        assert_eq!(index_columns(&conn, "idx_live_task_unique"), ["task_id"]);
     }
 
     #[test]
@@ -447,6 +497,88 @@ mod tests {
         assert_ne!(rows[1].2, rows[2].2);
         assert!(rows.iter().all(|row| row.3 == "video" && row.4 == 0));
         assert!(index_columns(&conn, "idx_item_unique").is_empty());
+    }
+
+    #[test]
+    fn v11_upgrades_to_v12_without_guessing_historical_task_links() {
+        let conn = create_v11_database();
+
+        migrate(&conn).unwrap();
+
+        let version: String = conn
+            .query_row(
+                "SELECT value FROM _metadata WHERE name = 'schema_version'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let historical: (Option<String>, String, String) = conn
+            .query_row(
+                "SELECT task_id, status, file_path FROM live_records WHERE room_id = 'historical-room'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(version, "12");
+        assert_eq!(historical.0, None);
+        assert_eq!(historical.1, "completed");
+        assert_eq!(historical.2, "/tmp/old.flv");
+    }
+
+    #[test]
+    fn database_open_upgrades_real_v11_file_before_creating_task_index() {
+        let path = std::env::temp_dir().join(format!(
+            "douyin-v11-live-migration-{}.sqlite",
+            uuid::Uuid::new_v4()
+        ));
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE _metadata (name TEXT PRIMARY KEY, value TEXT);
+                 INSERT INTO _metadata (name, value) VALUES ('schema_version', '11');
+                 CREATE TABLE live_records (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    room_id TEXT, web_rid TEXT, title TEXT, nickname TEXT,
+                    sec_user_id TEXT, file_path TEXT, file_size INTEGER DEFAULT 0,
+                    duration_sec INTEGER DEFAULT 0,
+                    status TEXT NOT NULL DEFAULT 'completed',
+                    started_at INTEGER, ended_at INTEGER, cover_url TEXT
+                 );
+                 INSERT INTO live_records (room_id, status, started_at)
+                 VALUES ('old-room', 'completed', 1);",
+            )
+            .unwrap();
+        }
+
+        let db = crate::database::connection::Database::open(&path).unwrap();
+        let records = db.get_live_records(10, 0).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].task_id, None);
+        drop(db);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn v12_rejects_duplicate_non_null_live_task_id_but_allows_null_history() {
+        let conn = create_v11_database();
+        migrate(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO live_records (task_id, status, updated_at) VALUES ('task-1', 'recording', 1)",
+            [],
+        )
+        .unwrap();
+        assert!(conn
+            .execute(
+                "INSERT INTO live_records (task_id, status, updated_at) VALUES ('task-1', 'error', 2)",
+                [],
+            )
+            .is_err());
+        conn.execute(
+            "INSERT INTO live_records (task_id, status, updated_at) VALUES (NULL, 'completed', 3)",
+            [],
+        )
+        .unwrap();
     }
 
     #[test]

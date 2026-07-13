@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Clone, specta::Type)]
 pub struct LiveRecord {
     pub id: i64,
+    pub task_id: Option<String>,
     pub room_id: Option<String>,
     pub web_rid: Option<String>,
     pub title: Option<String>,
@@ -18,13 +19,17 @@ pub struct LiveRecord {
     pub file_size: i64,
     pub duration_sec: i64,
     pub status: String,
+    pub error_msg: Option<String>,
     pub started_at: Option<i64>,
     pub ended_at: Option<i64>,
     pub cover_url: Option<String>,
+    pub updated_at: i64,
 }
 
 #[derive(Serialize, Deserialize, Clone, specta::Type)]
 pub struct NewLiveRecord {
+    #[serde(default)]
+    pub task_id: Option<String>,
     pub room_id: Option<String>,
     pub web_rid: Option<String>,
     pub title: Option<String>,
@@ -34,9 +39,55 @@ pub struct NewLiveRecord {
     pub file_size: i64,
     pub duration_sec: i64,
     pub status: String,
+    #[serde(default)]
+    pub error_msg: Option<String>,
     pub started_at: Option<i64>,
     pub ended_at: Option<i64>,
     pub cover_url: Option<String>,
+    #[serde(default)]
+    pub updated_at: Option<i64>,
+}
+
+/// Recorder 启动前创建的一对一直播记录。
+#[derive(Debug, Clone)]
+pub struct RecordingLiveRecord {
+    pub task_id: String,
+    pub room_id: String,
+    pub web_rid: String,
+    pub title: String,
+    pub nickname: String,
+    pub sec_user_id: String,
+    pub cover_url: String,
+    pub file_path: String,
+    pub started_at: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LiveTerminalStatus {
+    Completed,
+    Error,
+}
+
+impl LiveTerminalStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Completed => "completed",
+            Self::Error => "error",
+        }
+    }
+}
+
+/// Recorder 关闭文件后提交的最终事实。
+#[derive(Debug, Clone)]
+pub struct LiveTerminalCommit {
+    pub task_id: String,
+    pub status: LiveTerminalStatus,
+    pub file_path: String,
+    pub file_size: i64,
+    pub duration_sec: i64,
+    pub started_at: i64,
+    pub ended_at: i64,
+    pub error_msg: Option<String>,
 }
 
 // === 下载任务 ===
