@@ -4,8 +4,6 @@ Python API 模块
 """
 
 import asyncio
-import json
-import uuid
 import logging
 from typing import Optional
 
