@@ -183,6 +183,7 @@ pub(super) type PagedPlanFuture =
 
 pub(super) trait PagedDownloadResolver: Send + Sync {
     fn resolve_page(&self, mode: String, url: String, cursor: i64, count: i64) -> PagedPlanFuture;
+    fn resolve_download_page(&self, mode: String, url: String, save_dir: String, cursor: i64, count: i64) -> PagedPlanFuture;
 }
 
 pub(super) type LivePlanFuture = Pin<Box<dyn Future<Output = Result<LivePlanV1, String>> + Send>>;
@@ -222,6 +223,12 @@ impl PagedDownloadResolver for PythonPagedDownloadResolver {
     fn resolve_page(&self, mode: String, url: String, cursor: i64, count: i64) -> PagedPlanFuture {
         Box::pin(async move {
             TaskApplicationService::resolve_paged_download_plan(&mode, &url, cursor, count).await
+        })
+    }
+
+    fn resolve_download_page(&self, mode: String, url: String, save_dir: String, cursor: i64, count: i64) -> PagedPlanFuture {
+        Box::pin(async move {
+            TaskApplicationService::resolve_download_page_plan(&mode, &url, &save_dir, cursor, count).await
         })
     }
 }
@@ -461,6 +468,40 @@ impl<'a> TaskApplicationService<'a> {
         let json_value = tokio::task::spawn_blocking(move || {
             crate::python::handler::resolve_page(&resolver_mode, &url, cursor, count)
                 .map_err(|e| format!("resolve_page 调用失败: {}", e))
+        })
+        .await
+        .map_err(|e| format!("spawn_blocking 失败: {}", e))??;
+
+        if json_value.get("success").and_then(Value::as_bool) == Some(false) {
+            return Err(json_value
+                .get("error")
+                .and_then(Value::as_str)
+                .unwrap_or("分页解析失败")
+                .to_string());
+        }
+
+        PagedDownloadPlanV1::from_value_for_mode(json_value, &expected_mode)
+    }
+
+    /// Resolve a single download page with Rust-controlled save_dir.
+    ///
+    /// 与 resolve_paged_download_plan 的区别：
+    /// - resolve_paged_download_plan: 前端展示用，Python 计算 save_dir
+    /// - resolve_download_page_plan: 下载用，Rust 传入 save_dir，保证一致性
+    async fn resolve_download_page_plan(
+        mode: &str,
+        url: &str,
+        save_dir: &str,
+        cursor: i64,
+        count: i64,
+    ) -> Result<PagedDownloadPlanV1, String> {
+        let expected_mode = mode.to_string();
+        let resolver_mode = expected_mode.clone();
+        let url = url.to_string();
+        let save_dir = save_dir.to_string();
+        let json_value = tokio::task::spawn_blocking(move || {
+            crate::python::handler::resolve_download_page(&resolver_mode, &url, &save_dir, cursor, count)
+                .map_err(|e| format!("resolve_download_page 调用失败: {}", e))
         })
         .await
         .map_err(|e| format!("spawn_blocking 失败: {}", e))??;
@@ -1219,20 +1260,44 @@ impl<'a> TaskApplicationService<'a> {
                 page_counts.min(remaining as i64)
             };
 
-            let plan = adapters
-                .paged_resolver
-                .resolve_page(
-                    expected_mode.clone(),
-                    request.url.to_string(),
-                    cursor,
-                    request_count,
-                )
-                .await
-                .map_err(|error| {
-                    tracker.contextualize(format!(
-                        "第 {page_index} 页解析失败 (cursor={cursor}): {error}"
-                    ))
-                })?;
+            // 首页：调用 resolve_page 获取 save_dir 和用户资料
+            // 后续页：调用 resolve_download_page，传入首页的 save_dir，保证一致性
+            let plan = if page_index == 1 {
+                adapters
+                    .paged_resolver
+                    .resolve_page(
+                        expected_mode.clone(),
+                        request.url.to_string(),
+                        cursor,
+                        request_count,
+                    )
+                    .await
+                    .map_err(|error| {
+                        tracker.contextualize(format!(
+                            "第 {page_index} 页解析失败 (cursor={cursor}): {error}"
+                        ))
+                    })?
+            } else {
+                let current_save_dir = save_dir
+                    .as_ref()
+                    .ok_or_else(|| "首页未设置 save_dir".to_string())?
+                    .clone();
+                adapters
+                    .paged_resolver
+                    .resolve_download_page(
+                        expected_mode.clone(),
+                        request.url.to_string(),
+                        current_save_dir,
+                        cursor,
+                        request_count,
+                    )
+                    .await
+                    .map_err(|error| {
+                        tracker.contextualize(format!(
+                            "第 {page_index} 页解析失败 (cursor={cursor}): {error}"
+                        ))
+                    })?
+            };
 
             if cancel_signal.load(Ordering::Relaxed) {
                 return Err("下载已取消".to_string());
@@ -1261,9 +1326,7 @@ impl<'a> TaskApplicationService<'a> {
                         .map_err(|error| format!("更新任务资料失败: {error}"))?;
                 }
             } else {
-                if plan.save_dir != *save_dir.as_ref().expect("first page sets save_dir") {
-                    return Err(tracker.contextualize(format!("第 {page_index} 页 save_dir 漂移")));
-                }
+                // 后续页：save_dir 由 Rust 控制，无需一致性校验
                 if plan.user_profile.is_some() {
                     return Err(tracker
                         .contextualize(format!("第 {page_index} 页不得重复返回 user_profile")));

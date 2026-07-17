@@ -318,6 +318,11 @@ impl PagedDownloadResolver for FixedPagedResolver {
             }
         })
     }
+
+    fn resolve_download_page(&self, mode: String, url: String, save_dir: String, cursor: i64, count: i64) -> PagedPlanFuture {
+        // 测试中直接复用 resolve_page 逻辑，save_dir 由调用方控制
+        self.resolve_page(mode, url, cursor, count)
+    }
 }
 
 #[derive(Default)]

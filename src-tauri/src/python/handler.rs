@@ -115,6 +115,16 @@ pub fn resolve_page(mode: &str, url: &str, cursor: i64, count: i64) -> PyResult<
     call_py_json("resolve_page", (mode, url, cursor, count))
 }
 
+/// 解析单页下载 URL（下载专用，save_dir 由 Rust 控制）
+///
+/// 与 resolve_page 的区别：
+/// - resolve_page: 前端展示用，Python 计算 save_dir
+/// - resolve_download_page: 下载用，Rust 传入 save_dir，保证一致性
+pub fn resolve_download_page(mode: &str, url: &str, save_dir: &str, cursor: i64, count: i64) -> PyResult<Value> {
+    info!("[handler.rs] resolve_download_page, mode={}, save_dir={}, cursor={}, count={}", mode, save_dir, cursor, count);
+    call_py_json("resolve_download_page", (mode, url, save_dir, cursor, count))
+}
+
 // ============================================================
 // 搜索
 // ============================================================

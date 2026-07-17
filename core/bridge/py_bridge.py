@@ -618,7 +618,7 @@ def resolve_page(mode: str, url: str, cursor: int = 0, count: int = 20, aweme_id
                     if not sec_user_id:
                         return "无法从 URL 提取 sec_user_id"
                     if mode == "post":
-                        # 仅首页获取用户资料
+                        # 仅首页获取用户资料（对齐 f2 get_or_add_user_data 行为）
                         if cursor == 0:
                             profile_data = await crawler.fetch_user_profile(sec_user_id)
                             profile = UserProfileFilter(profile_data)
@@ -642,6 +642,22 @@ def resolve_page(mode: str, url: str, cursor: int = 0, count: int = 20, aweme_id
                     if not mix_id:
                         return "无法从 URL 提取 mix_id"
                     data = await crawler.fetch_mix_aweme(mix_id, cursor, count)
+                    # 对齐 f2：从合集第一个作品获取 sec_user_id，然后获取用户资料
+                    # 仅首页获取，后续页使用第一页的 directory_nickname
+                    if cursor == 0 and data:
+                        try:
+                            video_filter = UserPostFilter(data)
+                            video_list = video_filter.get_video_list()
+                            if video_list:
+                                first = video_list[0]
+                                sec_user_id = getattr(first, "author_sec_uid", None) or ""
+                                if sec_user_id:
+                                    profile_data = await crawler.fetch_user_profile(sec_user_id)
+                                    profile = UserProfileFilter(profile_data)
+                                    user_profile = profile.to_dict()
+                                    directory_nickname = user_profile.get("nickname") or "unknown"
+                        except Exception:
+                            pass  # 测试环境可能没有完整的 filter 支持
                 elif mode == "collects":
                     collects_id = url
                     # The collection contains works from unrelated authors. Use the
@@ -675,7 +691,8 @@ def resolve_page(mode: str, url: str, cursor: int = 0, count: int = 20, aweme_id
                 nickname = user_profile.get("nickname") or "unknown"
             elif all_details:
                 first = all_details[0]
-                nickname = getattr(first, "author_nickname", None) or "unknown"
+                # 确保 fallback 也使用 sanitize_filename，与首页一致
+                nickname = sanitize_filename(getattr(first, "author_nickname", None) or "unknown")
         save_dir = download_path / app_name / mode / nickname
 
         typed_items = build_media_items_v1(
@@ -706,3 +723,150 @@ def resolve_page(mode: str, url: str, cursor: int = 0, count: int = 20, aweme_id
             page_aweme_ids=page_aweme_ids,
             user_profile=typed_profile,
         ).model_dump(mode="json")
+
+
+@_safe_call
+def resolve_download_page(mode: str, url: str, save_dir: str, cursor: int = 0, count: int = 20) -> dict:
+    """解析单页下载 URL（下载专用，save_dir 由 Rust 控制）
+
+    与 resolve_page 的区别：
+    - resolve_page: 前端展示用，Python 计算 save_dir
+    - resolve_download_page: 下载用，Rust 传入 save_dir，保证一致性
+
+    Args:
+        mode: 分页下载模式 (post/like/mix/collects)
+        url: 目标 URL
+        save_dir: 保存目录（由 Rust 首页计算后传入）
+        cursor: 分页游标
+        count: 每页数量
+
+    Returns:
+        {
+            "success": True,
+            "items": [...],
+            "save_dir": save_dir,  # 原样返回
+            "next_cursor": ...,
+            "has_more": ...,
+            "page_aweme_ids": [...],
+            "user_profile": {...},  # 仅首页返回
+        }
+    """
+    from pathlib import Path
+
+    logger.info("[py_bridge] resolve_download_page 调用, mode=%s, url=%s, save_dir=%s, cursor=%d",
+                mode, url[:80], save_dir, cursor)
+
+    if mode not in ("post", "like", "mix", "collects"):
+        return {"success": False, "error": f"不支持的分页模式: {mode}"}
+
+    handler = _get_context().handler
+    config = handler.config
+    cookie = config.cookie
+    naming = config.naming
+
+    base_headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+        "Referer": "https://www.douyin.com/",
+        "Cookie": cookie,
+    }
+
+    from core.crawler_engine.filter import UserPostFilter, UserProfileFilter
+    from core.utils import SecUserIdFetcher, MixIdFetcher
+    from core.models.paged_download import PagedDownloadPlanV1, PagedUserProfileV1
+    from core.services.media_plan import build_media_items_v1
+
+    user_profile = None
+    all_details = []
+    next_cursor = None
+    has_more = False
+
+    async def _fetch_page():
+        nonlocal user_profile, all_details, next_cursor, has_more
+        async with handler._user._make_crawler() as crawler:
+            if mode in ("post", "like"):
+                sec_user_id = await SecUserIdFetcher.get_sec_user_id(url)
+                if not sec_user_id:
+                    return "无法从 URL 提取 sec_user_id"
+                if mode == "post":
+                    # 仅首页获取用户资料
+                    if cursor == 0:
+                        profile_data = await crawler.fetch_user_profile(sec_user_id)
+                        profile = UserProfileFilter(profile_data)
+                        user_profile = profile.to_dict()
+                    data = await crawler.fetch_user_post(sec_user_id, cursor, count)
+                else:
+                    # like 模式：仅首页获取用户资料
+                    if cursor == 0:
+                        profile_data = await crawler.fetch_user_profile(sec_user_id)
+                        profile = UserProfileFilter(profile_data)
+                        user_profile = profile.to_dict()
+                    data = await crawler.fetch_user_favorite(sec_user_id, cursor, count)
+            elif mode == "mix":
+                mix_id = await MixIdFetcher.get_mix_id(url)
+                if not mix_id:
+                    return "无法从 URL 提取 mix_id"
+                data = await crawler.fetch_mix_aweme(mix_id, cursor, count)
+                # 仅首页获取用户资料
+                if cursor == 0 and data:
+                    from core.crawler_engine.filter import UserPostFilter as MixFilter
+                    mix_filter = MixFilter(data)
+                    if mix_filter.aweme_list:
+                        first_aweme = mix_filter.aweme_list[0]
+                        sec_user_id = first_aweme.get("author", {}).get("sec_uid", "")
+                        if sec_user_id:
+                            profile_data = await crawler.fetch_user_profile(sec_user_id)
+                            profile = UserProfileFilter(profile_data)
+                            user_profile = profile.to_dict()
+            elif mode == "collects":
+                collects_id = url
+                data = await crawler.fetch_user_collects_video(collects_id, cursor, count)
+            else:
+                data = None
+
+            if not data:
+                has_more = False
+                return None
+
+            video_filter = UserPostFilter(data)
+            for detail in video_filter.get_video_list():
+                all_details.append(detail)
+
+            has_more = video_filter.has_more
+            next_cursor = video_filter.max_cursor if has_more else None
+            return None
+
+    error = _run_async(_fetch_page())
+    if error:
+        return {"success": False, "error": error}
+
+    # 使用 Rust 传入的 save_dir，不重新计算
+    typed_items = build_media_items_v1(
+        all_details, naming=naming, folderize=config.folderize, headers=base_headers
+    )
+    page_aweme_ids = []
+    seen_ids = set()
+    for d in all_details:
+        aid = str(getattr(d, "aweme_id", "") or "").strip()
+        if aid and aid not in seen_ids:
+            seen_ids.add(aid)
+            page_aweme_ids.append(aid)
+
+    typed_profile = None
+    if user_profile:
+        typed_profile = PagedUserProfileV1.model_validate(
+            {
+                field: user_profile.get(field)
+                for field in PagedUserProfileV1.model_fields
+                if field in user_profile
+            }
+        )
+
+    return PagedDownloadPlanV1(
+        mode=mode,
+        save_dir=save_dir,  # 原样返回 Rust 传入的 save_dir
+        items=typed_items,
+        next_cursor=next_cursor,
+        has_more=has_more,
+        page_aweme_ids=page_aweme_ids,
+        user_profile=typed_profile,
+    ).model_dump(mode="json")
