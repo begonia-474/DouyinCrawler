@@ -109,6 +109,10 @@ def download_python(version: str) -> None:
             tar.extract(member, PYTHON_DIR)
 
     shutil.rmtree(tmp_dir)
+    # 同步 tauri.conf.json 的 DLL 资源映射，使其匹配本次下载的版本，
+    # 确保 Windows 分发安装后 python3XX.dll 与 exe 同目录（加载时导入解析）。
+    sync_tauri_dll_resources(resolved)
+
     print(f"Python {resolved} 运行时已就绪: {PYTHON_DIR}")
     _list_key_files()
 
@@ -189,6 +193,63 @@ def _list_key_files() -> None:
         print(f"  ✓ Lib/site-packages/ ({len(list(sites.iterdir()))} 个包)")
 
 
+def sync_tauri_dll_resources(resolved_version: str) -> None:
+    """保持 tauri.conf.json 的 python DLL 资源映射与本次下载版本一致。
+
+    PyO3 以加载时导入依赖 python3XX.dll（XX = 主版本+次版本），Windows 加载器
+    要求该 DLL 与 exe 同目录。Tauri 把 `bundle.resources` 的目标平铺到安装根，
+    因此把对应 DLL 单独映射到根目录文件名即可满足。版本切换时此函数自动更新
+    映射，避免忘记改 tauri.conf.json 导致分发包在干净机器上启动即崩。
+
+    采用定向文本替换（而非 JSON 往返序列化），仅改写 resources 块内的 python
+    DLL 行，其余格式（如单行数组）保持字节不变。
+    """
+    import re
+
+    parts = resolved_version.split(".")
+    if len(parts) < 2:
+        print(f"WARNING: 无法解析版本号 {resolved_version}，跳过 tauri.conf.json 同步")
+        return
+    pyver = f"{parts[0]}{parts[1]}"  # 3.13.0 -> 313
+    versioned_dll = f"python{pyver}.dll"
+
+    conf_path = PROJECT_ROOT / "src-tauri" / "tauri.conf.json"
+    if not conf_path.exists():
+        print(f"WARNING: 未找到 {conf_path}，跳过 DLL 资源映射同步")
+        return
+
+    text = conf_path.read_text(encoding="utf-8")
+    header = re.search(r'(?m)^([ \t]*)"resources"\s*:\s*\{', text)
+    if not header:
+        print("WARNING: tauri.conf.json 未找到 resources 块，跳过同步")
+        return
+    base_indent = header.group(1)
+    entry_indent = base_indent + "  "
+    open_pos = header.end() - 1  # '{' 位置
+    try:
+        close_pos = text.index("}", open_pos + 1)
+    except ValueError:
+        print("WARNING: resources 块未闭合，跳过同步")
+        return
+    inner = text[open_pos + 1:close_pos]
+
+    # 保留非 python DLL 单文件映射的条目（含 ../core/ 和 binaries/python/ 目录映射）
+    dll_key_re = re.compile(r"^binaries/python/python\d+\.dll$")
+    kept = re.findall(r'(?m)^\s*"([^"]+)"\s*:\s*"([^"]+)"\s*,?', inner)
+    entries = [(k, v) for k, v in kept if not dll_key_re.match(k)]
+    entries.append(("binaries/python/python3.dll", "python3.dll"))
+    entries.append((f"binaries/python/{versioned_dll}", versioned_dll))
+
+    lines = [f'{base_indent}"resources": {{']
+    for i, (k, v) in enumerate(entries):
+        comma = "," if i < len(entries) - 1 else ""
+        lines.append(f'{entry_indent}"{k}": "{v}"{comma}')
+    lines.append(f"{base_indent}}}")
+    new_text = text[:header.start()] + "\n".join(lines) + text[close_pos + 1:]
+    conf_path.write_text(new_text, encoding="utf-8")
+    print(f"已同步 tauri.conf.json: python3.dll + {versioned_dll} → 安装根目录")
+
+
 def install_dependencies() -> None:
     target = PYTHON_DIR / "Lib" / "site-packages"
     target.mkdir(parents=True, exist_ok=True)
@@ -220,7 +281,6 @@ def _fix_native_packages_for_windows(site_packages: Path) -> None:
     pip install --target 在 Linux 上会安装 Linux 原生 .so 文件。
     以下包有原生扩展，在 Windows 上需要 .pyd 文件：
     - pydantic_core (Rust/PyO3)
-    - pycryptodomex (C extension)
     - yaml/PyYAML (C extension, 有 pure-Python fallback)
     """
     if sys.platform == "win32":
@@ -234,7 +294,6 @@ def _fix_native_packages_for_windows(site_packages: Path) -> None:
 
     native_packages = [
         "pydantic-core",
-        "pycryptodomex",
         "pyyaml",
     ]
 

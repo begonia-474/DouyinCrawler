@@ -187,7 +187,7 @@ pub fn run() {
             let _ = DB_PATH.set(db_path.clone());
 
             // 初始化配置管理器
-            let config_manager = Arc::new(Mutex::new(ConfigManager::new()));
+            let config_manager = Arc::new(Mutex::new(ConfigManager::new(app.handle())));
 
             // 初始化 Python 桥接器
             let resource_dir = app.path().resource_dir().ok();
@@ -316,47 +316,24 @@ pub fn run() {
 }
 
 fn resolve_db_path(app: &tauri::App) -> PathBuf {
-    // 生产模式优先使用 app_data_dir，开发模式使用项目相对路径
-    #[cfg(not(debug_assertions))]
-    {
-        if let Ok(data_dir) = app.path().app_data_dir() {
-            let prod_path = data_dir.join("douyin.db");
-            // 如果 AppData 中已有数据库，直接使用
-            if prod_path.exists() {
-                info!("使用 AppData 数据库: {:?}", prod_path);
-                return prod_path;
+    // 统一走 Tauri 的 `app_local_data_dir()`（本机数据目录，不该漫游），
+    // 由 `tauri.conf.json` 的 `identifier` 派生子目录名，开发与生产一致：
+    // - Windows: `%LOCALAPPDATA%\com.axiao.douyin-crawler\douyin.db`
+    // - macOS:   `~/Library/Application Support/com.axiao.douyin-crawler/douyin.db`
+    //   (macOS 不区分本机/漫游，app_local_data_dir 与 app_data_dir 同一位置)
+    // - Linux:   `~/.local/share/com.axiao.douyin-crawler/douyin.db`
+    match app.path().app_local_data_dir() {
+        Ok(data_dir) => {
+            if let Err(e) = std::fs::create_dir_all(&data_dir) {
+                warn!("创建数据库目录失败 {:?}: {}", &data_dir, e);
             }
-            // 兼容旧版：检查项目相对路径是否有已有数据库
-            let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-            let legacy_path = current_dir.parent().unwrap_or(&current_dir).join("data").join("douyin.db");
-            if legacy_path.exists() {
-                info!("迁移旧数据库: {:?} → {:?}", legacy_path, prod_path);
-                let _ = std::fs::create_dir_all(&data_dir);
-                let _ = std::fs::copy(&legacy_path, &prod_path);
-                return prod_path;
-            }
-            // 新建到 AppData
-            let _ = std::fs::create_dir_all(&data_dir);
-            info!("新建 AppData 数据库: {:?}", prod_path);
-            return prod_path;
+            let db_path = data_dir.join("douyin.db");
+            info!("数据库路径: {:?}", db_path);
+            db_path
         }
-        warn!("获取 AppData 路径失败，回退到项目目录");
+        Err(e) => {
+            error!("获取 app_local_data_dir 失败: {}, 回退到当前目录", e);
+            PathBuf::from("douyin.db")
+        }
     }
-
-    // 开发模式：使用项目根目录下的 data/
-    let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let project_root = current_dir.parent().unwrap_or(&current_dir);
-    let dev_path = project_root.join("data").join("douyin.db");
-
-    if dev_path.exists() {
-        info!("使用项目数据库: {:?}", dev_path);
-        return dev_path;
-    }
-
-    if let Err(e) = std::fs::create_dir_all(dev_path.parent().unwrap_or(&project_root.join("data"))) {
-        warn!("创建 data 目录失败: {}", e);
-    }
-
-    info!("新建项目数据库: {:?}", dev_path);
-    dev_path
 }

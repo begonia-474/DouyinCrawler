@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use log::{info, warn, error};
+use tauri::Manager;
 
 fn default_page_counts() -> u32 { 20 }
 fn default_timeout() -> u32 { 5 }
@@ -104,8 +105,14 @@ impl ConfigManager {
     }
 
     /// 创建配置管理器
-    pub fn new() -> Self {
-        let config_dir = Self::get_config_dir();
+    ///
+    /// 统一走 Tauri 的 `app_config_dir()`，由 `tauri.conf.json` 的 `identifier`
+    /// 派生子目录名（开发与生产一致，不再分两套路径）：
+    /// - Windows: `%APPDATA%\com.axiao.douyin-crawler\app.json`
+    /// - macOS:   `~/Library/Application Support/com.axiao.douyin-crawler/app.json`
+    /// - Linux:   `~/.config/com.axiao.douyin-crawler/app.json`
+    pub fn new(app_handle: &tauri::AppHandle) -> Self {
+        let config_dir = Self::resolve_config_dir(app_handle);
         let config_path = config_dir.join("app.json");
 
         let config = Self::load_config(&config_path);
@@ -116,38 +123,24 @@ impl ConfigManager {
         }
     }
 
-    /// 获取配置目录
-    fn get_config_dir() -> PathBuf {
-        // 生产模式优先使用平台标准配置目录
-        #[cfg(not(debug_assertions))]
-        if let Some(config_dir) = dirs::config_dir() {
-            let app_config_dir = config_dir.join("DouyinCrawler");
-            let _ = std::fs::create_dir_all(&app_config_dir);
-            info!("使用 AppConfig 目录: {:?}", app_config_dir);
-            return app_config_dir;
+    /// 解析配置目录
+    fn resolve_config_dir(app_handle: &tauri::AppHandle) -> PathBuf {
+        match app_handle.path().app_config_dir() {
+            Ok(dir) => {
+                if let Err(e) = std::fs::create_dir_all(&dir) {
+                    warn!("创建配置目录失败 {:?}: {}", &dir, e);
+                }
+                info!("使用 AppConfig 目录: {:?}", dir);
+                dir
+            }
+            Err(e) => {
+                // 极端情况兜底（如某些无 HOME 的环境），落到当前工作目录的 config/
+                error!("获取 app_config_dir 失败: {}, 回退到 ./config/", e);
+                let fallback = PathBuf::from("config");
+                let _ = std::fs::create_dir_all(&fallback);
+                fallback
+            }
         }
-
-        // 开发模式：优先使用项目根目录下的 config 目录
-        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let project_root = manifest_dir.parent().unwrap_or(&manifest_dir);
-        let config_dir = project_root.join("config");
-
-        if config_dir.exists() {
-            return config_dir;
-        }
-
-        // 回退：当前工作目录
-        let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let current_config_dir = current_dir.join("config");
-
-        if current_config_dir.exists() {
-            return current_config_dir;
-        }
-
-        // 都不存在时，创建在项目根目录
-        info!("创建新 config 目录: {:?}", config_dir);
-        let _ = std::fs::create_dir_all(&config_dir);
-        config_dir
     }
 
     /// 加载配置

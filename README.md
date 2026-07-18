@@ -161,7 +161,7 @@ Zustand stores / React Query cache invalidation
 - 运行时配置文件：`config/app.json`
 - 默认数据库：`data/douyin.db`
 - 默认下载目录：`Download/`
-- 前端开发端口：`3000`
+- 前端开发端口：`5173`
 
 `config/app.json` 可能包含有效抖音 Cookie，`config/` 已被 `.gitignore` 忽略，请不要提交或公开 Cookie。
 
