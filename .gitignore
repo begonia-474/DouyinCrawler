@@ -94,7 +94,8 @@ Thumbs.db
 desktop.ini
 
 # 文档和项目配置
-docs/
+docs/*
+!docs/reference/
 CLAUDE.md
 AGENTS.md
 CONTEXT.md

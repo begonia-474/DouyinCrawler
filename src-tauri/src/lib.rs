@@ -190,14 +190,15 @@ pub fn run() {
             let config_manager = Arc::new(Mutex::new(ConfigManager::new()));
 
             // 初始化 Python 桥接器
-            let python_bridge = match PythonBridge::new() {
+            let resource_dir = app.path().resource_dir().ok();
+            let python_bridge = match PythonBridge::new(resource_dir) {
                 Ok(bridge) => {
                     info!("Python 桥接器初始化成功");
                     Arc::new(bridge)
                 }
                 Err(e) => {
                     error!("Python 桥接器初始化失败: {}", e);
-                    Arc::new(PythonBridge::new().unwrap_or_else(|_| {
+                    Arc::new(PythonBridge::new(app.path().resource_dir().ok()).unwrap_or_else(|_| {
                         panic!("无法创建 Python 桥接器")
                     }))
                 }
@@ -314,7 +315,7 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-fn resolve_db_path(_app: &tauri::App) -> PathBuf {
+fn resolve_db_path(app: &tauri::App) -> PathBuf {
     // 生产模式优先使用 app_data_dir，开发模式使用项目相对路径
     #[cfg(not(debug_assertions))]
     {

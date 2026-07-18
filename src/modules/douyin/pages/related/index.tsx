@@ -27,12 +27,12 @@ export default function RelatedPage() {
       const filterGids = seenIdsRef.current.size > 0 ? [...seenIdsRef.current].join(",") + "," : "";
       const res = await getRelated(url, 20, filterGids);
       if (res.success && res.data) {
-        const newIds = (res.data.videos as VideoItem[])
+        const newIds = (res.data.videos as unknown as VideoItem[])
           .map((v) => v.aweme_id)
           .filter(Boolean);
         newIds.forEach((id) => seenIdsRef.current.add(id));
         return {
-          items: res.data.videos as VideoItem[],
+          items: res.data.videos as unknown as VideoItem[],
           nextCursor: 0,
           hasMore: res.data.has_more ?? false,
         };

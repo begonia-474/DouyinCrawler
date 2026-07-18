@@ -118,7 +118,16 @@ impl ConfigManager {
 
     /// 获取配置目录
     fn get_config_dir() -> PathBuf {
-        // 优先使用项目根目录下的 config 目录
+        // 生产模式优先使用平台标准配置目录
+        #[cfg(not(debug_assertions))]
+        if let Some(config_dir) = dirs::config_dir() {
+            let app_config_dir = config_dir.join("DouyinCrawler");
+            let _ = std::fs::create_dir_all(&app_config_dir);
+            info!("使用 AppConfig 目录: {:?}", app_config_dir);
+            return app_config_dir;
+        }
+
+        // 开发模式：优先使用项目根目录下的 config 目录
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let project_root = manifest_dir.parent().unwrap_or(&manifest_dir);
         let config_dir = project_root.join("config");
@@ -136,6 +145,8 @@ impl ConfigManager {
         }
 
         // 都不存在时，创建在项目根目录
+        info!("创建新 config 目录: {:?}", config_dir);
+        let _ = std::fs::create_dir_all(&config_dir);
         config_dir
     }
 

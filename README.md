@@ -17,7 +17,8 @@
 
 - 前端：React 19、TypeScript、Vite 7、Tailwind CSS 4、shadcn/ui、Zustand、React Query
 - 桌面：Tauri 2、Rust、PyO3
-- 爬虫核心：Python 3.13、httpx、pydantic、ABogus/XBogus 签名算法
+- 爬虫核心：Python 3.11+、httpx、pydantic、ABogus/XBogus 签名算法
+- 分发：Windows 安装包内嵌 Python 运行时，用户无需额外安装
 - 数据库：SQLite、rusqlite、WAL 模式
 - 测试：pytest、pytest-asyncio、前端 TypeScript 构建、Cargo check
 
@@ -50,11 +51,27 @@ pnpm tauri dev
 pnpm dev
 ```
 
-生产构建：
+## 生产构建
 
 ```bash
 pnpm tauri build
 ```
+
+产物在 `src-tauri/target/release/bundle/`。
+
+### Windows 分发包
+
+Windows 分发包内嵌完整的 Python 运行时，用户无需安装 Python。
+
+```bash
+# 首次：下载 Python 运行时并安装依赖（只需一次）
+pnpm setup:python
+
+# 构建
+pnpm tauri build
+```
+
+生成 `.msi` 安装包，安装即用。
 
 ## 测试与检查
 
@@ -73,6 +90,12 @@ python -m pytest -m offline
 PYTHONIOENCODING=utf-8 python test/test_all_modes.py
 PYTHONIOENCODING=utf-8 python test/e2e_verify.py
 ```
+
+## 文档
+
+- [架构文档](docs/reference/architecture.md) — 三层架构详解、核心模块职责、数据流
+- [API 文档](docs/reference/api.md) — 所有 Tauri 命令接口说明
+- [部署文档](docs/reference/deployment.md) — 环境要求、安装步骤、构建与测试
 
 ## 项目结构
 

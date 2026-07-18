@@ -99,6 +99,37 @@ pub fn py_to_json_value(obj: &Bound<'_, PyAny>) -> PyResult<Value> {
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("JSON fallback 反序列化失败: {}", e)))
 }
 
+// ============================================================
+// Windows DLL 搜索目录辅助
+// ============================================================
+
+#[cfg(target_os = "windows")]
+extern "system" {
+    fn SetDllDirectoryW(lpPathName: *const u16) -> i32;
+}
+
+#[cfg(target_os = "windows")]
+fn set_dll_directory(path: &std::path::Path) {
+    use std::os::windows::ffi::OsStrExt;
+    let wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    unsafe {
+        let result = SetDllDirectoryW(wide.as_ptr());
+        if result != 0 {
+            info!("[bridge] SetDllDirectoryW: {:?}", path);
+        } else {
+            eprintln!("[bridge] SetDllDirectoryW 失败: {:?}", path);
+        }
+    }
+}
+
+// ============================================================
+// PythonBridge
+// ============================================================
+
 static INIT: Once = Once::new();
 
 /// Python 桥接器
@@ -109,56 +140,100 @@ pub struct PythonBridge {
 impl PythonBridge {
     #[cfg(test)]
     pub(crate) fn for_test() -> Self {
+        Python::with_gil(|py| {
+            Self::init_python_path_for_test(py).ok();
+        });
         Self {}
     }
 
     /// 创建新的 Python 桥接器
-    pub fn new() -> PyResult<Self> {
-        // 确保 Python 路径只初始化一次
+    ///
+    /// `resource_dir` — Tauri app.path().resource_dir() 的返回值。
+    /// 当为 Some 且包含 `python/` 子目录时，启用嵌入式 Python 模式。
+    /// 当为 None 或不包含嵌入式 Python 时，回退到开发模式（系统 Python + CARGO_MANIFEST_DIR）。
+    pub fn new(resource_dir: Option<PathBuf>) -> PyResult<Self> {
         INIT.call_once(|| {
-            if let Err(e) = Self::init_python_path() {
+            Self::pre_init_python(&resource_dir);
+            if let Err(e) = Self::init_python_path(&resource_dir) {
                 eprintln!("[PythonBridge] 初始化 Python 路径失败: {}", e);
             }
         });
-
         Ok(Self {})
     }
 
-    /// 初始化 Python 路径
-    fn init_python_path() -> PyResult<()> {
+    /// Python 初始化前配置：设置 PYTHONHOME 和 DLL 搜索目录（Windows）
+    fn pre_init_python(resource_dir: &Option<PathBuf>) {
+        let python_dir = resource_dir
+            .as_ref()
+            .map(|d| d.join("python"))
+            .filter(|d| d.exists());
+
+        if let Some(ref py_dir) = python_dir {
+            info!("[bridge] 启用嵌入式 Python 模式, PYTHONHOME={:?}", py_dir);
+            std::env::set_var("PYTHONHOME", py_dir);
+
+            #[cfg(target_os = "windows")]
+            set_dll_directory(py_dir);
+        }
+    }
+
+    /// 初始化 Python sys.path
+    fn init_python_path(resource_dir: &Option<PathBuf>) -> PyResult<()> {
         Python::with_gil(|py| {
             let sys = py.import_bound("sys")?;
             let path = sys.getattr("path")?;
 
-            // 获取项目根目录（src-tauri 的父目录）
-            let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-            let project_root = manifest_dir.parent().unwrap_or(&manifest_dir);
+            // 判断使用嵌入式还是开发模式
+            let use_bundled = resource_dir
+                .as_ref()
+                .map(|d| d.join("python").exists() && d.join("core").exists())
+                .unwrap_or(false);
 
-            // 添加项目根目录
-            if let Some(root_str) = project_root.to_str() {
-                path.call_method1("append", (root_str,))?;
-                info!("添加项目根目录: {}", root_str);
+            if use_bundled {
+                let base = resource_dir.as_ref().unwrap();
+                append_sys_path(&path, base)?;
+                append_sys_path(&path, &base.join("core"))?;
+                info!("[bridge] 嵌入式模式: sys.path 已配置, base={:?}", base);
+            } else {
+                // 开发模式：使用 CARGO_MANIFEST_DIR 的相对路径
+                let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+                let project_root = manifest_dir.parent().unwrap_or(&manifest_dir);
+
+                append_sys_path(&path, project_root)?;
+                let backend_dir = project_root.join("backend");
+                if backend_dir.exists() {
+                    append_sys_path(&path, &backend_dir)?;
+                }
+                append_sys_path(&path, &project_root.join("core"))?;
+                info!("[bridge] 开发模式: sys.path 已配置, root={:?}", project_root);
             }
 
-            // 添加 backend 目录
-            let backend_dir = project_root.join("backend");
-            if let Some(backend_str) = backend_dir.to_str() {
-                path.call_method1("append", (backend_str,))?;
-                info!("添加 backend 目录: {}", backend_str);
-            }
-
-            // 添加 core 目录
-            let core_dir = project_root.join("core");
-            if let Some(core_str) = core_dir.to_str() {
-                path.call_method1("append", (core_str,))?;
-                info!("添加 core 目录: {}", core_str);
-            }
-
-            info!("Python 路径初始化完成");
+            info!("[bridge] Python 路径初始化完成");
             Ok(())
         })
     }
 
+    #[cfg(test)]
+    fn init_python_path_for_test(py: Python<'_>) -> PyResult<()> {
+        let sys = py.import_bound("sys")?;
+        let path = sys.getattr("path")?;
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let project_root = manifest_dir.parent().unwrap_or(&manifest_dir);
+        append_sys_path(&path, &project_root.join("core"))?;
+        Ok(())
+    }
+}
+
+/// 将路径追加到 Python sys.path
+fn append_sys_path(sys_path: &Bound<'_, PyAny>, dir: &std::path::Path) -> PyResult<()> {
+    if let Some(s) = dir.to_str() {
+        if s.is_empty() {
+            return Ok(());
+        }
+        sys_path.call_method1("append", (s,))?;
+        info!("[bridge] sys.path += {:?}", s);
+    }
+    Ok(())
 }
 
 // 线程安全：PythonBridge 可以在多线程中使用
