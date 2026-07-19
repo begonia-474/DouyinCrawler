@@ -37,22 +37,10 @@ cd DouyinCrawler
 
 ### 2. Python 环境
 
-使用项目自带的虚拟环境：
+准备 Python 3.11+ 环境。可以使用 Conda、venv 或其他环境管理方式：
 
 ```bash
-# 激活虚拟环境
-source .venv/bin/activate        # Linux / macOS
-# .venv\Scripts\activate         # Windows
-
 # 安装依赖（使用 lock 文件锁定版本）
-pip install -r requirements.txt -c requirements.lock
-```
-
-如果需要从头创建虚拟环境：
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
 pip install -r requirements.txt -c requirements.lock
 ```
 
@@ -191,8 +179,7 @@ python -m pytest -m offline
 需要有效 Cookie 和网络环境：
 
 ```bash
-# 激活虚拟环境
-source .venv/bin/activate
+# 使用已准备好的 Python 环境
 
 # 运行全模式测试
 PYTHONIOENCODING=utf-8 python test/test_all_modes.py
@@ -214,7 +201,7 @@ python -m pytest -m offline             # Python 离线测试
 
 ## 常见问题
 
-### Python 虚拟环境激活失败
+### Python 环境激活失败
 
 确保 Python 版本 >= 3.11：
 

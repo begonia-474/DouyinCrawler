@@ -40,10 +40,7 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "../core/": "core/",
-      "binaries/python/": "python/",
-      "binaries/python/python3.dll": "python3.dll",
-      "binaries/python/python313.dll": "python313.dll"
+      "../core/": "core/"
     }
   }
 }

@@ -24,10 +24,9 @@
 
 ## 环境准备
 
-Python 使用项目目录下的虚拟环境：
+请准备 Python 3.11+、Node.js、pnpm 和 Rust 环境。Python 依赖按个人习惯安装到 Conda、venv 或其他隔离环境中：
 
 ```bash
-source .venv/bin/activate
 pip install -r requirements.txt -c requirements.lock
 ```
 

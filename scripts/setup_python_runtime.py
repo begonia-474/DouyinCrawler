@@ -194,12 +194,12 @@ def _list_key_files() -> None:
 
 
 def sync_tauri_dll_resources(resolved_version: str) -> None:
-    """保持 tauri.conf.json 的 python DLL 资源映射与本次下载版本一致。
+    """保持 Windows Tauri 配置的 Python DLL 资源映射与下载版本一致。
 
     PyO3 以加载时导入依赖 python3XX.dll（XX = 主版本+次版本），Windows 加载器
     要求该 DLL 与 exe 同目录。Tauri 把 `bundle.resources` 的目标平铺到安装根，
     因此把对应 DLL 单独映射到根目录文件名即可满足。版本切换时此函数自动更新
-    映射，避免忘记改 tauri.conf.json 导致分发包在干净机器上启动即崩。
+    映射，避免忘记改 Windows 配置导致分发包在干净机器上启动即崩。
 
     采用定向文本替换（而非 JSON 往返序列化），仅改写 resources 块内的 python
     DLL 行，其余格式（如单行数组）保持字节不变。
@@ -208,12 +208,12 @@ def sync_tauri_dll_resources(resolved_version: str) -> None:
 
     parts = resolved_version.split(".")
     if len(parts) < 2:
-        print(f"WARNING: 无法解析版本号 {resolved_version}，跳过 tauri.conf.json 同步")
+        print(f"WARNING: 无法解析版本号 {resolved_version}，跳过 Windows Tauri 配置同步")
         return
     pyver = f"{parts[0]}{parts[1]}"  # 3.13.0 -> 313
     versioned_dll = f"python{pyver}.dll"
 
-    conf_path = PROJECT_ROOT / "src-tauri" / "tauri.conf.json"
+    conf_path = PROJECT_ROOT / "src-tauri" / "tauri.windows.conf.json"
     if not conf_path.exists():
         print(f"WARNING: 未找到 {conf_path}，跳过 DLL 资源映射同步")
         return
@@ -221,7 +221,7 @@ def sync_tauri_dll_resources(resolved_version: str) -> None:
     text = conf_path.read_text(encoding="utf-8")
     header = re.search(r'(?m)^([ \t]*)"resources"\s*:\s*\{', text)
     if not header:
-        print("WARNING: tauri.conf.json 未找到 resources 块，跳过同步")
+        print("WARNING: tauri.windows.conf.json 未找到 resources 块，跳过同步")
         return
     base_indent = header.group(1)
     entry_indent = base_indent + "  "
@@ -233,7 +233,7 @@ def sync_tauri_dll_resources(resolved_version: str) -> None:
         return
     inner = text[open_pos + 1:close_pos]
 
-    # 保留非 python DLL 单文件映射的条目（含 ../core/ 和 binaries/python/ 目录映射）
+    # 保留非版本化 DLL 的条目，例如 binaries/python/ 目录映射。
     dll_key_re = re.compile(r"^binaries/python/python\d+\.dll$")
     kept = re.findall(r'(?m)^\s*"([^"]+)"\s*:\s*"([^"]+)"\s*,?', inner)
     entries = [(k, v) for k, v in kept if not dll_key_re.match(k)]
@@ -247,7 +247,7 @@ def sync_tauri_dll_resources(resolved_version: str) -> None:
     lines.append(f"{base_indent}}}")
     new_text = text[:header.start()] + "\n".join(lines) + text[close_pos + 1:]
     conf_path.write_text(new_text, encoding="utf-8")
-    print(f"已同步 tauri.conf.json: python3.dll + {versioned_dll} → 安装根目录")
+    print(f"已同步 tauri.windows.conf.json: python3.dll + {versioned_dll} → 安装根目录")
 
 
 def install_dependencies() -> None:
